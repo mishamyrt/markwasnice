@@ -17,6 +17,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
     private let textView: NSTextView
     private var isApplyingStyles = false
     private var settings: EditorSettings
+    private var themeColors = EditorThemeColors.default
+    private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
 
     var string: String {
         get { textView.string }
@@ -54,6 +56,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         updateTextContainerInset()
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyEditorColors()
+        applyStyles(currentStyleSpans)
+    }
+
     func setString(_ string: String, clearsUndo: Bool) {
         let selectedRange = textView.selectedRange()
         textView.string = string
@@ -76,6 +84,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
             return
         }
 
+        currentStyleSpans = spans
         let selectedRanges = textView.selectedRanges
         let visibleOrigin = scrollView.contentView.bounds.origin
         let orderedSpans = orderedForVisibleRange(spans)
@@ -122,7 +131,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = .textBackgroundColor
+        scrollView.backgroundColor = colors.background
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 160, right: 0)
         scrollView.documentView = textView
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -151,9 +160,15 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.enabledTextCheckingTypes = 0
 
-        textView.backgroundColor = .textBackgroundColor
-        textView.insertionPointColor = .textColor
+        applyEditorColors()
         applyBaseStyleToText()
+    }
+
+    private func applyEditorColors() {
+        scrollView.backgroundColor = colors.background
+        textView.backgroundColor = colors.background
+        textView.insertionPointColor = colors.caret
+        textView.selectedTextAttributes = [.backgroundColor: colors.selection]
     }
 
     private func applyBaseStyleToText() {
@@ -180,9 +195,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
 
         return [
             .font: baseFont,
-            .foregroundColor: NSColor.textColor,
+            .foregroundColor: colors.foreground,
             .paragraphStyle: paragraphStyle,
         ]
+    }
+
+    private var colors: EditorThemeColors.Variant {
+        themeColors.variant(for: effectiveAppearance)
     }
 
     private func updateTypingAttributesAtSelection(spans: [ResolvedMarkdownStyleSpan]) {
@@ -207,23 +226,24 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
             attributes[.font] = font(from: attributes, adding: .boldFontMask)
         case .emphasis:
             attributes[.font] = font(from: attributes, adding: .italicFontMask)
+            attributes[.foregroundColor] = colors.emphasis
         case .inlineCode:
             attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
-            attributes[.backgroundColor] = NSColor.controlAccentColor.withAlphaComponent(0.12)
-            attributes[.foregroundColor] = NSColor.labelColor
+            attributes[.backgroundColor] = colors.codeBackground
+            attributes[.foregroundColor] = colors.codeForeground
         case .codeBlock:
             attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
-            attributes[.backgroundColor] = NSColor.controlBackgroundColor
-            attributes[.foregroundColor] = NSColor.labelColor
+            attributes[.backgroundColor] = colors.codeBackground
+            attributes[.foregroundColor] = colors.codeForeground
         case .link:
-            attributes[.foregroundColor] = NSColor.linkColor
+            attributes[.foregroundColor] = colors.linkText
             attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
         case .image:
-            attributes[.foregroundColor] = NSColor.systemPurple
+            attributes[.foregroundColor] = colors.image
         case .blockQuote:
-            attributes[.foregroundColor] = NSColor.secondaryLabelColor
+            attributes[.foregroundColor] = colors.quote
         case .thematicBreak:
-            attributes[.foregroundColor] = NSColor.tertiaryLabelColor
+            attributes[.foregroundColor] = colors.thematicBreak
         case .orderedList, .unorderedList:
             break
         }
@@ -255,37 +275,38 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
             addFontTraits(.boldFontMask, range: range)
         case .emphasis:
             addFontTraits(.italicFontMask, range: range)
+            textStorage.addAttribute(.foregroundColor, value: colors.emphasis, range: range)
         case .inlineCode:
             setMonospaceFont(range: range)
             textStorage.addAttributes(
                 [
-                    .backgroundColor: NSColor.controlAccentColor.withAlphaComponent(0.12),
-                    .foregroundColor: NSColor.labelColor,
+                    .backgroundColor: colors.codeBackground,
+                    .foregroundColor: colors.codeForeground,
                 ], range: range)
         case .codeBlock:
             setMonospaceFont(range: range)
             textStorage.addAttributes(
                 [
-                    .backgroundColor: NSColor.controlBackgroundColor,
-                    .foregroundColor: NSColor.labelColor,
+                    .backgroundColor: colors.codeBackground,
+                    .foregroundColor: colors.codeForeground,
                 ], range: range)
         case .link:
             textStorage.addAttributes(
                 [
-                    .foregroundColor: NSColor.linkColor,
+                    .foregroundColor: colors.linkText,
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
                 ], range: range)
         case .image:
-            textStorage.addAttribute(.foregroundColor, value: NSColor.systemPurple, range: range)
+            textStorage.addAttribute(.foregroundColor, value: colors.image, range: range)
         case .blockQuote:
             textStorage.addAttribute(
-                .foregroundColor, value: NSColor.secondaryLabelColor, range: range)
+                .foregroundColor, value: colors.quote, range: range)
             applyLineMarkerStyle(pattern: "^\\s*>", range: range)
         case .orderedList, .unorderedList:
             applyLineMarkerStyle(pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+", range: range)
         case .thematicBreak:
             textStorage.addAttribute(
-                .foregroundColor, value: NSColor.tertiaryLabelColor, range: range)
+                .foregroundColor, value: colors.thematicBreak, range: range)
         }
     }
 
@@ -402,7 +423,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
             }
 
             textStorage.addAttribute(
-                .foregroundColor, value: NSColor.tertiaryLabelColor, range: markerRange)
+                .foregroundColor, value: colors.listMarker, range: markerRange)
         }
     }
 }
