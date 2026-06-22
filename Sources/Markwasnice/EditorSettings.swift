@@ -9,7 +9,7 @@ struct EditorSettings: Equatable {
 
     static let maxTextWidthOptions = [64, 72, 80]
     static let tabWidthOptions = [1, 2, 4]
-    static let defaultBasePointSize: CGFloat = 17
+    static let defaultBasePointSize: CGFloat = 20
     static let defaultTextSizeScale: CGFloat = 1
     static let defaultMaxTextColumns = 64
     static let defaultTabInsertionMode = TabInsertionMode.spaces
@@ -53,7 +53,8 @@ final class EditorSettingsStore {
             ? storedColumns
             : EditorSettings.defaultMaxTextColumns
         let storedTabInsertionMode = defaults.string(forKey: Key.tabInsertionMode)
-        let tabInsertionMode = storedTabInsertionMode.flatMap(EditorSettings.TabInsertionMode.init(rawValue:))
+        let tabInsertionMode =
+            storedTabInsertionMode.flatMap(EditorSettings.TabInsertionMode.init(rawValue:))
             ?? EditorSettings.defaultTabInsertionMode
         let storedTabWidth = defaults.integer(forKey: Key.tabWidth)
         let tabWidth =

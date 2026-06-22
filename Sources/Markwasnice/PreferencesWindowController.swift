@@ -5,7 +5,7 @@ final class PreferencesWindowController: NSWindowController {
     private var settings: EditorSettings
     private let onChange: (EditorSettings) -> Void
     private let textSizeSlider = NSSlider(
-        value: 1, minValue: 0.6, maxValue: 3, target: nil, action: nil)
+        value: 1, minValue: 0.05, maxValue: 1.95, target: nil, action: nil)
     private let smallTextSizeLabel = NSTextField(labelWithString: "A")
     private let largeTextSizeLabel = NSTextField(labelWithString: "A")
     private let widthPopup = NSPopUpButton()
@@ -46,6 +46,7 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     @objc private func textSizeChanged(_ sender: NSSlider) {
+        print(settings.textSizeScale)
         settings.textSizeScale = CGFloat(sender.doubleValue)
         onChange(settings)
     }
@@ -84,7 +85,7 @@ final class PreferencesWindowController: NSWindowController {
         textSizeSlider.target = self
         textSizeSlider.action = #selector(textSizeChanged(_:))
         textSizeSlider.doubleValue = Double(settings.textSizeScale)
-        textSizeSlider.numberOfTickMarks = 14
+        textSizeSlider.numberOfTickMarks = 15
         textSizeSlider.allowsTickMarkValuesOnly = true
 
         smallTextSizeLabel.font = LilexFontProvider.regular(size: 11)
@@ -155,7 +156,8 @@ final class PreferencesWindowController: NSWindowController {
             tabModeLabel.topAnchor.constraint(equalTo: widthLabel.bottomAnchor, constant: 28),
             tabModeLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
 
-            tabModePopup.leadingAnchor.constraint(equalTo: tabModeLabel.trailingAnchor, constant: 12),
+            tabModePopup.leadingAnchor.constraint(
+                equalTo: tabModeLabel.trailingAnchor, constant: 12),
             tabModePopup.centerYAnchor.constraint(equalTo: tabModeLabel.centerYAnchor),
             tabModePopup.widthAnchor.constraint(equalToConstant: 120),
 
@@ -163,11 +165,13 @@ final class PreferencesWindowController: NSWindowController {
             tabWidthLabel.topAnchor.constraint(equalTo: tabModeLabel.bottomAnchor, constant: 28),
             tabWidthLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
 
-            tabWidthPopup.leadingAnchor.constraint(equalTo: tabWidthLabel.trailingAnchor, constant: 12),
+            tabWidthPopup.leadingAnchor.constraint(
+                equalTo: tabWidthLabel.trailingAnchor, constant: 12),
             tabWidthPopup.centerYAnchor.constraint(equalTo: tabWidthLabel.centerYAnchor),
             tabWidthPopup.widthAnchor.constraint(equalToConstant: 90),
 
-            tabWidthCaption.leadingAnchor.constraint(equalTo: tabWidthPopup.trailingAnchor, constant: 8),
+            tabWidthCaption.leadingAnchor.constraint(
+                equalTo: tabWidthPopup.trailingAnchor, constant: 8),
             tabWidthCaption.centerYAnchor.constraint(equalTo: tabWidthPopup.centerYAnchor),
         ])
     }

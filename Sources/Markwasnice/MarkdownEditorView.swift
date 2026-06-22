@@ -31,6 +31,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     private let textView: MarkdownTextView
     private var isApplyingStyles = false
     private var settings: EditorSettings
+    private var windowWidthFontScale: CGFloat = 1
+    private var hangsHeadingMarkers = true
     private var themeColors = EditorThemeColors.default
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var paragraphGutter: CGFloat = 0
@@ -133,6 +135,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         self.settings = settings
         updateTextContainerInset()
         applyStyles(spans)
+    }
+
+    func updateWindowWidthFontScale(for windowWidth: CGFloat, spans: [ResolvedMarkdownStyleSpan]) {
+        let newScale = Self.windowWidthFontScale(for: windowWidth)
+        let newHangsHeadingMarkers = Self.hangsHeadingMarkers(for: windowWidth)
+        let didChangeFontScale = newScale != windowWidthFontScale
+        let didChangeHeadingHang = newHangsHeadingMarkers != hangsHeadingMarkers
+
+        windowWidthFontScale = newScale
+        hangsHeadingMarkers = newHangsHeadingMarkers
+
+        let didChangeParagraphGutter = updateTextContainerInset()
+        if didChangeFontScale || didChangeHeadingHang || didChangeParagraphGutter {
+            applyStyles(spans)
+        }
     }
 
     func setChromeInsets(top: CGFloat, bottom: CGFloat) {
@@ -457,7 +474,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     }
 
     private var baseFont: NSFont {
-        LilexFontProvider.regular(size: settings.basePointSize)
+        LilexFontProvider.regular(size: basePointSize)
+    }
+
+    private var basePointSize: CGFloat {
+        settings.basePointSize * windowWidthFontScale
     }
 
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
@@ -470,8 +491,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
     private func baseParagraphStyle() -> NSMutableParagraphStyle {
         let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.minimumLineHeight = settings.lineHeight
-        paragraphStyle.maximumLineHeight = settings.lineHeight
+        paragraphStyle.minimumLineHeight = lineHeight
+        paragraphStyle.maximumLineHeight = lineHeight
         paragraphStyle.firstLineHeadIndent = paragraphGutter
         paragraphStyle.headIndent = paragraphGutter
         paragraphStyle.tailIndent = -paragraphGutter
@@ -480,6 +501,46 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
     private var colors: EditorThemeColors.Variant {
         themeColors.variant(for: effectiveAppearance)
+    }
+
+    private var lineHeight: CGFloat {
+        basePointSize * 1.6
+    }
+
+    private static func windowWidthFontScale(for windowWidth: CGFloat) -> CGFloat {
+        if windowWidth > 1250 {
+            return 1.2
+        }
+
+        if windowWidth < 440 {
+            return 0.9
+        }
+
+        return 1
+    }
+
+    private static func minimumHorizontalPaddingCharacters(for width: CGFloat) -> CGFloat {
+        if width > 980 {
+            return 6
+        }
+
+        if width > 770 {
+            return 5
+        }
+
+        if width > 510 {
+            return 4
+        }
+
+        if width > 440 {
+            return 3
+        }
+
+        return 2
+    }
+
+    private static func hangsHeadingMarkers(for width: CGFloat) -> Bool {
+        width > 440
     }
 
     private func updateTypingAttributesAtSelection(spans: [ResolvedMarkdownStyleSpan]) {
@@ -653,6 +714,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     }
 
     private func applyHeadingHang(range: NSRange) {
+        guard hangsHeadingMarkers else {
+            return
+        }
+
         guard
             let expression = try? NSRegularExpression(
                 pattern: "^\\s*#{1,6}\\s+", options: [.anchorsMatchLines])
@@ -681,15 +746,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
     @discardableResult
     private func updateTextContainerInset() -> Bool {
-        let minimumHorizontalInset: CGFloat = 28
         let availableWidth =
             scrollView.contentView.bounds.width > 0
             ? scrollView.contentView.bounds.width : bounds.width
+        let minimumHorizontalInset =
+            (characterWidth() * Self.minimumHorizontalPaddingCharacters(for: availableWidth))
         let targetWidth = characterWidth() * CGFloat(settings.maxTextColumns)
         let horizontalInset = max(minimumHorizontalInset, floor((availableWidth - targetWidth) / 2))
         let markerGutter = characterWidth() * 7
-        let containerInset = max(0, horizontalInset - markerGutter)
-        let newParagraphGutter = horizontalInset - containerInset
+        let containerInset = max(6, horizontalInset - markerGutter)
+        let newParagraphGutter = max(0, horizontalInset - containerInset)
         let didChangeParagraphGutter = newParagraphGutter != paragraphGutter
 
         paragraphGutter = newParagraphGutter
@@ -719,7 +785,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
     private func characterWidth() -> CGFloat {
         let width = ("0" as NSString).size(withAttributes: [.font: baseFont]).width
-        return width > 0 ? width : settings.basePointSize * 0.6
+        return width > 0 ? width : basePointSize * 0.6
     }
 
     private func applyLineMarkerStyle(pattern: String, range: NSRange) {

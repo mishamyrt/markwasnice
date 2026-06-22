@@ -66,6 +66,7 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
 
         editorView.delegate = self
         editorView.setChromeInsets(top: EditorChromeView.topChromeHeight, bottom: 188)
+        editorView.updateWindowWidthFontScale(for: window.frame.width, spans: resolvedStyleSpans)
         if let draft {
             currentFileURL = draft.fileURL
             editorView.documentURL = draft.fileURL
@@ -100,6 +101,14 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
 
     func applySettings(_ settings: EditorSettings) {
         editorView.applySettings(settings, spans: resolvedStyleSpans)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard let window else {
+            return
+        }
+
+        editorView.updateWindowWidthFontScale(for: window.frame.width, spans: resolvedStyleSpans)
     }
 
     func newDocument() -> Bool {
