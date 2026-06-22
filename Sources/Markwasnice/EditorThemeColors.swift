@@ -44,9 +44,9 @@ struct EditorThemeColors: Equatable {
             selection: NSColor(calibratedRed: 0.25, green: 0.40, blue: 0.65, alpha: 0.55),
             emphasis: NSColor(calibratedRed: 0.94, green: 0.83, blue: 0.64, alpha: 1),
             codeForeground: NSColor(calibratedRed: 0.92, green: 0.88, blue: 0.78, alpha: 1),
-            codeBackground: NSColor(calibratedRed: 0.15, green: 0.15, blue: 0.13, alpha: 1),
+            codeBackground: NSColor(calibratedRed: 0.153, green: 0.153, blue: 0.153, alpha: 1),
             quote: NSColor(calibratedRed: 0.68, green: 0.65, blue: 0.57, alpha: 1),
-            punctuation: NSColor(calibratedRed: 0.55, green: 0.53, blue: 0.47, alpha: 1),
+            punctuation: NSColor(calibratedRed: 0.478, green: 0.482, blue: 0.467, alpha: 1.00),
             thematicBreak: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1),
             listMarker: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1)
         )

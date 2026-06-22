@@ -122,6 +122,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         for span in orderedSpans {
             applyStyle(span.kind, range: span.range)
         }
+        applyNonbreakingSpaceStyle()
 
         textStorage.endEditing()
         textView.undoManager?.enableUndoRegistration()
@@ -811,6 +812,27 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
             textStorage.addAttribute(
                 .foregroundColor, value: colors.listMarker, range: markerRange)
+        }
+    }
+
+    private func applyNonbreakingSpaceStyle() {
+        let string = textStorage.string as NSString
+        var searchRange = NSRange(location: 0, length: string.length)
+
+        while searchRange.length > 0 {
+            let range = string.range(of: "\u{00A0}", options: [], range: searchRange)
+            guard range.location != NSNotFound else {
+                return
+            }
+
+            textStorage.addAttributes(
+                [
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .underlineColor: colors.codeBackground,
+                ], range: range)
+
+            let nextLocation = range.location + range.length
+            searchRange = NSRange(location: nextLocation, length: string.length - nextLocation)
         }
     }
 }
