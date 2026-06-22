@@ -36,6 +36,8 @@ enum MarkdownStyleKind: Sendable {
     case codeBlock
     case link(destination: String?)
     case image(source: String?)
+    case linkSyntaxPunctuation
+    case linkDestination
     case blockQuote
     case orderedList
     case unorderedList
@@ -47,7 +49,8 @@ extension MarkdownStyleKind {
         switch self {
         case .heading, .codeBlock, .blockQuote, .orderedList, .unorderedList:
             return true
-        case .strong, .emphasis, .inlineCode, .link, .image, .thematicBreak:
+        case .strong, .emphasis, .inlineCode, .link, .image, .linkSyntaxPunctuation,
+             .linkDestination, .thematicBreak:
             return false
         }
     }

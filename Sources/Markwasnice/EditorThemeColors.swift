@@ -10,10 +10,7 @@ struct EditorThemeColors: Equatable {
         var codeForeground: NSColor
         var codeBackground: NSColor
         var quote: NSColor
-        var linkText: NSColor
-        var linkURL: NSColor
         var punctuation: NSColor
-        var image: NSColor
         var thematicBreak: NSColor
         var listMarker: NSColor
     }
@@ -36,10 +33,7 @@ struct EditorThemeColors: Equatable {
             codeForeground: NSColor(calibratedRed: 0.11, green: 0.10, blue: 0.09, alpha: 1),
             codeBackground: NSColor(calibratedRed: 0.91, green: 0.89, blue: 0.84, alpha: 1),
             quote: NSColor(calibratedRed: 0.42, green: 0.40, blue: 0.35, alpha: 1),
-            linkText: NSColor(calibratedRed: 0.00, green: 0.32, blue: 0.76, alpha: 1),
-            linkURL: NSColor(calibratedRed: 0.32, green: 0.45, blue: 0.60, alpha: 1),
             punctuation: NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.49, alpha: 1),
-            image: NSColor(calibratedRed: 0.52, green: 0.20, blue: 0.67, alpha: 1),
             thematicBreak: NSColor(calibratedRed: 0.62, green: 0.60, blue: 0.55, alpha: 1),
             listMarker: NSColor(calibratedRed: 0.62, green: 0.60, blue: 0.55, alpha: 1)
         ),
@@ -52,10 +46,7 @@ struct EditorThemeColors: Equatable {
             codeForeground: NSColor(calibratedRed: 0.92, green: 0.88, blue: 0.78, alpha: 1),
             codeBackground: NSColor(calibratedRed: 0.15, green: 0.15, blue: 0.13, alpha: 1),
             quote: NSColor(calibratedRed: 0.68, green: 0.65, blue: 0.57, alpha: 1),
-            linkText: NSColor(calibratedRed: 0.44, green: 0.68, blue: 1.00, alpha: 1),
-            linkURL: NSColor(calibratedRed: 0.55, green: 0.68, blue: 0.82, alpha: 1),
             punctuation: NSColor(calibratedRed: 0.55, green: 0.53, blue: 0.47, alpha: 1),
-            image: NSColor(calibratedRed: 0.82, green: 0.58, blue: 0.95, alpha: 1),
             thematicBreak: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1),
             listMarker: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1)
         )

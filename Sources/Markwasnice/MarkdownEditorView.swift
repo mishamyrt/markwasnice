@@ -574,11 +574,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
             attributes[.backgroundColor] = colors.codeBackground
             attributes[.foregroundColor] = colors.codeForeground
-        case .link:
-            attributes[.foregroundColor] = colors.linkText
+        case .linkDestination:
+            attributes[.foregroundColor] = colors.punctuation
             attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
-        case .image:
-            attributes[.foregroundColor] = colors.image
+        case .linkSyntaxPunctuation:
+            attributes[.foregroundColor] = colors.punctuation
+        case .link, .image:
+            break
         case .blockQuote:
             attributes[.foregroundColor] = colors.quote
         case .thematicBreak:
@@ -630,14 +632,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
                     .backgroundColor: colors.codeBackground,
                     .foregroundColor: colors.codeForeground,
                 ], range: range)
-        case .link:
+        case .linkDestination:
             textStorage.addAttributes(
                 [
-                    .foregroundColor: colors.linkText,
+                    .foregroundColor: colors.punctuation,
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
                 ], range: range)
-        case .image:
-            textStorage.addAttribute(.foregroundColor, value: colors.image, range: range)
+        case .linkSyntaxPunctuation:
+            textStorage.addAttribute(.foregroundColor, value: colors.punctuation, range: range)
+        case .link, .image:
+            break
         case .blockQuote:
             textStorage.addAttribute(
                 .foregroundColor, value: colors.quote, range: range)
