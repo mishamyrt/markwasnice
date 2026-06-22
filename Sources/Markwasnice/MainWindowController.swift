@@ -313,8 +313,7 @@ private final class EditorChromeView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Untitled")
     private let dirtyDotLabel = NSTextField(labelWithString: "•")
     private let wordCountLabel = NSTextField(labelWithString: "0 words")
-    private let undoButton = ChromeIconButton(symbolName: "arrow.uturn.backward")
-    private let redoButton = ChromeIconButton(symbolName: "arrow.uturn.forward")
+    private let historyControl = ChromeHistoryControl()
     private let previewButton = ChromeIconButton(symbolName: "eye")
     private var trackingArea: NSTrackingArea?
     private var isChromeVisible = true
@@ -348,7 +347,7 @@ private final class EditorChromeView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
-        let isInTopZone = bounds.maxY - location.y <= 96
+        let isInTopZone = bounds.maxY - location.y <= 52
         updateTopHover(isInTopZone)
     }
 
@@ -425,14 +424,14 @@ private final class EditorChromeView: NSView {
     private func configureTopChrome() {
         topChrome.translatesAutoresizingMaskIntoConstraints = false
 
-        let leftStack = NSStackView(views: [undoButton, redoButton])
-        leftStack.orientation = .horizontal
-        leftStack.spacing = 6
-        leftStack.alignment = .centerY
-        leftStack.translatesAutoresizingMaskIntoConstraints = false
+        historyControl.onUndo = { [weak self] in
+            self?.onUndo?()
+        }
+        historyControl.onRedo = { [weak self] in
+            self?.onRedo?()
+        }
+        historyControl.translatesAutoresizingMaskIntoConstraints = false
 
-        configureChromeButton(undoButton, action: #selector(undoPressed(_:)))
-        configureChromeButton(redoButton, action: #selector(redoPressed(_:)))
         configureChromeButton(previewButton, action: #selector(previewPressed(_:)))
         previewButton.isEnabled = false
 
@@ -447,7 +446,7 @@ private final class EditorChromeView: NSView {
         dirtyDotLabel.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(topChrome)
-        topChrome.contentView.addSubview(leftStack)
+        topChrome.contentView.addSubview(historyControl)
         topChrome.contentView.addSubview(titleLabel)
         topChrome.contentView.addSubview(dirtyDotLabel)
         topChrome.contentView.addSubview(previewButton)
@@ -458,14 +457,16 @@ private final class EditorChromeView: NSView {
             topChrome.topAnchor.constraint(equalTo: topAnchor),
             topChrome.heightAnchor.constraint(equalToConstant: Self.topChromeHeight),
 
-            leftStack.leadingAnchor.constraint(
-                equalTo: topChrome.contentView.leadingAnchor, constant: 84),
-            leftStack.centerYAnchor.constraint(
-                equalTo: topChrome.contentView.topAnchor, constant: 28),
+            historyControl.leadingAnchor.constraint(
+                equalTo: topChrome.contentView.leadingAnchor, constant: 94),
+            historyControl.centerYAnchor.constraint(
+                equalTo: topChrome.contentView.topAnchor, constant: 27),
+            historyControl.widthAnchor.constraint(equalToConstant: 72),
+            historyControl.heightAnchor.constraint(equalToConstant: 36),
 
             titleLabel.centerXAnchor.constraint(
                 equalTo: topChrome.contentView.centerXAnchor, constant: -5),
-            titleLabel.centerYAnchor.constraint(equalTo: leftStack.centerYAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: historyControl.centerYAnchor),
             titleLabel.widthAnchor.constraint(
                 lessThanOrEqualTo: topChrome.contentView.widthAnchor, multiplier: 0.42),
 
@@ -473,8 +474,8 @@ private final class EditorChromeView: NSView {
             dirtyDotLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
             previewButton.trailingAnchor.constraint(
-                equalTo: topChrome.contentView.trailingAnchor, constant: -18),
-            previewButton.centerYAnchor.constraint(equalTo: leftStack.centerYAnchor),
+                equalTo: topChrome.contentView.trailingAnchor, constant: -9),
+            previewButton.centerYAnchor.constraint(equalTo: historyControl.centerYAnchor),
         ])
     }
 
@@ -508,23 +509,14 @@ private final class EditorChromeView: NSView {
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 30),
-            button.heightAnchor.constraint(equalToConstant: 30),
+            button.widthAnchor.constraint(equalToConstant: 36),
+            button.heightAnchor.constraint(equalToConstant: 36),
         ])
     }
 
     private func setControlsEnabled(_ enabled: Bool) {
-        undoButton.isEnabled = enabled
-        redoButton.isEnabled = enabled
+        historyControl.isEnabled = enabled
         previewButton.isEnabled = false
-    }
-
-    @objc private func undoPressed(_ sender: Any?) {
-        onUndo?()
-    }
-
-    @objc private func redoPressed(_ sender: Any?) {
-        onRedo?()
     }
 
     @objc private func previewPressed(_ sender: Any?) {
@@ -547,7 +539,7 @@ private final class HeaderChromeView: NSView {
     }
 
     private func configureView() {
-        blurView.blurRadius = 3
+        blurView.blurRadius = 2
         blurView.translatesAutoresizingMaskIntoConstraints = false
         contentView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -573,7 +565,7 @@ private final class PureBackdropBlurView: NSView {
     private let backgroundGradientLayer = CAGradientLayer()
     private let backdropLayer: CALayer
 
-    var blurRadius: CGFloat = 3 {
+    var blurRadius: CGFloat = 2 {
         didSet {
             updateBlurRadius()
         }
@@ -667,7 +659,7 @@ private final class PureBackdropBlurView: NSView {
             .background
 
         backgroundGradientLayer.colors = [
-            background.withAlphaComponent(0.8).cgColor,
+            background.withAlphaComponent(0.9).cgColor,
             background.withAlphaComponent(0).cgColor,
         ]
     }
@@ -707,6 +699,204 @@ private final class PureBackdropBlurView: NSView {
 
         assertionFailure("No usable CAFilter factory selector found")
         return nil
+    }
+}
+
+private final class ChromeHistoryControl: NSControl {
+    private enum Segment {
+        case undo
+        case redo
+    }
+
+    private let glassView = NSGlassEffectView()
+    private let glassContentView = NSView()
+    private let undoHoverView = NSView()
+    private let redoHoverView = NSView()
+    private let dividerView = NSView()
+    private let undoImageView = NSImageView()
+    private let redoImageView = NSImageView()
+    private var hoverSegment: Segment?
+    private var trackingArea: NSTrackingArea?
+
+    var onUndo: (() -> Void)?
+    var onRedo: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureView()
+    }
+
+    override var isEnabled: Bool {
+        didSet {
+            alphaValue = isEnabled ? 1 : 0.45
+            updateHoverSegment(nil)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .inVisibleRect, .mouseMoved, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard isEnabled else {
+            return
+        }
+
+        updateHoverSegment(segment(at: convert(event.locationInWindow, from: nil)))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard isEnabled else {
+            return
+        }
+
+        updateHoverSegment(segment(at: convert(event.locationInWindow, from: nil)))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        updateHoverSegment(nil)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isEnabled else {
+            return
+        }
+
+        let location = convert(event.locationInWindow, from: nil)
+        guard let segment = segment(at: location) else {
+            return
+        }
+
+        if segment == .undo {
+            onUndo?()
+        } else {
+            onRedo?()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    private func configureView() {
+        wantsLayer = true
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.22
+        layer?.shadowRadius = 14
+        layer?.shadowOffset = CGSize(width: 0, height: -4)
+
+        glassView.translatesAutoresizingMaskIntoConstraints = false
+        glassView.cornerRadius = 18
+        glassView.style = .regular
+        glassView.contentView = glassContentView
+
+        glassContentView.translatesAutoresizingMaskIntoConstraints = false
+
+        configureHoverView(undoHoverView)
+        configureHoverView(redoHoverView)
+
+        dividerView.wantsLayer = true
+        dividerView.layer?.backgroundColor =
+            NSColor.separatorColor
+            .withAlphaComponent(0.1)
+            .cgColor
+        dividerView.translatesAutoresizingMaskIntoConstraints = false
+
+        configureImageView(undoImageView, symbolName: "chevron.left")
+        configureImageView(redoImageView, symbolName: "chevron.right")
+
+        addSubview(glassView)
+        glassContentView.addSubview(undoHoverView)
+        glassContentView.addSubview(redoHoverView)
+        glassContentView.addSubview(dividerView)
+        glassContentView.addSubview(undoImageView)
+        glassContentView.addSubview(redoImageView)
+        NSLayoutConstraint.activate([
+            glassView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glassView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glassView.topAnchor.constraint(equalTo: topAnchor),
+            glassView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            glassContentView.leadingAnchor.constraint(equalTo: glassView.leadingAnchor),
+            glassContentView.trailingAnchor.constraint(equalTo: glassView.trailingAnchor),
+            glassContentView.topAnchor.constraint(equalTo: glassView.topAnchor),
+            glassContentView.bottomAnchor.constraint(equalTo: glassView.bottomAnchor),
+
+            undoHoverView.centerXAnchor.constraint(
+                equalTo: glassContentView.leadingAnchor, constant: 18),
+            undoHoverView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+            undoHoverView.widthAnchor.constraint(equalToConstant: 28),
+            undoHoverView.heightAnchor.constraint(equalToConstant: 28),
+
+            redoHoverView.centerXAnchor.constraint(
+                equalTo: glassContentView.trailingAnchor, constant: -18),
+            redoHoverView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+            redoHoverView.widthAnchor.constraint(equalToConstant: 28),
+            redoHoverView.heightAnchor.constraint(equalToConstant: 28),
+
+            dividerView.centerXAnchor.constraint(equalTo: glassContentView.centerXAnchor),
+            dividerView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+            dividerView.widthAnchor.constraint(equalToConstant: 1),
+            dividerView.heightAnchor.constraint(equalToConstant: 20),
+
+            undoImageView.centerXAnchor.constraint(
+                equalTo: glassContentView.leadingAnchor, constant: 18),
+            undoImageView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+            undoImageView.widthAnchor.constraint(equalToConstant: 14),
+            undoImageView.heightAnchor.constraint(equalToConstant: 14),
+
+            redoImageView.centerXAnchor.constraint(
+                equalTo: glassContentView.trailingAnchor, constant: -18),
+            redoImageView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+            redoImageView.widthAnchor.constraint(equalToConstant: 14),
+            redoImageView.heightAnchor.constraint(equalToConstant: 14),
+        ])
+    }
+
+    private func configureHoverView(_ view: NSView) {
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+        view.layer?.cornerRadius = 14
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.isHidden = true
+    }
+
+    private func configureImageView(_ imageView: NSImageView, symbolName: String) {
+        imageView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        imageView.contentTintColor = .labelColor
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    private func segment(at location: NSPoint) -> Segment? {
+        guard bounds.contains(location) else {
+            return nil
+        }
+
+        return location.x < bounds.midX ? .undo : .redo
+    }
+
+    private func updateHoverSegment(_ segment: Segment?) {
+        hoverSegment = segment
+        undoHoverView.isHidden = hoverSegment != .undo
+        redoHoverView.isHidden = hoverSegment != .redo
     }
 }
 
@@ -760,7 +950,7 @@ private final class ChromeIconButton: NSControl {
         layer?.shadowOffset = CGSize(width: 0, height: -4)
 
         glassView.translatesAutoresizingMaskIntoConstraints = false
-        glassView.cornerRadius = 15
+        glassView.cornerRadius = 18
         glassView.style = .regular
         glassView.contentView = glassContentView
 
