@@ -138,7 +138,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     func setChromeInsets(top: CGFloat, bottom: CGFloat) {
         topScrollInset = top
         bottomScrollInset = bottom
-        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: bottom, right: 0)
+        scrollView.contentInsets = NSEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
         updateTextContainerInset()
     }
 
@@ -239,7 +239,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
         scrollView.backgroundColor = colors.background
-        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: bottomScrollInset, right: 0)
+        scrollView.contentInsets = NSEdgeInsets(
+            top: topScrollInset, left: 0, bottom: bottomScrollInset, right: 0)
         scrollView.documentView = textView
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -692,7 +693,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let didChangeParagraphGutter = newParagraphGutter != paragraphGutter
 
         paragraphGutter = newParagraphGutter
-        textView.textContainerInset = NSSize(width: containerInset, height: 24 + topScrollInset)
+        textView.textContainerInset = NSSize(width: containerInset, height: 0)
         return didChangeParagraphGutter
     }
 
@@ -703,10 +704,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let clipView = scrollView.contentView
         let documentBounds = scrollView.documentView?.bounds ?? .zero
         let maxOriginX = max(0, documentBounds.maxX - clipView.bounds.width)
-        let maxOriginY = max(0, documentBounds.maxY - clipView.bounds.height)
+        let minOriginY = -scrollView.contentInsets.top
+        let maxOriginY = max(
+            minOriginY,
+            documentBounds.maxY - clipView.bounds.height + scrollView.contentInsets.bottom)
         let clampedOrigin = NSPoint(
             x: min(max(visibleOrigin.x, 0), maxOriginX),
-            y: min(max(visibleOrigin.y, 0), maxOriginY)
+            y: min(max(visibleOrigin.y, minOriginY), maxOriginY)
         )
 
         clipView.scroll(to: clampedOrigin)
@@ -767,7 +771,8 @@ private final class MarkdownTextView: NSTextView {
         if selectedRange().length > 0,
             let string = plainString(from: insertString),
             let pair = quotePair(for: string),
-            commandDelegate?.markdownTextView(self, wrapSelectionWith: pair.opening, closing: pair.closing) == true
+            commandDelegate?.markdownTextView(
+                self, wrapSelectionWith: pair.opening, closing: pair.closing) == true
         {
             return
         }
