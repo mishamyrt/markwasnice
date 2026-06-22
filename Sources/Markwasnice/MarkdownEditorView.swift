@@ -10,7 +10,7 @@ protocol MarkdownEditorViewDelegate: AnyObject {
 @MainActor
 private protocol MarkdownTextViewCommandDelegate: AnyObject {
     func markdownTextViewInsertTab(_ textView: NSTextView)
-    func markdownTextViewContinueList(_ textView: NSTextView) -> Bool
+    func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool
     func markdownTextView(
         _ textView: NSTextView, wrapSelectionWith opening: String, closing: String
     ) -> Bool
@@ -189,9 +189,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         replaceSelectedText(with: insertedText)
     }
 
-    func markdownTextViewContinueList(_ textView: NSTextView) -> Bool {
-        guard textView.selectedRange().length == 0,
-            let continuation = listContinuationAtSelection()
+    func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool {
+        guard textView.selectedRange().length == 0 else {
+            return false
+        }
+
+        if exitEmptyMarkdownPrefixAtSelection() {
+            return true
+        }
+
+        guard
+            let continuation = listContinuationAtSelection() ?? quoteContinuationAtSelection()
         else {
             return false
         }
@@ -315,6 +323,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             NSRange(location: selectedRange.location + (string as NSString).length, length: 0))
     }
 
+    private func replaceText(in range: NSRange, with string: String, selectedLocation: Int) -> Bool {
+        guard textView.shouldChangeText(in: range, replacementString: string) else {
+            return false
+        }
+
+        textView.textStorage?.replaceCharacters(in: range, with: string)
+        textView.didChangeText()
+        textView.setSelectedRange(NSRange(location: selectedLocation, length: 0))
+        return true
+    }
+
     @discardableResult
     private func wrapSelection(opening: String, closing: String) -> Bool {
         let selectedRange = textView.selectedRange()
@@ -360,6 +379,65 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let indentation = prefix.substring(with: match.range(at: 1))
         let marker = prefix.substring(with: match.range(at: 2))
         return "\n\(indentation)\(nextListMarker(after: marker)) "
+    }
+
+    private func exitEmptyMarkdownPrefixAtSelection() -> Bool {
+        let nsString = textView.string as NSString
+        let location = textView.selectedRange().location
+        let lineLocation = location > 0 ? location - 1 : 0
+        let lineRange = nsString.lineRange(for: NSRange(location: lineLocation, length: 0))
+        let cursorRange = NSRange(
+            location: lineRange.location, length: max(0, location - lineRange.location))
+        let lineText = nsString.substring(with: lineRange).trimmingCharacters(in: .newlines)
+        guard lineMatchesEmptyMarkdownPrefix(lineText) else {
+            return false
+        }
+
+        let replacementRange = NSRange(
+            location: lineRange.location,
+            length: lineRange.location + lineRange.length > location
+                ? lineRange.length : cursorRange.length)
+        return replaceText(
+            in: replacementRange, with: "\n", selectedLocation: replacementRange.location + 1)
+    }
+
+    private func lineMatchesEmptyMarkdownPrefix(_ line: String) -> Bool {
+        let range = NSRange(location: 0, length: (line as NSString).length)
+        let patterns = [
+            "^[ \\t]*(?:[-+*]|\\d+[.)])\\s+$",
+            "^[ \\t]*>\\s*$",
+        ]
+
+        return patterns.contains { pattern in
+            guard let expression = try? NSRegularExpression(pattern: pattern) else {
+                return false
+            }
+
+            return expression.firstMatch(in: line, range: range) != nil
+        }
+    }
+
+    private func quoteContinuationAtSelection() -> String? {
+        let nsString = textView.string as NSString
+        let location = textView.selectedRange().location
+        let lineLocation = location > 0 ? location - 1 : 0
+        let lineRange = nsString.lineRange(for: NSRange(location: lineLocation, length: 0))
+        let cursorRange = NSRange(
+            location: lineRange.location, length: max(0, location - lineRange.location))
+        let linePrefix = nsString.substring(with: cursorRange)
+        guard
+            let expression = try? NSRegularExpression(pattern: "^([ \\t]*)>"),
+            let match = expression.firstMatch(
+                in: linePrefix, range: NSRange(location: 0, length: (linePrefix as NSString).length)
+            ),
+            match.numberOfRanges == 2
+        else {
+            return nil
+        }
+
+        let prefix = linePrefix as NSString
+        let indentation = prefix.substring(with: match.range(at: 1))
+        return "\n\(indentation)>"
     }
 
     private func nextListMarker(after marker: String) -> String {
@@ -583,7 +661,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         case .link, .image:
             break
         case .blockQuote:
-            attributes[.foregroundColor] = colors.quote
+            break
         case .thematicBreak:
             attributes[.foregroundColor] = colors.thematicBreak
         case .orderedList, .unorderedList:
@@ -644,9 +722,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         case .link, .image:
             break
         case .blockQuote:
-            textStorage.addAttribute(
-                .foregroundColor, value: colors.quote, range: range)
-            applyLineMarkerStyle(pattern: "^\\s*>", range: range)
+            applyLineMarkerStyle(pattern: "^\\s*(>)", range: range, markerCaptureGroup: 1)
         case .orderedList, .unorderedList:
             applyLineMarkerStyle(pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+", range: range)
         case .thematicBreak:
@@ -793,7 +869,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         return width > 0 ? width : basePointSize * 0.6
     }
 
-    private func applyLineMarkerStyle(pattern: String, range: NSRange) {
+    private func applyLineMarkerStyle(
+        pattern: String, range: NSRange, markerCaptureGroup: Int? = nil
+    ) {
         guard
             let expression = try? NSRegularExpression(
                 pattern: pattern, options: [.anchorsMatchLines])
@@ -803,7 +881,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
         let string = textStorage.string as NSString
         expression.enumerateMatches(in: textStorage.string, range: range) { match, _, _ in
-            guard let markerRange = match?.range,
+            guard let match else {
+                return
+            }
+
+            let markerRange: NSRange
+            if let markerCaptureGroup {
+                guard markerCaptureGroup < match.numberOfRanges else {
+                    return
+                }
+                markerRange = match.range(at: markerCaptureGroup)
+            } else {
+                markerRange = match.range
+            }
+
+            guard
                 markerRange.location != NSNotFound,
                 markerRange.location + markerRange.length <= string.length
             else {
@@ -851,7 +943,7 @@ private final class MarkdownTextView: NSTextView {
         case "\t":
             commandDelegate?.markdownTextViewInsertTab(self)
         case "\r", "\n":
-            if commandDelegate?.markdownTextViewContinueList(self) != true {
+            if commandDelegate?.markdownTextViewContinueMarkdownPrefix(self) != true {
                 super.keyDown(with: event)
             }
         default:
