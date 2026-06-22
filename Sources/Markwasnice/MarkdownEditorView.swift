@@ -19,6 +19,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
     private var settings: EditorSettings
     private var themeColors = EditorThemeColors.default
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
+    private var paragraphGutter: CGFloat = 0
 
     var string: String {
         get { textView.string }
@@ -53,7 +54,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
 
     override func layout() {
         super.layout()
-        updateTextContainerInset()
+        let didChangeParagraphGutter = updateTextContainerInset()
+        if didChangeParagraphGutter {
+            applyStyles(currentStyleSpans)
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -189,15 +193,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
     }
 
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.minimumLineHeight = settings.lineHeight
-        paragraphStyle.maximumLineHeight = settings.lineHeight
-
         return [
             .font: baseFont,
             .foregroundColor: colors.foreground,
-            .paragraphStyle: paragraphStyle,
+            .paragraphStyle: baseParagraphStyle(),
         ]
+    }
+
+    private func baseParagraphStyle() -> NSMutableParagraphStyle {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.minimumLineHeight = settings.lineHeight
+        paragraphStyle.maximumLineHeight = settings.lineHeight
+        paragraphStyle.firstLineHeadIndent = paragraphGutter
+        paragraphStyle.headIndent = paragraphGutter
+        paragraphStyle.tailIndent = -paragraphGutter
+        return paragraphStyle
     }
 
     private var colors: EditorThemeColors.Variant {
@@ -271,6 +281,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         switch kind {
         case .heading(_):
             addFontTraits(.boldFontMask, range: range)
+            applyHeadingHang(range: range)
         case .strong:
             addFontTraits(.boldFontMask, range: range)
         case .emphasis:
@@ -373,14 +384,48 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func updateTextContainerInset() {
+    private func applyHeadingHang(range: NSRange) {
+        guard
+            let expression = try? NSRegularExpression(
+                pattern: "^\\s*#{1,6}\\s+", options: [.anchorsMatchLines])
+        else {
+            return
+        }
+
+        let string = textStorage.string as NSString
+        let markerCharacterWidth = characterWidth()
+        let lineRange = string.lineRange(for: range)
+        expression.enumerateMatches(in: textStorage.string, range: lineRange) { match, _, stop in
+            guard let markerRange = match?.range,
+                markerRange.location != NSNotFound,
+                markerRange.location + markerRange.length <= string.length
+            else {
+                return
+            }
+
+            let paragraphStyle = baseParagraphStyle()
+            paragraphStyle.firstLineHeadIndent = paragraphGutter - markerCharacterWidth * CGFloat(markerRange.length)
+            textStorage.addAttribute(.paragraphStyle, value: paragraphStyle, range: lineRange)
+            stop.pointee = true
+        }
+    }
+
+    @discardableResult
+    private func updateTextContainerInset() -> Bool {
         let minimumHorizontalInset: CGFloat = 28
         let availableWidth =
             scrollView.contentView.bounds.width > 0
             ? scrollView.contentView.bounds.width : bounds.width
         let targetWidth = characterWidth() * CGFloat(settings.maxTextColumns)
         let horizontalInset = max(minimumHorizontalInset, floor((availableWidth - targetWidth) / 2))
-        textView.textContainerInset = NSSize(width: horizontalInset, height: 24)
+        let markerGutter = characterWidth() * 7
+        let containerInset = max(0, horizontalInset - markerGutter)
+        let newParagraphGutter = horizontalInset - containerInset
+        let didChangeParagraphGutter = newParagraphGutter != paragraphGutter
+
+        paragraphGutter = newParagraphGutter
+        textView.textContainerInset = NSSize(width: containerInset, height: 24)
+        return didChangeParagraphGutter
     }
 
     private func restoreSelectionAndScroll(selectedRanges: [NSValue], visibleOrigin: NSPoint) {

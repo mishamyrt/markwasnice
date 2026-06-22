@@ -44,7 +44,7 @@ struct EditorThemeColors: Equatable {
             listMarker: NSColor(calibratedRed: 0.62, green: 0.60, blue: 0.55, alpha: 1)
         ),
         dark: Variant(
-            background: NSColor(calibratedRed: 0.101, green: 0.101, blue: 0.101, alpha: 1),
+            background: NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.08, alpha: 1),
             foreground: NSColor(calibratedRed: 0.8, green: 0.8, blue: 0.79, alpha: 1),
             caret: NSColor(calibratedRed: 0.88, green: 0.86, blue: 0.81, alpha: 1),
             selection: NSColor(calibratedRed: 0.25, green: 0.40, blue: 0.65, alpha: 0.55),
