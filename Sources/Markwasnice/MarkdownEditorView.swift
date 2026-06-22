@@ -656,6 +656,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         case .linkDestination:
             attributes[.foregroundColor] = colors.punctuation
             attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            attributes[.underlineColor] = colors.underline
         case .linkSyntaxPunctuation:
             attributes[.foregroundColor] = colors.punctuation
         case .link, .image:
@@ -716,6 +717,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
                 [
                     .foregroundColor: colors.punctuation,
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .underlineColor: colors.underline,
                 ], range: range)
         case .linkSyntaxPunctuation:
             textStorage.addAttribute(.foregroundColor, value: colors.punctuation, range: range)
@@ -920,7 +922,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             textStorage.addAttributes(
                 [
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
-                    .underlineColor: colors.codeBackground,
+                    .underlineColor: colors.underline,
                 ], range: range)
 
             let nextLocation = range.location + range.length

@@ -11,6 +11,7 @@ struct EditorThemeColors: Equatable {
         var codeBackground: NSColor
         var quote: NSColor
         var punctuation: NSColor
+        var underline: NSColor
         var thematicBreak: NSColor
         var listMarker: NSColor
     }
@@ -34,6 +35,7 @@ struct EditorThemeColors: Equatable {
             codeBackground: NSColor(calibratedRed: 0.91, green: 0.89, blue: 0.84, alpha: 1),
             quote: NSColor(calibratedRed: 0.42, green: 0.40, blue: 0.35, alpha: 1),
             punctuation: NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.49, alpha: 1),
+            underline: NSColor(calibratedRed: 0.64, green: 0.62, blue: 0.57, alpha: 1),
             thematicBreak: NSColor(calibratedRed: 0.62, green: 0.60, blue: 0.55, alpha: 1),
             listMarker: NSColor(calibratedRed: 0.62, green: 0.60, blue: 0.55, alpha: 1)
         ),
@@ -46,7 +48,8 @@ struct EditorThemeColors: Equatable {
             codeForeground: NSColor(calibratedRed: 0.92, green: 0.88, blue: 0.78, alpha: 1),
             codeBackground: NSColor(calibratedRed: 0.153, green: 0.153, blue: 0.153, alpha: 1),
             quote: NSColor(calibratedRed: 0.68, green: 0.65, blue: 0.57, alpha: 1),
-            punctuation: NSColor(calibratedRed: 0.478, green: 0.482, blue: 0.467, alpha: 1.00),
+            punctuation: NSColor(calibratedRed: 0.8, green: 0.8, blue: 0.79, alpha: 0.54),
+            underline: NSColor(calibratedRed: 0.8, green: 0.8, blue: 0.79, alpha: 0.33),
             thematicBreak: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1),
             listMarker: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1)
         )
