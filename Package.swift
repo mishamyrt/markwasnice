@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "Markwasnice",
     platforms: [
-        .macOS(.v15)
+        .macOS(.v26)
     ],
     products: [
         .executable(name: "Markwasnice", targets: ["Markwasnice"])
@@ -28,8 +28,8 @@ let package = Package(
             name: "MarkwasniceTests",
             dependencies: [
                 "Markwasnice",
-                .product(name: "Markdown", package: "swift-markdown")
+                .product(name: "Markdown", package: "swift-markdown"),
             ]
-        )
+        ),
     ]
 )

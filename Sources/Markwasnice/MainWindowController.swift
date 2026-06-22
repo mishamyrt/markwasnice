@@ -1,4 +1,8 @@
 import AppKit
+import CoreImage
+import CoreImage.CIFilterBuiltins
+import ObjectiveC.runtime
+import QuartzCore
 import UniformTypeIdentifiers
 
 @MainActor
@@ -10,6 +14,8 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
     private var autosaveWorkItem: DispatchWorkItem?
     private var wordCountTask: Task<Void, Never>?
     private var chromeHideWorkItem: DispatchWorkItem?
+    private var isChromeSuppressed = false
+    private var isPointerInChromeRevealZone = false
     private var latestParseResult: MarkdownParseResult?
     private var resolvedStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var currentFileURL: URL?
@@ -31,19 +37,26 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
             backing: .buffered,
             defer: false
         )
+        // HACK: add custom toolbar to make move window controls
+        let customToolbar = NSToolbar()
+        window.toolbar = customToolbar
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.toolbarStyle = .unified
         window.acceptsMouseMovedEvents = true
+        window.isMovableByWindowBackground = true
+        window.isOpaque = false
+        window.backgroundColor = .clear
         window.title = draft?.fileURL?.lastPathComponent ?? "Untitled"
         window.center()
         window.contentView = contentView
 
         super.init(window: window)
 
-        contentView.onTopHover = { [weak self] in self?.showChrome() }
-        contentView.onLeaveTopHover = { [weak self] in self?.scheduleChromeHide() }
+        contentView.onTopHoverChanged = { [weak self] isHovering in
+            self?.handleTopHoverChanged(isHovering)
+        }
         contentView.onUndo = { [weak self] in
             self?.window?.firstResponder?.tryToPerform(Selector(("undo:")), with: nil)
         }
@@ -250,19 +263,28 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
     }
 
     private func hideChrome() {
+        isChromeSuppressed = true
+        guard !isPointerInChromeRevealZone else {
+            return
+        }
+
+        hideChromeNow()
+    }
+
+    private func hideChromeNow() {
         chromeHideWorkItem?.cancel()
         chromeHideWorkItem = nil
         contentView.setChromeVisible(false)
         setWindowButtonsVisible(false)
     }
 
-    private func scheduleChromeHide() {
-        chromeHideWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.hideChrome()
+    private func handleTopHoverChanged(_ isHovering: Bool) {
+        isPointerInChromeRevealZone = isHovering
+        if isHovering {
+            showChrome()
+        } else if isChromeSuppressed {
+            hideChromeNow()
         }
-        chromeHideWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
     }
 
     private func setWindowButtonsVisible(_ visible: Bool) {
@@ -279,15 +301,14 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
 
 @MainActor
 private final class EditorChromeView: NSView {
-    static let topChromeHeight: CGFloat = 72
+    static let topChromeHeight: CGFloat = 60
 
-    var onTopHover: (() -> Void)?
-    var onLeaveTopHover: (() -> Void)?
+    var onTopHoverChanged: ((Bool) -> Void)?
     var onUndo: (() -> Void)?
     var onRedo: (() -> Void)?
 
     private let editorView: MarkdownEditorView
-    private let topChrome = NSVisualEffectView()
+    private let topChrome = HeaderChromeView()
     private let statusBar = NSVisualEffectView()
     private let titleLabel = NSTextField(labelWithString: "Untitled")
     private let dirtyDotLabel = NSTextField(labelWithString: "•")
@@ -296,8 +317,8 @@ private final class EditorChromeView: NSView {
     private let redoButton = ChromeIconButton(symbolName: "arrow.uturn.forward")
     private let previewButton = ChromeIconButton(symbolName: "eye")
     private var trackingArea: NSTrackingArea?
-    private var isHoveringTop = false
     private var isChromeVisible = true
+    private var isPointerInTopZone = false
 
     init(editorView: MarkdownEditorView) {
         self.editorView = editorView
@@ -328,18 +349,11 @@ private final class EditorChromeView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         let isInTopZone = bounds.maxY - location.y <= 96
-        if isInTopZone {
-            isHoveringTop = true
-            onTopHover?()
-        } else if isHoveringTop {
-            isHoveringTop = false
-            onLeaveTopHover?()
-        }
+        updateTopHover(isInTopZone)
     }
 
     override func mouseExited(with event: NSEvent) {
-        isHoveringTop = false
-        onLeaveTopHover?()
+        updateTopHover(false)
     }
 
     func setChromeVisible(_ visible: Bool) {
@@ -364,10 +378,23 @@ private final class EditorChromeView: NSView {
             }
 
             Task { @MainActor in
+                guard self.isChromeVisible == visible else {
+                    return
+                }
+
                 self.topChrome.isHidden = !visible
                 self.statusBar.isHidden = !visible
             }
         }
+    }
+
+    private func updateTopHover(_ isHovering: Bool) {
+        guard isHovering != isPointerInTopZone else {
+            return
+        }
+
+        isPointerInTopZone = isHovering
+        onTopHoverChanged?(isHovering)
     }
 
     func updateTitle(_ title: String, isEdited: Bool) {
@@ -396,12 +423,7 @@ private final class EditorChromeView: NSView {
     }
 
     private func configureTopChrome() {
-        topChrome.material = .headerView
-        topChrome.blendingMode = .withinWindow
-        topChrome.state = .active
         topChrome.translatesAutoresizingMaskIntoConstraints = false
-        topChrome.wantsLayer = true
-        topChrome.layer?.mask = topGradientMask()
 
         let leftStack = NSStackView(views: [undoButton, redoButton])
         leftStack.orientation = .horizontal
@@ -425,10 +447,10 @@ private final class EditorChromeView: NSView {
         dirtyDotLabel.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(topChrome)
-        topChrome.addSubview(leftStack)
-        topChrome.addSubview(titleLabel)
-        topChrome.addSubview(dirtyDotLabel)
-        topChrome.addSubview(previewButton)
+        topChrome.contentView.addSubview(leftStack)
+        topChrome.contentView.addSubview(titleLabel)
+        topChrome.contentView.addSubview(dirtyDotLabel)
+        topChrome.contentView.addSubview(previewButton)
 
         NSLayoutConstraint.activate([
             topChrome.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -436,19 +458,22 @@ private final class EditorChromeView: NSView {
             topChrome.topAnchor.constraint(equalTo: topAnchor),
             topChrome.heightAnchor.constraint(equalToConstant: Self.topChromeHeight),
 
-            leftStack.leadingAnchor.constraint(equalTo: topChrome.leadingAnchor, constant: 84),
-            leftStack.centerYAnchor.constraint(equalTo: topChrome.topAnchor, constant: 32),
+            leftStack.leadingAnchor.constraint(
+                equalTo: topChrome.contentView.leadingAnchor, constant: 84),
+            leftStack.centerYAnchor.constraint(
+                equalTo: topChrome.contentView.topAnchor, constant: 28),
 
-            titleLabel.centerXAnchor.constraint(equalTo: topChrome.centerXAnchor, constant: -5),
+            titleLabel.centerXAnchor.constraint(
+                equalTo: topChrome.contentView.centerXAnchor, constant: -5),
             titleLabel.centerYAnchor.constraint(equalTo: leftStack.centerYAnchor),
             titleLabel.widthAnchor.constraint(
-                lessThanOrEqualTo: topChrome.widthAnchor, multiplier: 0.42),
+                lessThanOrEqualTo: topChrome.contentView.widthAnchor, multiplier: 0.42),
 
             dirtyDotLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4),
             dirtyDotLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
             previewButton.trailingAnchor.constraint(
-                equalTo: topChrome.trailingAnchor, constant: -18),
+                equalTo: topChrome.contentView.trailingAnchor, constant: -18),
             previewButton.centerYAnchor.constraint(equalTo: leftStack.centerYAnchor),
         ])
     }
@@ -483,8 +508,8 @@ private final class EditorChromeView: NSView {
         button.action = action
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 28),
-            button.heightAnchor.constraint(equalToConstant: 28),
+            button.widthAnchor.constraint(equalToConstant: 30),
+            button.heightAnchor.constraint(equalToConstant: 30),
         ])
     }
 
@@ -492,20 +517,6 @@ private final class EditorChromeView: NSView {
         undoButton.isEnabled = enabled
         redoButton.isEnabled = enabled
         previewButton.isEnabled = false
-    }
-
-    private func topGradientMask() -> CALayer {
-        let gradient = CAGradientLayer()
-        gradient.frame = NSRect(x: 0, y: 0, width: 2000, height: Self.topChromeHeight)
-        gradient.colors = [
-            NSColor.black.cgColor,
-            NSColor.black.withAlphaComponent(0.9).cgColor,
-            NSColor.black.withAlphaComponent(0).cgColor,
-        ]
-        gradient.locations = [0, 0.68, 1]
-        gradient.startPoint = CGPoint(x: 0.5, y: 1)
-        gradient.endPoint = CGPoint(x: 0.5, y: 0)
-        return gradient
     }
 
     @objc private func undoPressed(_ sender: Any?) {
@@ -521,20 +532,198 @@ private final class EditorChromeView: NSView {
 }
 
 @MainActor
+private final class HeaderChromeView: NSView {
+    private let blurView = PureBackdropBlurView()
+    let contentView = NSView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureView()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    private func configureView() {
+        blurView.blurRadius = 3
+        blurView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(blurView)
+        addSubview(contentView)
+
+        NSLayoutConstraint.activate([
+            blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            blurView.topAnchor.constraint(equalTo: topAnchor),
+            blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentView.topAnchor.constraint(equalTo: topAnchor),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+}
+
+private final class PureBackdropBlurView: NSView {
+    private let containerLayer = CALayer()
+    private let backgroundGradientLayer = CAGradientLayer()
+    private let backdropLayer: CALayer
+
+    var blurRadius: CGFloat = 3 {
+        didSet {
+            updateBlurRadius()
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        backdropLayer = Self.makeBackdropLayer()
+        super.init(frame: frameRect)
+        configureView()
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        containerLayer.frame = bounds
+        backgroundGradientLayer.frame = bounds
+        backdropLayer.frame = bounds
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateBackgroundGradient()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    private func configureView() {
+        wantsLayer = true
+        guard let rootLayer = layer else {
+            return
+        }
+
+        containerLayer.masksToBounds = true
+        backgroundGradientLayer.startPoint = CGPoint(x: 0.5, y: 1)
+        backgroundGradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+        updateBackgroundGradient()
+
+        backdropLayer.name = "pure-titlebar-backdrop"
+        backdropLayer.backgroundColor = NSColor.clear.cgColor
+        backdropLayer.masksToBounds = false
+        backdropLayer.setValue(true, forKey: "allowsGroupBlending")
+        backdropLayer.setValue(true, forKey: "allowsGroupOpacity")
+        backdropLayer.setValue(true, forKey: "disablesOccludedBackdropBlurs")
+        backdropLayer.setValue(true, forKey: "ignoresOffscreenGroups")
+        backdropLayer.setValue(false, forKey: "allowsInPlaceFiltering")
+        backdropLayer.setValue(0.5, forKey: "scale")
+        backdropLayer.setValue(8.0, forKey: "bleedAmount")
+
+        if let blur = Self.makeCAFilter(named: "variableBlur") {
+            let gradientImage = makeGradientImage(startOffset: 0)
+            blur.setValue(blurRadius, forKey: "inputRadius")
+            blur.setValue(gradientImage, forKey: "inputMaskImage")
+            blur.setValue(true, forKey: "inputNormalizeEdges")
+            backdropLayer.filters = [blur]
+        }
+
+        containerLayer.addSublayer(backgroundGradientLayer)
+        containerLayer.addSublayer(backdropLayer)
+        rootLayer.addSublayer(containerLayer)
+    }
+
+    private func makeGradientImage(
+        width: CGFloat = 100, height: CGFloat = 100, startOffset: CGFloat,
+    ) -> CGImage {  // much lower resolution might be acceptable
+        let ciGradientFilter = CIFilter.smoothLinearGradient()
+        ciGradientFilter.color0 = CIColor.black
+        ciGradientFilter.color1 = CIColor.clear
+        ciGradientFilter.point0 = CGPoint(x: 0, y: height)
+        ciGradientFilter.point1 = CGPoint(x: 0, y: startOffset * height)  // small negative value looks better with vertical lines
+
+        return CIContext().createCGImage(
+            ciGradientFilter.outputImage!, from: CGRect(x: 0, y: 0, width: width, height: height))!
+    }
+
+    private func updateBlurRadius() {
+        backdropLayer.setValue(blurRadius, forKeyPath: "filters.variableBlur.inputRadius")
+    }
+
+    private func updateBackgroundGradient() {
+        let background = EditorThemeColors.default
+            .variant(for: effectiveAppearance)
+            .background
+
+        backgroundGradientLayer.colors = [
+            background.withAlphaComponent(0.8).cgColor,
+            background.withAlphaComponent(0).cgColor,
+        ]
+    }
+
+    private static func makeBackdropLayer() -> CALayer {
+        guard let layerClass = NSClassFromString("CABackdropLayer") as? CALayer.Type else {
+            assertionFailure("CABackdropLayer is unavailable")
+            return CALayer()
+        }
+
+        return layerClass.init()
+    }
+
+    private static func makeCAFilter(named name: String) -> NSObject? {
+        guard let filterClass = NSClassFromString("CAFilter") else {
+            assertionFailure("CAFilter is unavailable")
+            return nil
+        }
+
+        let selectors = [
+            NSSelectorFromString("filterWithType:"),
+            NSSelectorFromString("filterWithName:"),
+        ]
+
+        typealias Factory = @convention(c) (AnyClass, Selector, NSString) -> Unmanaged<AnyObject>?
+
+        for selector in selectors {
+            guard let method = class_getClassMethod(filterClass, selector) else {
+                continue
+            }
+
+            let implementation = method_getImplementation(method)
+            let factory = unsafeBitCast(implementation, to: Factory.self)
+            return factory(filterClass, selector, name as NSString)?.takeUnretainedValue()
+                as? NSObject
+        }
+
+        assertionFailure("No usable CAFilter factory selector found")
+        return nil
+    }
+}
+
 private final class ChromeIconButton: NSControl {
-    private let effectView = NSVisualEffectView()
+    private let glassView = NSGlassEffectView()
+    private let glassContentView = NSView()
     private let imageView = NSImageView()
 
     init(symbolName: String) {
         super.init(frame: .zero)
-
         imageView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
         configureView()
     }
 
     override var isEnabled: Bool {
         didSet {
-            alphaValue = isEnabled ? 1 : 0.4
+            alphaValue = isEnabled ? 1 : 0.45
         }
     }
 
@@ -566,33 +755,37 @@ private final class ChromeIconButton: NSControl {
     private func configureView() {
         wantsLayer = true
         layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.18
-        layer?.shadowRadius = 8
-        layer?.shadowOffset = NSSize(width: 0, height: -1)
+        layer?.shadowOpacity = 0.22
+        layer?.shadowRadius = 14
+        layer?.shadowOffset = CGSize(width: 0, height: -4)
 
-        effectView.material = .hudWindow
-        effectView.blendingMode = .withinWindow
-        effectView.state = .active
-        effectView.wantsLayer = true
-        effectView.layer?.cornerRadius = 14
-        effectView.layer?.masksToBounds = true
-        effectView.translatesAutoresizingMaskIntoConstraints = false
+        glassView.translatesAutoresizingMaskIntoConstraints = false
+        glassView.cornerRadius = 15
+        glassView.style = .regular
+        glassView.contentView = glassContentView
+
+        glassContentView.translatesAutoresizingMaskIntoConstraints = false
 
         imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
         imageView.contentTintColor = .labelColor
         imageView.imageScaling = .scaleProportionallyDown
         imageView.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(effectView)
-        effectView.addSubview(imageView)
+        addSubview(glassView)
+        glassContentView.addSubview(imageView)
         NSLayoutConstraint.activate([
-            effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            effectView.topAnchor.constraint(equalTo: topAnchor),
-            effectView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            glassView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glassView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glassView.topAnchor.constraint(equalTo: topAnchor),
+            glassView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            imageView.centerXAnchor.constraint(equalTo: effectView.centerXAnchor),
-            imageView.centerYAnchor.constraint(equalTo: effectView.centerYAnchor),
+            glassContentView.leadingAnchor.constraint(equalTo: glassView.leadingAnchor),
+            glassContentView.trailingAnchor.constraint(equalTo: glassView.trailingAnchor),
+            glassContentView.topAnchor.constraint(equalTo: glassView.topAnchor),
+            glassContentView.bottomAnchor.constraint(equalTo: glassView.bottomAnchor),
+
+            imageView.centerXAnchor.constraint(equalTo: glassContentView.centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
             imageView.widthAnchor.constraint(equalToConstant: 14),
             imageView.heightAnchor.constraint(equalToConstant: 14),
         ])
