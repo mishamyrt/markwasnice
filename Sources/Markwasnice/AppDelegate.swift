@@ -2,18 +2,24 @@ import AppKit
 import UniformTypeIdentifiers
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settingsStore = EditorSettingsStore()
+    private let autosaveStore = AutosaveStore()
     private var mainWindowController: MainWindowController?
     private var preferencesWindowController: PreferencesWindowController?
-    private var settings = EditorSettings(textSizeScale: EditorSettings.defaultTextSizeScale, maxTextColumns: EditorSettings.defaultMaxTextColumns)
+    private var settings = EditorSettings(
+        textSizeScale: EditorSettings.defaultTextSizeScale,
+        maxTextColumns: EditorSettings.defaultMaxTextColumns,
+        tabInsertionMode: EditorSettings.defaultTabInsertionMode,
+        tabWidth: EditorSettings.defaultTabWidth
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         LilexFontProvider.registerFonts()
         settings = settingsStore.load()
         MainMenu.install(delegate: self)
 
-        let controller = MainWindowController(settings: settings)
+        let controller = MainWindowController(settings: settings, autosaveStore: autosaveStore, draft: autosaveStore.load())
         mainWindowController = controller
         controller.showWindow(nil)
 
@@ -25,14 +31,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        mainWindowController?.confirmDiscardingUnsavedChanges() == false ? .terminateCancel : .terminateNow
+        mainWindowController?.flushAutosave()
+        return .terminateNow
     }
 
-    @objc func openDocument(_ sender: Any?) {
-        guard mainWindowController?.confirmDiscardingUnsavedChanges() != false else {
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu.title == "File",
+            let recentMenu = menu.item(withTitle: "Open Recent")?.submenu
+        else {
             return
         }
 
+        MainMenu.populateOpenRecentMenu(recentMenu, delegate: self)
+    }
+
+    @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -45,13 +58,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        do {
-            let text = try String(contentsOf: url, encoding: .utf8)
-            mainWindowController?.displayMarkdown(text, from: url)
-        } catch {
-            let alert = NSAlert(error: error)
-            alert.runModal()
+        open(url)
+    }
+
+    @objc func openRecentDocument(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else {
+            return
         }
+
+        open(url)
+    }
+
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        open(URL(fileURLWithPath: filename))
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        guard let filename = filenames.first else {
+            sender.reply(toOpenOrPrint: .failure)
+            return
+        }
+
+        sender.reply(toOpenOrPrint: open(URL(fileURLWithPath: filename)) ? .success : .failure)
     }
 
     @objc func newDocument(_ sender: Any?) {
@@ -64,6 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func saveDocumentAs(_ sender: Any?) {
         mainWindowController?.saveDocumentAs(sender)
+    }
+
+    @objc func pasteAsLink(_ sender: Any?) {
+        mainWindowController?.pasteAsLink()
     }
 
     @objc func showPreferences(_ sender: Any?) {
@@ -84,6 +116,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindowController?.window?.center()
         preferencesWindowController?.window?.makeKeyAndOrderFront(sender)
     }
+
+    @discardableResult
+    private func open(_ url: URL) -> Bool {
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            mainWindowController?.displayMarkdown(text, from: url)
+            return true
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+            return false
+        }
+    }
 }
 
 @MainActor
@@ -101,7 +146,7 @@ private enum MainMenu {
 
         let editMenuItem = NSMenuItem()
         mainMenu.addItem(editMenuItem)
-        editMenuItem.submenu = editMenu()
+        editMenuItem.submenu = editMenu(delegate: delegate)
 
         NSApp.mainMenu = mainMenu
     }
@@ -121,10 +166,13 @@ private enum MainMenu {
 
     private static func fileMenu(delegate: AppDelegate) -> NSMenu {
         let menu = NSMenu(title: "File")
+        menu.delegate = delegate
         let newItem = menu.addItem(withTitle: "New", action: #selector(AppDelegate.newDocument(_:)), keyEquivalent: "n")
         newItem.target = delegate
         let openItem = menu.addItem(withTitle: "Open...", action: #selector(AppDelegate.openDocument(_:)), keyEquivalent: "o")
         openItem.target = delegate
+        let openRecentItem = menu.addItem(withTitle: "Open Recent", action: nil, keyEquivalent: "")
+        openRecentItem.submenu = openRecentMenu(delegate: delegate)
         menu.addItem(NSMenuItem.separator())
         let saveItem = menu.addItem(withTitle: "Save", action: #selector(AppDelegate.saveDocument(_:)), keyEquivalent: "s")
         saveItem.target = delegate
@@ -135,7 +183,29 @@ private enum MainMenu {
         return menu
     }
 
-    private static func editMenu() -> NSMenu {
+    private static func openRecentMenu(delegate: AppDelegate) -> NSMenu {
+        let menu = NSMenu(title: "Open Recent")
+        populateOpenRecentMenu(menu, delegate: delegate)
+        return menu
+    }
+
+    static func populateOpenRecentMenu(_ menu: NSMenu, delegate: AppDelegate) {
+        menu.removeAllItems()
+        let urls = NSDocumentController.shared.recentDocumentURLs
+        if urls.isEmpty {
+            let item = menu.addItem(withTitle: "No Recent Documents", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            return
+        }
+
+        for url in urls {
+            let item = menu.addItem(withTitle: url.lastPathComponent, action: #selector(AppDelegate.openRecentDocument(_:)), keyEquivalent: "")
+            item.representedObject = url
+            item.target = delegate
+        }
+    }
+
+    private static func editMenu(delegate: AppDelegate) -> NSMenu {
         let menu = NSMenu(title: "Edit")
         menu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         menu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
@@ -143,6 +213,7 @@ private enum MainMenu {
         menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        menu.addItem(withTitle: "Paste as Link", action: #selector(AppDelegate.pasteAsLink(_:)), keyEquivalent: "V").target = delegate
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         return menu
     }

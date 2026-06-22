@@ -9,12 +9,14 @@ final class PreferencesWindowController: NSWindowController {
     private let smallTextSizeLabel = NSTextField(labelWithString: "A")
     private let largeTextSizeLabel = NSTextField(labelWithString: "A")
     private let widthPopup = NSPopUpButton()
+    private let tabModePopup = NSPopUpButton()
+    private let tabWidthPopup = NSPopUpButton()
 
     init(settings: EditorSettings, onChange: @escaping (EditorSettings) -> Void) {
         self.settings = settings
         self.onChange = onChange
 
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 150))
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 220))
         let window = NSWindow(
             contentRect: contentView.frame,
             styleMask: [.titled, .closable],
@@ -34,6 +36,8 @@ final class PreferencesWindowController: NSWindowController {
         self.settings = settings
         textSizeSlider.doubleValue = Double(settings.textSizeScale)
         widthPopup.selectItem(withTitle: String(settings.maxTextColumns))
+        tabModePopup.selectItem(withTitle: title(for: settings.tabInsertionMode))
+        tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
     }
 
     @available(*, unavailable)
@@ -55,10 +59,27 @@ final class PreferencesWindowController: NSWindowController {
         onChange(settings)
     }
 
+    @objc private func tabModeChanged(_ sender: NSPopUpButton) {
+        settings.tabInsertionMode = sender.indexOfSelectedItem == 1 ? .tab : .spaces
+        onChange(settings)
+    }
+
+    @objc private func tabWidthChanged(_ sender: NSPopUpButton) {
+        guard let value = Int(sender.titleOfSelectedItem ?? "") else {
+            return
+        }
+
+        settings.tabWidth = value
+        onChange(settings)
+    }
+
     private func configureControls(in contentView: NSView) {
         let textSizeLabel = NSTextField(labelWithString: "Text Size")
         let widthLabel = NSTextField(labelWithString: "Text Width")
         let widthCaption = NSTextField(labelWithString: "characters")
+        let tabModeLabel = NSTextField(labelWithString: "Tab Inserts")
+        let tabWidthLabel = NSTextField(labelWithString: "Tab Size")
+        let tabWidthCaption = NSTextField(labelWithString: "characters")
 
         textSizeSlider.target = self
         textSizeSlider.action = #selector(textSizeChanged(_:))
@@ -76,9 +97,24 @@ final class PreferencesWindowController: NSWindowController {
         widthPopup.action = #selector(widthChanged(_:))
         widthPopup.selectItem(withTitle: String(settings.maxTextColumns))
 
+        for mode in EditorSettings.TabInsertionMode.allCases {
+            tabModePopup.addItem(withTitle: title(for: mode))
+        }
+        tabModePopup.target = self
+        tabModePopup.action = #selector(tabModeChanged(_:))
+        tabModePopup.selectItem(withTitle: title(for: settings.tabInsertionMode))
+
+        for option in EditorSettings.tabWidthOptions {
+            tabWidthPopup.addItem(withTitle: String(option))
+        }
+        tabWidthPopup.target = self
+        tabWidthPopup.action = #selector(tabWidthChanged(_:))
+        tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
+
         for view in [
             textSizeLabel, smallTextSizeLabel, textSizeSlider, largeTextSizeLabel, widthLabel,
-            widthPopup, widthCaption,
+            widthPopup, widthCaption, tabModeLabel, tabModePopup, tabWidthLabel, tabWidthPopup,
+            tabWidthCaption,
         ] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
@@ -114,7 +150,35 @@ final class PreferencesWindowController: NSWindowController {
 
             widthCaption.leadingAnchor.constraint(equalTo: widthPopup.trailingAnchor, constant: 8),
             widthCaption.centerYAnchor.constraint(equalTo: widthPopup.centerYAnchor),
+
+            tabModeLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
+            tabModeLabel.topAnchor.constraint(equalTo: widthLabel.bottomAnchor, constant: 28),
+            tabModeLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
+
+            tabModePopup.leadingAnchor.constraint(equalTo: tabModeLabel.trailingAnchor, constant: 12),
+            tabModePopup.centerYAnchor.constraint(equalTo: tabModeLabel.centerYAnchor),
+            tabModePopup.widthAnchor.constraint(equalToConstant: 120),
+
+            tabWidthLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
+            tabWidthLabel.topAnchor.constraint(equalTo: tabModeLabel.bottomAnchor, constant: 28),
+            tabWidthLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
+
+            tabWidthPopup.leadingAnchor.constraint(equalTo: tabWidthLabel.trailingAnchor, constant: 12),
+            tabWidthPopup.centerYAnchor.constraint(equalTo: tabWidthLabel.centerYAnchor),
+            tabWidthPopup.widthAnchor.constraint(equalToConstant: 90),
+
+            tabWidthCaption.leadingAnchor.constraint(equalTo: tabWidthPopup.trailingAnchor, constant: 8),
+            tabWidthCaption.centerYAnchor.constraint(equalTo: tabWidthPopup.centerYAnchor),
         ])
+    }
+
+    private func title(for mode: EditorSettings.TabInsertionMode) -> String {
+        switch mode {
+        case .spaces:
+            "Spaces"
+        case .tab:
+            "Tab"
+        }
     }
 
 }

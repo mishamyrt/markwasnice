@@ -1,12 +1,26 @@
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
 protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
+    func markdownEditorViewDidScroll(_ editorView: MarkdownEditorView)
 }
 
 @MainActor
-final class MarkdownEditorView: NSView, NSTextViewDelegate {
+private protocol MarkdownTextViewCommandDelegate: AnyObject {
+    func markdownTextViewInsertTab(_ textView: NSTextView)
+    func markdownTextViewContinueList(_ textView: NSTextView) -> Bool
+    func markdownTextView(
+        _ textView: NSTextView, wrapSelectionWith opening: String, closing: String
+    ) -> Bool
+    func markdownTextViewDraggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation
+    func markdownTextViewPerformDragOperation(_ sender: NSDraggingInfo, in textView: NSTextView)
+        -> Bool
+}
+
+@MainActor
+final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewCommandDelegate {
     weak var delegate: MarkdownEditorViewDelegate?
 
     private let scrollView = NSScrollView()
@@ -14,12 +28,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
     private let layoutManager = NSLayoutManager()
     private let textContainer = NSTextContainer(
         containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
-    private let textView: NSTextView
+    private let textView: MarkdownTextView
     private var isApplyingStyles = false
     private var settings: EditorSettings
     private var themeColors = EditorThemeColors.default
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var paragraphGutter: CGFloat = 0
+    private var topScrollInset: CGFloat = 0
+    private var bottomScrollInset: CGFloat = 160
+
+    var documentURL: URL?
 
     var string: String {
         get { textView.string }
@@ -36,12 +54,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         textContainer.heightTracksTextView = false
         textContainer.lineFragmentPadding = 0
 
-        textView = NSTextView(frame: .zero, textContainer: textContainer)
+        textView = MarkdownTextView(frame: .zero, textContainer: textContainer)
 
         super.init(frame: frameRect)
 
         configureTextView()
         configureScrollView()
+        registerForDraggedTypes([.fileURL])
 
         addSubview(scrollView)
         NSLayoutConstraint.activate([
@@ -116,6 +135,90 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         applyStyles(spans)
     }
 
+    func setChromeInsets(top: CGFloat, bottom: CGFloat) {
+        topScrollInset = top
+        bottomScrollInset = bottom
+        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: bottom, right: 0)
+        updateTextContainerInset()
+    }
+
+    func pasteAsLink() {
+        let selectedRange = textView.selectedRange()
+        guard selectedRange.length > 0,
+            let selectedText = (textView.string as NSString).substring(with: selectedRange)
+                .nilIfEmpty,
+            let urlString = pasteboardURLString()
+        else {
+            return
+        }
+
+        replaceSelectedText(with: "[\(escapeLinkText(selectedText))](\(urlString))")
+    }
+
+    func wrapSelectionWithQuotes(opening: String, closing: String) {
+        _ = wrapSelection(opening: opening, closing: closing)
+    }
+
+    func markdownTextViewInsertTab(_ textView: NSTextView) {
+        let insertedText: String
+        switch settings.tabInsertionMode {
+        case .spaces:
+            insertedText = String(repeating: " ", count: settings.tabWidth)
+        case .tab:
+            insertedText = "\t"
+        }
+
+        replaceSelectedText(with: insertedText)
+    }
+
+    func markdownTextViewContinueList(_ textView: NSTextView) -> Bool {
+        guard textView.selectedRange().length == 0,
+            let continuation = listContinuationAtSelection()
+        else {
+            return false
+        }
+
+        replaceSelectedText(with: continuation)
+        return true
+    }
+
+    func markdownTextView(
+        _ textView: NSTextView, wrapSelectionWith opening: String, closing: String
+    ) -> Bool {
+        wrapSelection(opening: opening, closing: closing)
+    }
+
+    func markdownTextViewDraggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        imageFileURL(from: sender.draggingPasteboard) == nil ? [] : .copy
+    }
+
+    func markdownTextViewPerformDragOperation(_ sender: NSDraggingInfo, in textView: NSTextView)
+        -> Bool
+    {
+        guard let url = imageFileURL(from: sender.draggingPasteboard) else {
+            return false
+        }
+
+        let point = textView.convert(sender.draggingLocation, from: nil)
+        insertMarkdownImage(for: url, at: point)
+        return true
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        markdownTextViewDraggingEntered(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let url = imageFileURL(from: sender.draggingPasteboard) else {
+            return false
+        }
+
+        let point = convert(sender.draggingLocation, from: nil)
+        let textPoint = textView.convert(point, from: self)
+        insertMarkdownImage(for: url, at: textPoint)
+        return true
+    }
+
     func textDidChange(_ notification: Notification) {
         guard !isApplyingStyles else {
             return
@@ -136,13 +239,26 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
         scrollView.backgroundColor = colors.background
-        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 160, right: 0)
+        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: bottomScrollInset, right: 0)
         scrollView.documentView = textView
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewBoundsDidChange(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+    }
+
+    @objc private func scrollViewBoundsDidChange(_ notification: Notification) {
+        delegate?.markdownEditorViewDidScroll(self)
     }
 
     private func configureTextView() {
         textView.delegate = self
+        textView.commandDelegate = self
+        textView.registerForDraggedTypes([.fileURL])
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -166,6 +282,157 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
 
         applyEditorColors()
         applyBaseStyleToText()
+    }
+
+    private func replaceSelectedText(with string: String) {
+        let selectedRange = textView.selectedRange()
+        guard textView.shouldChangeText(in: selectedRange, replacementString: string) else {
+            return
+        }
+
+        textView.textStorage?.replaceCharacters(in: selectedRange, with: string)
+        textView.didChangeText()
+        textView.setSelectedRange(
+            NSRange(location: selectedRange.location + (string as NSString).length, length: 0))
+    }
+
+    @discardableResult
+    private func wrapSelection(opening: String, closing: String) -> Bool {
+        let selectedRange = textView.selectedRange()
+        guard selectedRange.length > 0 else {
+            return false
+        }
+
+        let selectedText = (textView.string as NSString).substring(with: selectedRange)
+        let replacement = opening + selectedText + closing
+        guard textView.shouldChangeText(in: selectedRange, replacementString: replacement) else {
+            return false
+        }
+
+        textView.textStorage?.replaceCharacters(in: selectedRange, with: replacement)
+        textView.didChangeText()
+        textView.setSelectedRange(
+            NSRange(
+                location: selectedRange.location + (opening as NSString).length,
+                length: (selectedText as NSString).length))
+        return true
+    }
+
+    private func listContinuationAtSelection() -> String? {
+        let nsString = textView.string as NSString
+        let location = textView.selectedRange().location
+        let lineLocation = location > 0 ? location - 1 : 0
+        let lineRange = nsString.lineRange(for: NSRange(location: lineLocation, length: 0))
+        let cursorRange = NSRange(
+            location: lineRange.location, length: max(0, location - lineRange.location))
+        let linePrefix = nsString.substring(with: cursorRange)
+        guard
+            let expression = try? NSRegularExpression(
+                pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(.+)$"),
+            let match = expression.firstMatch(
+                in: linePrefix, range: NSRange(location: 0, length: (linePrefix as NSString).length)
+            ),
+            match.numberOfRanges == 4
+        else {
+            return nil
+        }
+
+        let prefix = linePrefix as NSString
+        let indentation = prefix.substring(with: match.range(at: 1))
+        let marker = prefix.substring(with: match.range(at: 2))
+        return "\n\(indentation)\(nextListMarker(after: marker)) "
+    }
+
+    private func nextListMarker(after marker: String) -> String {
+        guard let expression = try? NSRegularExpression(pattern: "^(\\d+)([.)])$"),
+            let match = expression.firstMatch(
+                in: marker, range: NSRange(location: 0, length: (marker as NSString).length)),
+            match.numberOfRanges == 3,
+            let number = Int((marker as NSString).substring(with: match.range(at: 1)))
+        else {
+            return marker
+        }
+
+        let suffix = (marker as NSString).substring(with: match.range(at: 2))
+        return "\(number + 1)\(suffix)"
+    }
+
+    private func pasteboardURLString() -> String? {
+        let pasteboard = NSPasteboard.general
+        if let url = NSURL(from: pasteboard) as URL? {
+            return url.absoluteString
+        }
+
+        guard
+            let string = pasteboard.string(forType: .string)?.trimmingCharacters(
+                in: .whitespacesAndNewlines),
+            let url = URL(string: string),
+            url.scheme != nil
+        else {
+            return nil
+        }
+
+        return url.absoluteString
+    }
+
+    private func escapeLinkText(_ text: String) -> String {
+        text.replacingOccurrences(of: "]", with: "\\]")
+    }
+
+    private func imageFileURL(from pasteboard: NSPasteboard) -> URL? {
+        guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL]
+        else {
+            return nil
+        }
+
+        return urls.first { url in
+            guard url.isFileURL,
+                let type = UTType(filenameExtension: url.pathExtension)
+            else {
+                return false
+            }
+
+            return type.conforms(to: .image)
+        }
+    }
+
+    private func markdownRelativePath(for url: URL) -> String {
+        guard let documentURL else {
+            return url.lastPathComponent
+        }
+
+        let baseDirectory = documentURL.deletingLastPathComponent()
+        return relativePath(from: baseDirectory, to: url)
+    }
+
+    private func insertMarkdownImage(for url: URL, at point: NSPoint) {
+        let characterIndex = textView.characterIndexForInsertion(at: point)
+        textView.setSelectedRange(NSRange(location: characterIndex, length: 0))
+
+        let path = markdownRelativePath(for: url)
+        let name = url.deletingPathExtension().lastPathComponent.nilIfEmpty ?? "image"
+        replaceSelectedText(with: "![\(escapeLinkText(name))](\(path))")
+    }
+
+    private func relativePath(from baseDirectory: URL, to targetURL: URL) -> String {
+        let baseComponents = baseDirectory.standardizedFileURL.pathComponents
+        let targetComponents = targetURL.standardizedFileURL.pathComponents
+        var sharedPrefixCount = 0
+
+        while sharedPrefixCount < baseComponents.count,
+            sharedPrefixCount < targetComponents.count,
+            baseComponents[sharedPrefixCount] == targetComponents[sharedPrefixCount]
+        {
+            sharedPrefixCount += 1
+        }
+
+        guard sharedPrefixCount > 0 else {
+            return targetURL.lastPathComponent
+        }
+
+        let upComponents = Array(repeating: "..", count: baseComponents.count - sharedPrefixCount)
+        let downComponents = targetComponents.dropFirst(sharedPrefixCount)
+        return (upComponents + downComponents).joined(separator: "/")
     }
 
     private func applyEditorColors() {
@@ -404,7 +671,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
             }
 
             let paragraphStyle = baseParagraphStyle()
-            paragraphStyle.firstLineHeadIndent = paragraphGutter - markerCharacterWidth * CGFloat(markerRange.length)
+            paragraphStyle.firstLineHeadIndent =
+                paragraphGutter - markerCharacterWidth * CGFloat(markerRange.length)
             textStorage.addAttribute(.paragraphStyle, value: paragraphStyle, range: lineRange)
             stop.pointee = true
         }
@@ -424,7 +692,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
         let didChangeParagraphGutter = newParagraphGutter != paragraphGutter
 
         paragraphGutter = newParagraphGutter
-        textView.textContainerInset = NSSize(width: containerInset, height: 24)
+        textView.textContainerInset = NSSize(width: containerInset, height: 24 + topScrollInset)
         return didChangeParagraphGutter
     }
 
@@ -470,5 +738,81 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate {
             textStorage.addAttribute(
                 .foregroundColor, value: colors.listMarker, range: markerRange)
         }
+    }
+}
+
+@MainActor
+private final class MarkdownTextView: NSTextView {
+    weak var commandDelegate: MarkdownTextViewCommandDelegate?
+
+    override func keyDown(with event: NSEvent) {
+        guard event.modifierFlags.intersection([.command, .control]).isEmpty else {
+            super.keyDown(with: event)
+            return
+        }
+
+        switch event.charactersIgnoringModifiers {
+        case "\t":
+            commandDelegate?.markdownTextViewInsertTab(self)
+        case "\r", "\n":
+            if commandDelegate?.markdownTextViewContinueList(self) != true {
+                super.keyDown(with: event)
+            }
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        if selectedRange().length > 0,
+            let string = plainString(from: insertString),
+            let pair = quotePair(for: string),
+            commandDelegate?.markdownTextView(self, wrapSelectionWith: pair.opening, closing: pair.closing) == true
+        {
+            return
+        }
+
+        super.insertText(insertString, replacementRange: replacementRange)
+    }
+
+    private func plainString(from insertString: Any) -> String? {
+        if let string = insertString as? String {
+            return string
+        }
+
+        return (insertString as? NSAttributedString)?.string
+    }
+
+    private func quotePair(for string: String) -> (opening: String, closing: String)? {
+        switch string {
+        case "\"":
+            return ("\"", "\"")
+        case "'":
+            return ("'", "'")
+        case "`":
+            return ("`", "`")
+        case "«":
+            return ("«", "»")
+        case "“":
+            return ("“", "”")
+        case "„":
+            return ("„", "“")
+        default:
+            return nil
+        }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        commandDelegate?.markdownTextViewDraggingEntered(sender) ?? []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        commandDelegate?.markdownTextViewPerformDragOperation(sender, in: self) ?? false
+    }
+}
+
+extension String {
+    fileprivate var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
