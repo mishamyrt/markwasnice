@@ -38,7 +38,7 @@ all: $(APP_DIST)
 
 .PHONY: run
 run: ## build and run the app
-	@swift run -Xswiftc -swift-version -Xswiftc 6 $(APP_NAME)
+	@swift run $(APP_NAME)
 
 .PHONY: clean
 clean: ## clean the build directory
