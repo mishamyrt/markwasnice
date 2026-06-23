@@ -46,7 +46,6 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     @objc private func textSizeChanged(_ sender: NSSlider) {
-        print(settings.textSizeScale)
         settings.textSizeScale = CGFloat(sender.doubleValue)
         onChange(settings)
     }
