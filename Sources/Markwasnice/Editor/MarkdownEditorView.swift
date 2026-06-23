@@ -633,15 +633,15 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             attributes[.font] = font(from: attributes, adding: .boldFontMask)
         case .emphasis:
             attributes[.font] = font(from: attributes, adding: .italicFontMask)
-            attributes[.foregroundColor] = colors.emphasis
+            attributes[.foregroundColor] = colors.foreground
         case .inlineCode:
             attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
             attributes[.markdownCodeBackgroundColor] = colors.codeBackground
-            attributes[.foregroundColor] = colors.codeForeground
+            attributes[.foregroundColor] = colors.foreground
         case .codeBlock:
             attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
             attributes[.markdownCodeBlockBackgroundColor] = colors.codeBackground
-            attributes[.foregroundColor] = colors.codeForeground
+            attributes[.foregroundColor] = colors.foreground
         case .linkDestination:
             attributes[.foregroundColor] = colors.punctuation
             attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
@@ -686,20 +686,20 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             addFontTraits(.boldFontMask, range: range)
         case .emphasis:
             addFontTraits(.italicFontMask, range: range)
-            textStorage.addAttribute(.foregroundColor, value: colors.emphasis, range: range)
+            textStorage.addAttribute(.foregroundColor, value: colors.foreground, range: range)
         case .inlineCode:
             setMonospaceFont(range: range)
             textStorage.addAttributes(
                 [
                     .markdownCodeBackgroundColor: colors.codeBackground,
-                    .foregroundColor: colors.codeForeground,
+                    .foregroundColor: colors.foreground,
                 ], range: range)
         case .codeBlock:
             setMonospaceFont(range: range)
             textStorage.addAttributes(
                 [
                     .markdownCodeBlockBackgroundColor: colors.codeBackground,
-                    .foregroundColor: colors.codeForeground,
+                    .foregroundColor: colors.foreground,
                 ], range: range)
         case .linkDestination:
             textStorage.addAttributes(
