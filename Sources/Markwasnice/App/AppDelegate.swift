@@ -5,7 +5,8 @@ import UniformTypeIdentifiers
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settingsStore = EditorSettingsStore()
     private let autosaveStore = AutosaveStore()
-    private var mainWindowController: MainWindowController?
+    private var autosaveWorkItem: DispatchWorkItem?
+    private(set) var isTerminating = false
     private var preferencesWindowController: PreferencesWindowController?
     private var settings = EditorSettings(
         textSizeScale: EditorSettings.defaultTextSizeScale,
@@ -19,9 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings = settingsStore.load()
         MainMenu.install(delegate: self)
 
-        let controller = MainWindowController(settings: settings, autosaveStore: autosaveStore, draft: autosaveStore.load())
-        mainWindowController = controller
-        controller.showWindow(nil)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, NSDocumentController.shared.documents.isEmpty else {
+                return
+            }
+
+            if !self.restoreAutosavedSession() {
+                self.newDocument(nil)
+            }
+        }
 
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -31,7 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        mainWindowController?.flushAutosave()
+        isTerminating = true
+        flushAutosave(force: true)
         return .terminateNow
     }
 
@@ -47,18 +55,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [
             UTType(filenameExtension: "md") ?? .plainText,
             UTType(filenameExtension: "markdown") ?? .plainText
         ]
 
-        guard panel.runModal() == .OK, let url = panel.url else {
+        guard panel.runModal() == .OK else {
             return
         }
 
-        open(url)
+        for url in panel.urls {
+            open(url)
+        }
     }
 
     @objc func openRecentDocument(_ sender: NSMenuItem) {
@@ -74,28 +84,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
-        guard let filename = filenames.first else {
+        guard !filenames.isEmpty else {
             sender.reply(toOpenOrPrint: .failure)
             return
         }
 
-        sender.reply(toOpenOrPrint: open(URL(fileURLWithPath: filename)) ? .success : .failure)
+        let didOpenAll = filenames.allSatisfy { filename in
+            open(URL(fileURLWithPath: filename))
+        }
+        sender.reply(toOpenOrPrint: didOpenAll ? .success : .failure)
     }
 
     @objc func newDocument(_ sender: Any?) {
-        _ = mainWindowController?.newDocument()
+        let document = MarkdownDocument(settings: settings)
+        show(document)
+        scheduleAutosave()
     }
 
     @objc func saveDocument(_ sender: Any?) {
-        mainWindowController?.saveDocument(sender)
+        guard let document = currentDocument() else {
+            return
+        }
+
+        guard let url = document.fileURL else {
+            saveDocumentAs(sender)
+            return
+        }
+
+        document.save(to: url, ofType: MarkdownDocument.fileType, for: .saveOperation) { error in
+            self.presentSaveErrorIfNeeded(error)
+            self.scheduleAutosave()
+        }
     }
 
     @objc func saveDocumentAs(_ sender: Any?) {
-        mainWindowController?.saveDocumentAs(sender)
+        guard let document = currentDocument() else {
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "md") ?? .plainText,
+            .plainText,
+        ]
+        panel.nameFieldStringValue = document.fileURL?.lastPathComponent ?? "Untitled.md"
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        document.save(to: url, ofType: MarkdownDocument.fileType, for: .saveAsOperation) { error in
+            self.presentSaveErrorIfNeeded(error)
+            self.scheduleAutosave()
+        }
     }
 
     @objc func pasteAsLink(_ sender: Any?) {
-        mainWindowController?.pasteAsLink()
+        currentWindowController()?.pasteAsLink()
     }
 
     @objc func showPreferences(_ sender: Any?) {
@@ -107,7 +152,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
                 self.settings = settings
                 self.settingsStore.save(settings)
-                self.mainWindowController?.applySettings(settings)
+                for document in NSDocumentController.shared.documents {
+                    (document as? MarkdownDocument)?.applySettings(settings)
+                }
             }
         }
 
@@ -119,14 +166,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     private func open(_ url: URL) -> Bool {
+        if let document = NSDocumentController.shared.document(for: url) {
+            document.showWindows()
+            return true
+        }
+
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
-            mainWindowController?.displayMarkdown(text, from: url)
+            let document = MarkdownDocument(settings: settings)
+            document.loadText(text, from: url)
+            show(document)
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            scheduleAutosave()
             return true
         } catch {
             let alert = NSAlert(error: error)
             alert.runModal()
             return false
         }
+    }
+
+    private func show(_ document: MarkdownDocument) {
+        document.onAutosaveNeeded = { [weak self] in
+            self?.scheduleAutosave()
+        }
+        document.onAutosaveNow = { [weak self] in
+            self?.flushAutosave()
+        }
+        NSDocumentController.shared.addDocument(document)
+        document.makeWindowControllers()
+        document.showWindows()
+    }
+
+    private func restoreAutosavedSession() -> Bool {
+        guard let session = autosaveStore.loadSession(), !session.drafts.isEmpty else {
+            return false
+        }
+
+        for draft in session.drafts {
+            let document = MarkdownDocument(settings: settings)
+            document.restore(draft)
+            show(document)
+        }
+
+        return true
+    }
+
+    private func scheduleAutosave() {
+        guard !isTerminating else {
+            return
+        }
+
+        autosaveWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.flushAutosave()
+        }
+        autosaveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: workItem)
+    }
+
+    private func flushAutosave(force: Bool = false) {
+        guard force || !isTerminating else {
+            return
+        }
+
+        autosaveWorkItem?.cancel()
+        autosaveWorkItem = nil
+
+        let drafts = NSDocumentController.shared.documents.compactMap { document in
+            (document as? MarkdownDocument)?.autosavedDraft
+        }
+        autosaveStore.saveSession(AutosavedSession(drafts: drafts))
+    }
+
+    private func currentDocument() -> MarkdownDocument? {
+        if let document = currentWindowController()?.document as? MarkdownDocument {
+            return document
+        }
+
+        return NSDocumentController.shared.currentDocument as? MarkdownDocument
+    }
+
+    private func currentWindowController() -> MainWindowController? {
+        NSApp.keyWindow?.windowController as? MainWindowController
+    }
+
+    private func presentSaveErrorIfNeeded(_ error: Error?) {
+        guard let error else {
+            return
+        }
+
+        let alert = NSAlert(error: error)
+        alert.runModal()
     }
 }

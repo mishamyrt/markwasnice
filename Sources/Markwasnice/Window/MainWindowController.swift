@@ -9,9 +9,11 @@ private extension NSToolbarItem.Identifier {
 
 @MainActor
 final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate, NSWindowDelegate, NSToolbarDelegate {
+    private static var nextWindowTopLeft: NSPoint?
+
     private let editorView: MarkdownEditorView
     private let contentView: EditorChromeView
-    private let autosaveStore: AutosaveStore
+    private weak var markdownDocument: MarkdownDocument?
     private let windowChromeToolbar = NSToolbar(identifier: "WindowChromeToolbar")
     private let fullScreenToolbar = NSToolbar(identifier: "FullScreenToolbar")
     private let fullScreenHistoryControl = ChromeHistoryControl()
@@ -20,26 +22,20 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
     private let fullScreenDirtyDotLabel = NSTextField(labelWithString: "•")
     private let fullScreenTitleView = NSStackView()
     private let parseService = MarkdownParseService()
-    private var autosaveWorkItem: DispatchWorkItem?
     private var wordCountTask: Task<Void, Never>?
     private var chromeHideWorkItem: DispatchWorkItem?
+    private var isCloseApproved = false
+    private var isClosingDocument = false
     private var isChromeSuppressed = false
     private var isPointerInChromeRevealZone = false
     private var isInFullScreen = false
     private var latestParseResult: MarkdownParseResult?
     private var resolvedStyleSpans: [ResolvedMarkdownStyleSpan] = []
-    private var currentFileURL: URL?
-    private var documentEdited = false {
-        didSet {
-            window?.isDocumentEdited = documentEdited
-            updateChromeTitle()
-        }
-    }
 
-    init(settings: EditorSettings, autosaveStore: AutosaveStore, draft: AutosavedDraft?) {
+    init(document: MarkdownDocument, settings: EditorSettings) {
+        markdownDocument = document
         editorView = MarkdownEditorView(settings: settings)
         contentView = EditorChromeView(editorView: editorView)
-        self.autosaveStore = autosaveStore
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
@@ -57,8 +53,11 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         window.isMovableByWindowBackground = true
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.title = draft?.fileURL?.lastPathComponent ?? "Untitled"
+        window.title = document.fileURL?.lastPathComponent ?? "Untitled"
         window.center()
+        Self.nextWindowTopLeft = window.cascadeTopLeft(
+            from: Self.nextWindowTopLeft ?? NSPoint(x: window.frame.minX, y: window.frame.maxY)
+        )
         window.contentView = contentView
 
         super.init(window: window)
@@ -78,12 +77,8 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         editorView.delegate = self
         editorView.setChromeInsets(top: EditorChromeView.topChromeHeight, bottom: 188)
         editorView.updateWindowWidthFontScale(for: window.frame.width, spans: resolvedStyleSpans)
-        if let draft {
-            currentFileURL = draft.fileURL
-            editorView.documentURL = draft.fileURL
-            editorView.setString(draft.text, clearsUndo: true)
-            documentEdited = !draft.text.isEmpty
-        }
+        editorView.documentURL = document.fileURL
+        editorView.setString(document.editorText, clearsUndo: true)
         parseService.onParse = { [weak self] result in
             guard let self else {
                 return
@@ -182,61 +177,6 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         }
     }
 
-    func newDocument() -> Bool {
-        flushAutosave()
-        currentFileURL = nil
-        editorView.documentURL = nil
-        editorView.setString("", clearsUndo: true)
-        documentEdited = false
-        latestParseResult = nil
-        resolvedStyleSpans = []
-        parseService.scheduleParse(text: editorView.string)
-        updateWindowTitle()
-        editorView.focus()
-        scheduleAutosave()
-        scheduleWordCount()
-        return true
-    }
-
-    func displayMarkdown(_ text: String, from url: URL) {
-        flushAutosave()
-        currentFileURL = url
-        editorView.documentURL = url
-        editorView.setString(text, clearsUndo: true)
-        documentEdited = false
-        latestParseResult = nil
-        resolvedStyleSpans = []
-        parseService.scheduleParse(text: text)
-        updateWindowTitle()
-        editorView.focus()
-        NSDocumentController.shared.noteNewRecentDocumentURL(url)
-        scheduleAutosave()
-        scheduleWordCount()
-    }
-
-    func saveDocument(_ sender: Any?) {
-        if let url = currentFileURL {
-            save(to: url)
-        } else {
-            saveDocumentAs(sender)
-        }
-    }
-
-    func saveDocumentAs(_ sender: Any?) {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [
-            UTType(filenameExtension: "md") ?? .plainText,
-            .plainText,
-        ]
-        panel.nameFieldStringValue = currentFileURL?.lastPathComponent ?? "Untitled.md"
-
-        guard panel.runModal() == .OK, let url = panel.url else {
-            return
-        }
-
-        save(to: url)
-    }
-
     func pasteAsLink() {
         editorView.pasteAsLink()
     }
@@ -245,16 +185,9 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         editorView.wrapSelectionWithQuotes(opening: opening, closing: closing)
     }
 
-    func flushAutosave() {
-        autosaveWorkItem?.cancel()
-        autosaveWorkItem = nil
-        autosaveStore.save(AutosavedDraft(text: editorView.string, fileURL: currentFileURL))
-    }
-
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView) {
-        documentEdited = true
+        markdownDocument?.editorTextDidChange(editorView.string)
         parseService.scheduleParse(text: editorView.string)
-        scheduleAutosave()
         scheduleWordCount()
         hideChrome()
     }
@@ -264,8 +197,26 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        flushAutosave()
-        return true
+        guard !isCloseApproved,
+              !isAppTerminating,
+              let markdownDocument,
+              markdownDocument.hasUnsavedChangesForDisplay else {
+            return true
+        }
+
+        promptToSaveBeforeClosing(sender, document: markdownDocument)
+        return false
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if isClosingDocument {
+            return
+        }
+
+        isClosingDocument = true
+        let document = markdownDocument
+        document?.close()
+        document?.flushAutosave()
     }
 
     @available(*, unavailable)
@@ -273,42 +224,22 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         fatalError("init(coder:) is not supported")
     }
 
-    private func save(to url: URL) {
-        do {
-            try editorView.string.write(to: url, atomically: true, encoding: .utf8)
-            currentFileURL = url
-            editorView.documentURL = url
-            documentEdited = false
-            updateWindowTitle()
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
-            scheduleAutosave()
-        } catch {
-            let alert = NSAlert(error: error)
-            alert.runModal()
-        }
+    func refreshDocumentState() {
+        editorView.documentURL = markdownDocument?.fileURL
+        updateWindowTitle()
     }
 
     private func updateWindowTitle() {
-        window?.title = currentFileURL?.lastPathComponent ?? "Untitled"
+        window?.title = documentTitle
+        window?.isDocumentEdited = markdownDocument?.hasUnsavedChangesForDisplay ?? false
         updateChromeTitle()
     }
 
     private func updateChromeTitle() {
-        contentView.updateTitle(
-            currentFileURL?.lastPathComponent ?? "Untitled", isEdited: documentEdited)
-        fullScreenTitleLabel.stringValue = currentFileURL?.lastPathComponent ?? "Untitled"
-        fullScreenDirtyDotLabel.isHidden = !documentEdited
-    }
-
-    private func scheduleAutosave() {
-        autosaveWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            Task { @MainActor in
-                self?.flushAutosave()
-            }
-        }
-        autosaveWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: workItem)
+        let isEdited = markdownDocument?.hasUnsavedChangesForDisplay ?? false
+        contentView.updateTitle(documentTitle, isEdited: isEdited)
+        fullScreenTitleLabel.stringValue = documentTitle
+        fullScreenDirtyDotLabel.isHidden = !isEdited
     }
 
     private func scheduleWordCount() {
@@ -421,6 +352,85 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
     }
 
     @objc private func fullScreenPreviewPressed(_ sender: Any?) {
+    }
+
+    private var documentTitle: String {
+        markdownDocument?.fileURL?.lastPathComponent ?? "Untitled"
+    }
+
+    private var isAppTerminating: Bool {
+        (NSApp.delegate as? AppDelegate)?.isTerminating == true
+    }
+
+    private func promptToSaveBeforeClosing(_ window: NSWindow, document: MarkdownDocument) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Do you want to save the changes you made to \"\(documentTitle)\"?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+
+        alert.beginSheetModal(for: window) { [weak self, weak document] response in
+            guard let self, let document else {
+                return
+            }
+
+            switch response {
+            case .alertFirstButtonReturn:
+                self.saveBeforeClosing(document, window: window)
+            case .alertSecondButtonReturn:
+                self.closeAfterUserApproval(window)
+            default:
+                break
+            }
+        }
+    }
+
+    private func saveBeforeClosing(_ document: MarkdownDocument, window: NSWindow) {
+        if let url = document.fileURL {
+            save(document, to: url, operation: .saveOperation, thenClose: window)
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "md") ?? .plainText,
+            .plainText,
+        ]
+        panel.nameFieldStringValue = "Untitled.md"
+        panel.beginSheetModal(for: window) { [weak self, weak document] response in
+            guard let self, let document, response == .OK, let url = panel.url else {
+                return
+            }
+
+            self.save(document, to: url, operation: .saveAsOperation, thenClose: window)
+        }
+    }
+
+    private func save(
+        _ document: MarkdownDocument,
+        to url: URL,
+        operation: NSDocument.SaveOperationType,
+        thenClose window: NSWindow
+    ) {
+        document.save(to: url, ofType: MarkdownDocument.fileType, for: operation) { [weak self] error in
+            guard let self else {
+                return
+            }
+
+            if let error {
+                NSAlert(error: error).beginSheetModal(for: window)
+                return
+            }
+
+            self.closeAfterUserApproval(window)
+        }
+    }
+
+    private func closeAfterUserApproval(_ window: NSWindow) {
+        isCloseApproved = true
+        window.close()
     }
 
     nonisolated private static func wordCount(in text: String) -> Int {
