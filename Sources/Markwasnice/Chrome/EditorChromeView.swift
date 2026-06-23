@@ -508,12 +508,6 @@ final class ChromeHistoryControl: NSControl {
     }
 
     private func configureView() {
-        wantsLayer = true
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.22
-        layer?.shadowRadius = 14
-        layer?.shadowOffset = CGSize(width: 0, height: -4)
-
         glassView.translatesAutoresizingMaskIntoConstraints = false
         glassView.cornerRadius = 18
         glassView.style = .regular
@@ -656,12 +650,6 @@ final class ChromeIconButton: NSControl {
     }
 
     private func configureView() {
-        wantsLayer = true
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.22
-        layer?.shadowRadius = 14
-        layer?.shadowOffset = CGSize(width: 0, height: -4)
-
         glassView.translatesAutoresizingMaskIntoConstraints = false
         glassView.cornerRadius = 18
         glassView.style = .regular
