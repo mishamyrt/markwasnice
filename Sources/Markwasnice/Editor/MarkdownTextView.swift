@@ -37,7 +37,7 @@ final class MarkdownTextView: NSTextView {
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         if selectedRange().length > 0,
             let string = plainString(from: insertString),
-            let pair = quotePair(for: string),
+            let pair = pairSymbol(for: string),
             commandDelegate?.markdownTextView(
                 self, wrapSelectionWith: pair.opening, closing: pair.closing) == true
         {
@@ -63,7 +63,7 @@ final class MarkdownTextView: NSTextView {
         return (insertString as? NSAttributedString)?.string
     }
 
-    private func quotePair(for string: String) -> (opening: String, closing: String)? {
+    private func pairSymbol(for string: String) -> (opening: String, closing: String)? {
         switch string {
         case "\"":
             return ("\"", "\"")
@@ -75,6 +75,10 @@ final class MarkdownTextView: NSTextView {
             return ("«", "»")
         case "“":
             return ("“", "”")
+        case "(":
+            return ("(", ")")
+        case "[":
+            return ("[", "]")
         case "„":
             return ("„", "“")
         default:
