@@ -149,12 +149,12 @@ final class EditorChromeView: NSView {
         previewButton.isEnabled = false
 
         titleLabel.alignment = .center
-        titleLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        titleLabel.font = .titleBarFont(ofSize: NSFont.systemFontSize)
         titleLabel.lineBreakMode = .byTruncatingMiddle
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = .controlTextColor
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        dirtyDotLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        dirtyDotLabel.font = .titleBarFont(ofSize: NSFont.systemFontSize + 5)
         dirtyDotLabel.textColor = .secondaryLabelColor
         dirtyDotLabel.translatesAutoresizingMaskIntoConstraints = false
 

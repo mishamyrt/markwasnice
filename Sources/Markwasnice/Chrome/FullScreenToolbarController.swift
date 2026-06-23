@@ -1,9 +1,10 @@
 import AppKit
 
-private extension NSToolbarItem.Identifier {
-    static let fullScreenHistory = NSToolbarItem.Identifier("FullScreenHistory")
-    static let fullScreenDocumentTitle = NSToolbarItem.Identifier("FullScreenDocumentTitle")
-    static let fullScreenPreview = NSToolbarItem.Identifier("FullScreenPreview")
+extension NSToolbarItem.Identifier {
+    fileprivate static let fullScreenHistory = NSToolbarItem.Identifier("FullScreenHistory")
+    fileprivate static let fullScreenDocumentTitle = NSToolbarItem.Identifier(
+        "FullScreenDocumentTitle")
+    fileprivate static let fullScreenPreview = NSToolbarItem.Identifier("FullScreenPreview")
 }
 
 @MainActor
@@ -99,11 +100,11 @@ final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
         ])
 
         titleLabel.alignment = .center
-        titleLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        titleLabel.font = .titleBarFont(ofSize: NSFont.systemFontSize)
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.textColor = .labelColor
 
-        dirtyDotLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        dirtyDotLabel.font = .titleBarFont(ofSize: NSFont.systemFontSize + 5)
         dirtyDotLabel.textColor = .secondaryLabelColor
 
         titleView.orientation = .horizontal
