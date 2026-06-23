@@ -5,17 +5,31 @@ import ObjectiveC.runtime
 import QuartzCore
 import UniformTypeIdentifiers
 
+private extension NSToolbarItem.Identifier {
+    static let fullScreenHistory = NSToolbarItem.Identifier("FullScreenHistory")
+    static let fullScreenDocumentTitle = NSToolbarItem.Identifier("FullScreenDocumentTitle")
+    static let fullScreenPreview = NSToolbarItem.Identifier("FullScreenPreview")
+}
+
 @MainActor
-final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate, NSWindowDelegate {
+final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate, NSWindowDelegate, NSToolbarDelegate {
     private let editorView: MarkdownEditorView
     private let contentView: EditorChromeView
     private let autosaveStore: AutosaveStore
+    private let windowChromeToolbar = NSToolbar(identifier: "WindowChromeToolbar")
+    private let fullScreenToolbar = NSToolbar(identifier: "FullScreenToolbar")
+    private let fullScreenHistoryControl = ChromeHistoryControl()
+    private let fullScreenPreviewButton = ChromeIconButton(symbolName: "eye")
+    private let fullScreenTitleLabel = NSTextField(labelWithString: "Untitled")
+    private let fullScreenDirtyDotLabel = NSTextField(labelWithString: "•")
+    private let fullScreenTitleView = NSStackView()
     private let parseService = MarkdownParseService()
     private var autosaveWorkItem: DispatchWorkItem?
     private var wordCountTask: Task<Void, Never>?
     private var chromeHideWorkItem: DispatchWorkItem?
     private var isChromeSuppressed = false
     private var isPointerInChromeRevealZone = false
+    private var isInFullScreen = false
     private var latestParseResult: MarkdownParseResult?
     private var resolvedStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var currentFileURL: URL?
@@ -37,9 +51,8 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
             backing: .buffered,
             defer: false
         )
-        // HACK: add custom toolbar to make move window controls
-        let customToolbar = NSToolbar()
-        window.toolbar = customToolbar
+        // HACK: add an empty toolbar to move the window controls into the content area.
+        window.toolbar = windowChromeToolbar
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -53,6 +66,8 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         window.contentView = contentView
 
         super.init(window: window)
+
+        configureFullScreenToolbar()
 
         contentView.onTopHoverChanged = { [weak self] isHovering in
             self?.handleTopHoverChanged(isHovering)
@@ -111,6 +126,64 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         }
 
         editorView.updateWindowWidthFontScale(for: window.frame.width, spans: resolvedStyleSpans)
+    }
+
+    func window(
+        _ window: NSWindow,
+        willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions
+    ) -> NSApplication.PresentationOptions {
+        var options = proposedOptions
+        options.insert(.autoHideMenuBar)
+        options.insert(.autoHideToolbar)
+        return options
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        setFullScreenChromeMode(true)
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        setFullScreenChromeMode(true)
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        setFullScreenChromeMode(false)
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        setFullScreenChromeMode(false)
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        fullScreenToolbarItemIdentifiers
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        fullScreenToolbarItemIdentifiers
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        switch itemIdentifier {
+        case .fullScreenHistory:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.view = fullScreenHistoryControl
+            return item
+        case .fullScreenDocumentTitle:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.view = fullScreenTitleView
+            item.isBordered = false
+            return item
+        case .fullScreenPreview:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.view = fullScreenPreviewButton
+            return item
+        default:
+            return nil
+        }
     }
 
     func newDocument() -> Bool {
@@ -227,6 +300,8 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
     private func updateChromeTitle() {
         contentView.updateTitle(
             currentFileURL?.lastPathComponent ?? "Untitled", isEdited: documentEdited)
+        fullScreenTitleLabel.stringValue = currentFileURL?.lastPathComponent ?? "Untitled"
+        fullScreenDirtyDotLabel.isHidden = !documentEdited
     }
 
     private func scheduleAutosave() {
@@ -260,6 +335,98 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         }
     }
 
+    private var fullScreenToolbarItemIdentifiers: [NSToolbarItem.Identifier] {
+        [
+            .fullScreenHistory,
+            .flexibleSpace,
+            .fullScreenDocumentTitle,
+            .flexibleSpace,
+            .fullScreenPreview,
+        ]
+    }
+
+    private func configureFullScreenToolbar() {
+        fullScreenToolbar.delegate = self
+        fullScreenToolbar.allowsUserCustomization = false
+        fullScreenToolbar.autosavesConfiguration = false
+        fullScreenToolbar.displayMode = .iconOnly
+        fullScreenToolbar.sizeMode = .regular
+        fullScreenToolbar.centeredItemIdentifier = .fullScreenDocumentTitle
+
+        fullScreenHistoryControl.onUndo = { [weak self] in
+            self?.window?.firstResponder?.tryToPerform(Selector(("undo:")), with: nil)
+        }
+        fullScreenHistoryControl.onRedo = { [weak self] in
+            self?.window?.firstResponder?.tryToPerform(Selector(("redo:")), with: nil)
+        }
+        fullScreenHistoryControl.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            fullScreenHistoryControl.widthAnchor.constraint(equalToConstant: 72),
+            fullScreenHistoryControl.heightAnchor.constraint(equalToConstant: 36),
+        ])
+
+        fullScreenPreviewButton.target = self
+        fullScreenPreviewButton.action = #selector(fullScreenPreviewPressed(_:))
+        fullScreenPreviewButton.isEnabled = false
+        fullScreenPreviewButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            fullScreenPreviewButton.widthAnchor.constraint(equalToConstant: 36),
+            fullScreenPreviewButton.heightAnchor.constraint(equalToConstant: 36),
+        ])
+
+        fullScreenTitleLabel.alignment = .center
+        fullScreenTitleLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        fullScreenTitleLabel.lineBreakMode = .byTruncatingMiddle
+        fullScreenTitleLabel.textColor = .labelColor
+
+        fullScreenDirtyDotLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        fullScreenDirtyDotLabel.textColor = .secondaryLabelColor
+
+        fullScreenTitleView.orientation = .horizontal
+        fullScreenTitleView.alignment = .centerY
+        fullScreenTitleView.spacing = 4
+        fullScreenTitleView.addArrangedSubview(fullScreenTitleLabel)
+        fullScreenTitleView.addArrangedSubview(fullScreenDirtyDotLabel)
+        fullScreenTitleView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            fullScreenTitleLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+            fullScreenTitleView.heightAnchor.constraint(equalToConstant: 24),
+        ])
+    }
+
+    private func setFullScreenChromeMode(_ isFullScreen: Bool) {
+        guard let window else {
+            return
+        }
+
+        isInFullScreen = isFullScreen
+        contentView.setUsesSystemTopBar(isFullScreen)
+        editorView.setChromeInsets(
+            top: isFullScreen ? 0 : EditorChromeView.topChromeHeight,
+            bottom: 188
+        )
+        setWindowButtonsVisible(true, animated: false)
+
+        if isFullScreen {
+            window.toolbar = fullScreenToolbar
+            window.toolbar?.isVisible = true
+            window.styleMask.remove(.fullSizeContentView)
+            window.titlebarAppearsTransparent = false
+            window.titleVisibility = .hidden
+        } else {
+            window.toolbar = windowChromeToolbar
+            window.styleMask.insert(.fullSizeContentView)
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            if isChromeSuppressed && !isPointerInChromeRevealZone {
+                hideChromeNow()
+            }
+        }
+    }
+
+    @objc private func fullScreenPreviewPressed(_ sender: Any?) {
+    }
+
     nonisolated private static func wordCount(in text: String) -> Int {
         text.split { character in
             character.isWhitespace || character.isPunctuation
@@ -267,6 +434,10 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
     }
 
     private func showChrome() {
+        guard !isInFullScreen else {
+            return
+        }
+
         chromeHideWorkItem?.cancel()
         chromeHideWorkItem = nil
         contentView.setChromeVisible(true)
@@ -275,6 +446,10 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
 
     private func hideChrome() {
         isChromeSuppressed = true
+        guard !isInFullScreen else {
+            return
+        }
+
         guard !isPointerInChromeRevealZone else {
             return
         }
@@ -283,6 +458,11 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
     }
 
     private func hideChromeNow() {
+        guard !isInFullScreen else {
+            setWindowButtonsVisible(true)
+            return
+        }
+
         chromeHideWorkItem?.cancel()
         chromeHideWorkItem = nil
         contentView.setChromeVisible(false)
@@ -291,6 +471,10 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
 
     private func handleTopHoverChanged(_ isHovering: Bool) {
         isPointerInChromeRevealZone = isHovering
+        guard !isInFullScreen else {
+            return
+        }
+
         if isHovering {
             showChrome()
         } else if isChromeSuppressed {
@@ -298,13 +482,17 @@ final class MainWindowController: NSWindowController, MarkdownEditorViewDelegate
         }
     }
 
-    private func setWindowButtonsVisible(_ visible: Bool) {
+    private func setWindowButtonsVisible(_ visible: Bool, animated: Bool = true) {
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             guard let button = window?.standardWindowButton(button) else {
                 continue
             }
 
-            button.animator().alphaValue = visible ? 1 : 0
+            if animated {
+                button.animator().alphaValue = visible ? 1 : 0
+            } else {
+                button.alphaValue = visible ? 1 : 0
+            }
             button.isEnabled = visible
         }
     }
@@ -329,6 +517,7 @@ private final class EditorChromeView: NSView {
     private var trackingArea: NSTrackingArea?
     private var isChromeVisible = true
     private var isPointerInTopZone = false
+    private var usesSystemTopBar = false
 
     init(editorView: MarkdownEditorView) {
         self.editorView = editorView
@@ -373,14 +562,14 @@ private final class EditorChromeView: NSView {
 
         isChromeVisible = visible
         if visible {
-            topChrome.isHidden = false
+            topChrome.isHidden = usesSystemTopBar
             statusBar.isHidden = false
         }
 
-        setControlsEnabled(visible)
+        setControlsEnabled(visible && !usesSystemTopBar)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
-            topChrome.animator().alphaValue = visible ? 1 : 0
+            topChrome.animator().alphaValue = visible && !usesSystemTopBar ? 1 : 0
             statusBar.animator().alphaValue = visible ? 1 : 0
         } completionHandler: { [weak self] in
             guard let self else {
@@ -392,10 +581,17 @@ private final class EditorChromeView: NSView {
                     return
                 }
 
-                self.topChrome.isHidden = !visible
+                self.topChrome.isHidden = self.usesSystemTopBar || !visible
                 self.statusBar.isHidden = !visible
             }
         }
+    }
+
+    func setUsesSystemTopBar(_ usesSystemTopBar: Bool) {
+        self.usesSystemTopBar = usesSystemTopBar
+        topChrome.alphaValue = usesSystemTopBar || !isChromeVisible ? 0 : 1
+        topChrome.isHidden = usesSystemTopBar || !isChromeVisible
+        setControlsEnabled(isChromeVisible && !usesSystemTopBar)
     }
 
     private func updateTopHover(_ isHovering: Bool) {
