@@ -393,7 +393,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     private func lineMatchesEmptyMarkdownPrefix(_ line: String) -> Bool {
         let range = NSRange(location: 0, length: (line as NSString).length)
         let patterns = [
-            "^[ \\t]*(?:[-+*]|\\d+[.)])\\s+$",
+            "^[ \\t]*(?:[-+*]|\\d+[.)])\\s*$",
             "^[ \\t]*>\\s*$",
         ]
 
@@ -426,7 +426,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
         let prefix = linePrefix as NSString
         let indentation = prefix.substring(with: match.range(at: 1))
-        return "\n\(indentation)>"
+        return "\n\(indentation)> "
     }
 
     private func nextListMarker(after marker: String) -> String {
