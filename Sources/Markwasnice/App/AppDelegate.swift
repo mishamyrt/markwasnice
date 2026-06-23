@@ -247,8 +247,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSDocumentController.shared.currentDocument as? MarkdownDocument
     }
 
-    private func currentWindowController() -> MainWindowController? {
-        NSApp.keyWindow?.windowController as? MainWindowController
+    private func currentWindowController() -> MarkdownDocumentWindowController? {
+        NSApp.keyWindow?.windowController as? MarkdownDocumentWindowController
     }
 
     private func presentSaveErrorIfNeeded(_ error: Error?) {

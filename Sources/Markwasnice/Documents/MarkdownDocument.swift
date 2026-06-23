@@ -34,7 +34,7 @@ final class MarkdownDocument: NSDocument {
     }
 
     override func makeWindowControllers() {
-        let controller = MainWindowController(document: self, settings: settings)
+        let controller = MarkdownDocumentWindowController(document: self, settings: settings)
         addWindowController(controller)
     }
 
@@ -119,13 +119,13 @@ final class MarkdownDocument: NSDocument {
     func applySettings(_ settings: EditorSettings) {
         self.settings = settings
         for controller in windowControllers {
-            (controller as? MainWindowController)?.applySettings(settings)
+            (controller as? MarkdownDocumentWindowController)?.applySettings(settings)
         }
     }
 
     func refreshWindowState() {
         for controller in windowControllers {
-            (controller as? MainWindowController)?.refreshDocumentState()
+            (controller as? MarkdownDocumentWindowController)?.refreshDocumentState()
         }
     }
 
