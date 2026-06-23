@@ -13,7 +13,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
     private let scrollView = NSScrollView()
     private let textStorage = NSTextStorage()
-    private let layoutManager = NSLayoutManager()
+    private let layoutManager = MarkdownCodeBackgroundLayoutManager()
     private let textContainer = NSTextContainer(
         containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
     private let textView: MarkdownTextView
@@ -311,7 +311,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             NSRange(location: selectedRange.location + (string as NSString).length, length: 0))
     }
 
-    private func replaceText(in range: NSRange, with string: String, selectedLocation: Int) -> Bool {
+    private func replaceText(in range: NSRange, with string: String, selectedLocation: Int) -> Bool
+    {
         guard textView.shouldChangeText(in: range, replacementString: string) else {
             return false
         }
@@ -571,7 +572,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     }
 
     private var lineHeight: CGFloat {
-        basePointSize * 1.6
+        basePointSize * 1.8
     }
 
     private static func windowWidthFontScale(for windowWidth: CGFloat) -> CGFloat {
@@ -635,11 +636,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             attributes[.foregroundColor] = colors.emphasis
         case .inlineCode:
             attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
-            attributes[.backgroundColor] = colors.codeBackground
+            attributes[.markdownCodeBackgroundColor] = colors.codeBackground
             attributes[.foregroundColor] = colors.codeForeground
         case .codeBlock:
             attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
-            attributes[.backgroundColor] = colors.codeBackground
+            attributes[.markdownCodeBlockBackgroundColor] = colors.codeBackground
             attributes[.foregroundColor] = colors.codeForeground
         case .linkDestination:
             attributes[.foregroundColor] = colors.punctuation
@@ -690,14 +691,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             setMonospaceFont(range: range)
             textStorage.addAttributes(
                 [
-                    .backgroundColor: colors.codeBackground,
+                    .markdownCodeBackgroundColor: colors.codeBackground,
                     .foregroundColor: colors.codeForeground,
                 ], range: range)
         case .codeBlock:
             setMonospaceFont(range: range)
             textStorage.addAttributes(
                 [
-                    .backgroundColor: colors.codeBackground,
+                    .markdownCodeBlockBackgroundColor: colors.codeBackground,
                     .foregroundColor: colors.codeForeground,
                 ], range: range)
         case .linkDestination:
