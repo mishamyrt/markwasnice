@@ -2,22 +2,28 @@ import AppKit
 
 extension NSAttributedString.Key {
     static let markdownCodeBackgroundColor = NSAttributedString.Key(
-        "MarkwasniceMarkdownCodeBackgroundColor")
+        "MarkwasniceMarkdownCodeBackgroundColor"
+    )
     static let markdownCodeBlockBackgroundColor = NSAttributedString.Key(
-        "MarkwasniceMarkdownCodeBlockBackgroundColor")
+        "MarkwasniceMarkdownCodeBlockBackgroundColor"
+    )
 }
 
 final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
     var codeBackgroundCornerRadius: CGFloat = 3
 
-    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+    override func drawBackground(
+        forGlyphRange glyphsToShow: NSRange,
+        at origin: NSPoint
+    ) {
         guard let textStorage else {
             super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
             return
         }
 
-        let characterRange = self.characterRange(
-            forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        let characterRange = characterRange(
+            forGlyphRange: glyphsToShow, actualGlyphRange: nil
+        )
         textStorage.enumerateAttribute(
             .markdownCodeBackgroundColor, in: characterRange, options: []
         ) { value, range, _ in
@@ -25,13 +31,20 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
                 return
             }
 
-            let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let glyphRange = self.glyphRange(
+                forCharacterRange: range,
+                actualCharacterRange: nil
+            )
             let visibleGlyphRange = NSIntersectionRange(glyphRange, glyphsToShow)
             guard visibleGlyphRange.length > 0 else {
                 return
             }
 
-            self.drawCodeBackground(color: color, glyphRange: visibleGlyphRange, at: origin)
+            self.drawCodeBackground(
+                color: color,
+                glyphRange: visibleGlyphRange,
+                at: origin
+            )
         }
 
         textStorage.enumerateAttribute(
@@ -50,7 +63,8 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
             )
 
             let glyphRange = self.glyphRange(
-                forCharacterRange: effectiveRange, actualCharacterRange: nil)
+                forCharacterRange: effectiveRange, actualCharacterRange: nil
+            )
             guard NSIntersectionRange(glyphRange, glyphsToShow).length > 0 else {
                 return
             }
@@ -61,9 +75,15 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
     }
 
-    private func drawCodeBackground(color: NSColor, glyphRange: NSRange, at origin: NSPoint) {
-        guard
-            let textContainer = textContainer(forGlyphAt: glyphRange.location, effectiveRange: nil)
+    private func drawCodeBackground(
+        color: NSColor,
+        glyphRange: NSRange,
+        at origin: NSPoint
+    ) {
+        guard let textContainer = textContainer(
+            forGlyphAt: glyphRange.location,
+            effectiveRange: nil
+        )
         else {
             return
         }
@@ -75,12 +95,14 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
             var lineGlyphRange = NSRange()
             lineFragmentRect(
                 forGlyphAt: glyphIndex, effectiveRange: &lineGlyphRange,
-                withoutAdditionalLayout: true)
+                withoutAdditionalLayout: true
+            )
             let drawingGlyphRange = NSIntersectionRange(glyphRange, lineGlyphRange)
 
             if let textGlyphRange = visibleTextGlyphRange(from: drawingGlyphRange),
-                let rect = codeBackgroundRect(
-                    forGlyphRange: textGlyphRange, in: textContainer, at: origin)
+               let rect = codeBackgroundRect(
+                   forGlyphRange: textGlyphRange, in: textContainer, at: origin
+               )
             {
                 color.setFill()
                 NSBezierPath(
@@ -94,7 +116,11 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
         }
     }
 
-    private func drawCodeBlockBackground(color: NSColor, glyphRange: NSRange, at origin: NSPoint) {
+    private func drawCodeBlockBackground(
+        color: NSColor,
+        glyphRange: NSRange,
+        at origin: NSPoint
+    ) {
         var glyphIndex = glyphRange.location
         let endGlyphIndex = NSMaxRange(glyphRange)
         var blockRect: NSRect?
@@ -103,7 +129,8 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
             var lineGlyphRange = NSRange()
             lineFragmentRect(
                 forGlyphAt: glyphIndex, effectiveRange: &lineGlyphRange,
-                withoutAdditionalLayout: true)
+                withoutAdditionalLayout: true
+            )
 
             if let lineRect = codeBlockLineRect(forGlyphAt: glyphIndex, at: origin) {
                 blockRect = blockRect.map { $0.union(lineRect) } ?? lineRect
@@ -124,19 +151,27 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
         ).fill()
     }
 
-    private func codeBlockLineRect(forGlyphAt glyphIndex: Int, at origin: NSPoint) -> NSRect? {
-        guard let textContainer = textContainer(forGlyphAt: glyphIndex, effectiveRange: nil) else {
+    private func codeBlockLineRect(
+        forGlyphAt glyphIndex: Int,
+        at origin: NSPoint
+    ) -> NSRect? {
+        guard let textContainer = textContainer(
+            forGlyphAt: glyphIndex,
+            effectiveRange: nil
+        ) else {
             return nil
         }
 
         var rect = lineFragmentRect(
-            forGlyphAt: glyphIndex, effectiveRange: nil, withoutAdditionalLayout: true)
+            forGlyphAt: glyphIndex, effectiveRange: nil, withoutAdditionalLayout: true
+        )
         guard rect.width > 0, rect.height > 0 else {
             return nil
         }
 
         if let paragraphStyle = paragraphStyle(forGlyphAt: glyphIndex) {
-            let trailingInset = paragraphStyle.tailIndent < 0 ? abs(paragraphStyle.tailIndent) : 0
+            let trailingInset = paragraphStyle
+                .tailIndent < 0 ? abs(paragraphStyle.tailIndent) : 0
             rect.origin.x += paragraphStyle.headIndent
             rect.size.width -= paragraphStyle.headIndent + trailingInset
         }
@@ -158,7 +193,11 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
             return nil
         }
 
-        return textStorage.attribute(.paragraphStyle, at: characterIndex, effectiveRange: nil)
+        return textStorage.attribute(
+            .paragraphStyle,
+            at: characterIndex,
+            effectiveRange: nil
+        )
             as? NSParagraphStyle
     }
 
@@ -197,7 +236,8 @@ final class MarkdownCodeBackgroundLayoutManager: NSLayoutManager {
     }
 
     private func codeBackgroundRect(
-        forGlyphRange glyphRange: NSRange, in textContainer: NSTextContainer, at origin: NSPoint
+        forGlyphRange glyphRange: NSRange, in textContainer: NSTextContainer,
+        at origin: NSPoint
     ) -> NSRect? {
         var rect = boundingRect(forGlyphRange: glyphRange, in: textContainer)
         guard rect.width > 0, rect.height > 0 else {

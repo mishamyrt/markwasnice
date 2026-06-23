@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tabWidth: EditorSettings.defaultTabWidth
     )
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         LilexFontProvider.registerFonts()
         settings = settingsStore.load()
         MainMenu.install(delegate: self)
@@ -33,11 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
         true
     }
 
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
         isTerminating = true
         flushAutosave(force: true)
         return .terminateNow
@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         guard menu.title == "File",
-            let recentMenu = menu.item(withTitle: "Open Recent")?.submenu
+              let recentMenu = menu.item(withTitle: "Open Recent")?.submenu
         else {
             return
         }
@@ -53,13 +53,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         MainMenu.populateOpenRecentMenu(recentMenu, delegate: self)
     }
 
-    @objc func openDocument(_ sender: Any?) {
+    @objc func openDocument(_: Any?) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [
             UTType(filenameExtension: "md") ?? .plainText,
-            UTType(filenameExtension: "markdown") ?? .plainText
+            UTType(filenameExtension: "markdown") ?? .plainText,
         ]
 
         guard panel.runModal() == .OK else {
@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         open(url)
     }
 
-    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+    func application(_: NSApplication, openFile filename: String) -> Bool {
         open(URL(fileURLWithPath: filename))
     }
 
@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sender.reply(toOpenOrPrint: didOpenAll ? .success : .failure)
     }
 
-    @objc func newDocument(_ sender: Any?) {
+    @objc func newDocument(_: Any?) {
         let document = MarkdownDocument(settings: settings)
         show(document)
         scheduleAutosave()
@@ -111,13 +111,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        document.save(to: url, ofType: MarkdownDocument.fileType, for: .saveOperation) { error in
-            self.presentSaveErrorIfNeeded(error)
-            self.scheduleAutosave()
-        }
+        document
+            .save(
+                to: url,
+                ofType: MarkdownDocument.fileType,
+                for: .saveOperation
+            ) { error in
+                self.presentSaveErrorIfNeeded(error)
+                self.scheduleAutosave()
+            }
     }
 
-    @objc func saveDocumentAs(_ sender: Any?) {
+    @objc func saveDocumentAs(_: Any?) {
         guard let document = currentDocument() else {
             return
         }
@@ -133,29 +138,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        document.save(to: url, ofType: MarkdownDocument.fileType, for: .saveAsOperation) { error in
-            self.presentSaveErrorIfNeeded(error)
-            self.scheduleAutosave()
-        }
+        document
+            .save(
+                to: url,
+                ofType: MarkdownDocument.fileType,
+                for: .saveAsOperation
+            ) { error in
+                self.presentSaveErrorIfNeeded(error)
+                self.scheduleAutosave()
+            }
     }
 
-    @objc func pasteAsLink(_ sender: Any?) {
+    @objc func pasteAsLink(_: Any?) {
         currentWindowController()?.pasteAsLink()
     }
 
     @objc func showPreferences(_ sender: Any?) {
         if preferencesWindowController == nil {
-            preferencesWindowController = PreferencesWindowController(settings: settings) { [weak self] settings in
-                guard let self else {
-                    return
-                }
+            preferencesWindowController =
+                PreferencesWindowController(settings: settings) { [weak self] settings in
+                    guard let self else {
+                        return
+                    }
 
-                self.settings = settings
-                self.settingsStore.save(settings)
-                for document in NSDocumentController.shared.documents {
-                    (document as? MarkdownDocument)?.applySettings(settings)
+                    self.settings = settings
+                    self.settingsStore.save(settings)
+                    for document in NSDocumentController.shared.documents {
+                        (document as? MarkdownDocument)?.applySettings(settings)
+                    }
                 }
-            }
         }
 
         preferencesWindowController?.update(settings: settings)

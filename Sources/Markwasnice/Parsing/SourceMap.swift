@@ -14,7 +14,8 @@ struct SourceMap {
         guard let lower = utf16Offset(for: sourceRange.lowerBound),
               let upper = utf16Offset(for: sourceRange.upperBound),
               lower <= upper,
-              upper <= textLength else {
+              upper <= textLength
+        else {
             return nil
         }
 
@@ -42,18 +43,24 @@ struct SourceMap {
         var index = text.startIndex
         while index < text.endIndex {
             if text[index].isNewline {
-                let lineText = text[lineStartIndex..<index]
-                result.append(Line(text: lineText, utf16StartOffset: lineUTF16StartOffset))
+                let lineText = text[lineStartIndex ..< index]
+                result.append(Line(
+                    text: lineText,
+                    utf16StartOffset: lineUTF16StartOffset
+                ))
 
                 let nextIndex = text.index(after: index)
-                lineUTF16StartOffset += text[lineStartIndex..<nextIndex].utf16.count
+                lineUTF16StartOffset += text[lineStartIndex ..< nextIndex].utf16.count
                 lineStartIndex = nextIndex
             }
 
             index = text.index(after: index)
         }
 
-        result.append(Line(text: text[lineStartIndex..<text.endIndex], utf16StartOffset: lineUTF16StartOffset))
+        result.append(Line(
+            text: text[lineStartIndex ..< text.endIndex],
+            utf16StartOffset: lineUTF16StartOffset
+        ))
         return result
     }
 }
@@ -65,7 +72,7 @@ private struct Line {
     init(text: Substring, utf16StartOffset: Int) {
         self.utf16StartOffset = utf16StartOffset
 
-        var offsets: [Int: Int] = [1: 0]
+        var offsets = [1: 0]
         var utf8Column = 1
         var utf16Offset = 0
 

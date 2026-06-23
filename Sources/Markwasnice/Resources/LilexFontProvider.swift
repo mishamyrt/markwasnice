@@ -12,9 +12,9 @@ enum LilexFontProvider {
 
         didRegisterFonts = true
         for name in ["Lilex[wght]", "Lilex-Italic[wght]"] {
-            guard
-                let url = Bundle.module.url(
-                    forResource: name, withExtension: "ttf", subdirectory: "Fonts")
+            guard let url = Bundle.module.url(
+                forResource: name, withExtension: "ttf", subdirectory: "Fonts"
+            )
             else {
                 continue
             }
@@ -24,11 +24,17 @@ enum LilexFontProvider {
     }
 
     static func regular(size: CGFloat) -> NSFont {
-        NSFont(name: "Lilex", size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        NSFont(name: "Lilex", size: size) ?? .monospacedSystemFont(
+            ofSize: size,
+            weight: .regular
+        )
     }
 
     static func italic(size: CGFloat) -> NSFont {
-        NSFont(name: "Lilex Italic", size: size) ?? font(size: size, traits: .italicFontMask)
+        NSFont(name: "Lilex Italic", size: size) ?? font(
+            size: size,
+            traits: .italicFontMask
+        )
     }
 
     static func bold(size: CGFloat) -> NSFont {

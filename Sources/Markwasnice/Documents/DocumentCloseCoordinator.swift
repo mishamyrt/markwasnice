@@ -21,7 +21,8 @@ final class DocumentCloseCoordinator {
               !isPromptVisible,
               !isAppTerminating(),
               let document,
-              document.hasUnsavedChangesForDisplay else {
+              document.hasUnsavedChangesForDisplay
+        else {
             return true
         }
 
@@ -57,7 +58,11 @@ final class DocumentCloseCoordinator {
 
             switch response {
             case .alertFirstButtonReturn:
-                self.saveBeforeClosing(document, window: window, onApprovedClose: onApprovedClose)
+                self.saveBeforeClosing(
+                    document,
+                    window: window,
+                    onApprovedClose: onApprovedClose
+                )
             case .alertSecondButtonReturn:
                 self.closeAfterUserApproval(onApprovedClose)
             default:
@@ -115,19 +120,24 @@ final class DocumentCloseCoordinator {
         window: NSWindow,
         onApprovedClose: @escaping () -> Void
     ) {
-        document.save(to: url, ofType: MarkdownDocument.fileType, for: operation) { [weak self] error in
-            guard let self else {
-                return
-            }
+        document
+            .save(
+                to: url,
+                ofType: MarkdownDocument.fileType,
+                for: operation
+            ) { [weak self] error in
+                guard let self else {
+                    return
+                }
 
-            if let error {
-                self.isPromptVisible = false
-                NSAlert(error: error).beginSheetModal(for: window)
-                return
-            }
+                if let error {
+                    self.isPromptVisible = false
+                    NSAlert(error: error).beginSheetModal(for: window)
+                    return
+                }
 
-            self.closeAfterUserApproval(onApprovedClose)
-        }
+                self.closeAfterUserApproval(onApprovedClose)
+            }
     }
 
     private func closeAfterUserApproval(_ onApprovedClose: () -> Void) {

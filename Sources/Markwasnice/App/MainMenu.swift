@@ -22,7 +22,11 @@ enum MainMenu {
 
     private static func applicationMenu(delegate: AppDelegate) -> NSMenu {
         let menu = NSMenu()
-        let settingsItem = menu.addItem(withTitle: "Settings...", action: #selector(AppDelegate.showPreferences(_:)), keyEquivalent: ",")
+        let settingsItem = menu.addItem(
+            withTitle: "Settings...",
+            action: #selector(AppDelegate.showPreferences(_:)),
+            keyEquivalent: ","
+        )
         settingsItem.target = delegate
         menu.addItem(NSMenuItem.separator())
         menu.addItem(
@@ -36,19 +40,43 @@ enum MainMenu {
     private static func fileMenu(delegate: AppDelegate) -> NSMenu {
         let menu = NSMenu(title: "File")
         menu.delegate = delegate
-        let newItem = menu.addItem(withTitle: "New", action: #selector(AppDelegate.newDocument(_:)), keyEquivalent: "n")
+        let newItem = menu.addItem(
+            withTitle: "New",
+            action: #selector(AppDelegate.newDocument(_:)),
+            keyEquivalent: "n"
+        )
         newItem.target = delegate
-        let openItem = menu.addItem(withTitle: "Open...", action: #selector(AppDelegate.openDocument(_:)), keyEquivalent: "o")
+        let openItem = menu.addItem(
+            withTitle: "Open...",
+            action: #selector(AppDelegate.openDocument(_:)),
+            keyEquivalent: "o"
+        )
         openItem.target = delegate
-        let openRecentItem = menu.addItem(withTitle: "Open Recent", action: nil, keyEquivalent: "")
+        let openRecentItem = menu.addItem(
+            withTitle: "Open Recent",
+            action: nil,
+            keyEquivalent: ""
+        )
         openRecentItem.submenu = openRecentMenu(delegate: delegate)
         menu.addItem(NSMenuItem.separator())
-        let saveItem = menu.addItem(withTitle: "Save", action: #selector(AppDelegate.saveDocument(_:)), keyEquivalent: "s")
+        let saveItem = menu.addItem(
+            withTitle: "Save",
+            action: #selector(AppDelegate.saveDocument(_:)),
+            keyEquivalent: "s"
+        )
         saveItem.target = delegate
-        let saveAsItem = menu.addItem(withTitle: "Save As...", action: #selector(AppDelegate.saveDocumentAs(_:)), keyEquivalent: "S")
+        let saveAsItem = menu.addItem(
+            withTitle: "Save As...",
+            action: #selector(AppDelegate.saveDocumentAs(_:)),
+            keyEquivalent: "S"
+        )
         saveAsItem.target = delegate
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        menu.addItem(
+            withTitle: "Close",
+            action: #selector(NSWindow.performClose(_:)),
+            keyEquivalent: "w"
+        )
         return menu
     }
 
@@ -62,13 +90,21 @@ enum MainMenu {
         menu.removeAllItems()
         let urls = NSDocumentController.shared.recentDocumentURLs
         if urls.isEmpty {
-            let item = menu.addItem(withTitle: "No Recent Documents", action: nil, keyEquivalent: "")
+            let item = menu.addItem(
+                withTitle: "No Recent Documents",
+                action: nil,
+                keyEquivalent: ""
+            )
             item.isEnabled = false
             return
         }
 
         for url in urls {
-            let item = menu.addItem(withTitle: url.lastPathComponent, action: #selector(AppDelegate.openRecentDocument(_:)), keyEquivalent: "")
+            let item = menu.addItem(
+                withTitle: url.lastPathComponent,
+                action: #selector(AppDelegate.openRecentDocument(_:)),
+                keyEquivalent: ""
+            )
             item.representedObject = url
             item.target = delegate
         }
@@ -79,11 +115,31 @@ enum MainMenu {
         menu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         menu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        menu.addItem(withTitle: "Paste as Link", action: #selector(AppDelegate.pasteAsLink(_:)), keyEquivalent: "V").target = delegate
-        menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(
+            withTitle: "Cut",
+            action: #selector(NSText.cut(_:)),
+            keyEquivalent: "x"
+        )
+        menu.addItem(
+            withTitle: "Copy",
+            action: #selector(NSText.copy(_:)),
+            keyEquivalent: "c"
+        )
+        menu.addItem(
+            withTitle: "Paste",
+            action: #selector(NSText.paste(_:)),
+            keyEquivalent: "v"
+        )
+        menu.addItem(
+            withTitle: "Paste as Link",
+            action: #selector(AppDelegate.pasteAsLink(_:)),
+            keyEquivalent: "V"
+        ).target = delegate
+        menu.addItem(
+            withTitle: "Select All",
+            action: #selector(NSText.selectAll(_:)),
+            keyEquivalent: "a"
+        )
         return menu
     }
 }

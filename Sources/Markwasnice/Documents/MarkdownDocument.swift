@@ -13,9 +13,10 @@ final class MarkdownDocument: NSDocument {
             refreshWindowState()
         }
     }
+
     nonisolated(unsafe) private var text = ""
 
-    override class var autosavesInPlace: Bool {
+    override static var autosavesInPlace: Bool {
         false
     }
 
@@ -34,15 +35,18 @@ final class MarkdownDocument: NSDocument {
     }
 
     override func makeWindowControllers() {
-        let controller = MarkdownDocumentWindowController(document: self, settings: settings)
+        let controller = MarkdownDocumentWindowController(
+            document: self,
+            settings: settings
+        )
         addWindowController(controller)
     }
 
-    override func data(ofType typeName: String) throws -> Data {
+    override func data(ofType _: String) throws -> Data {
         Data(text.utf8)
     }
 
-    override func read(from data: Data, ofType typeName: String) throws {
+    override func read(from data: Data, ofType _: String) throws {
         guard let string = String(data: data, encoding: .utf8) else {
             throw NSError(
                 domain: NSCocoaErrorDomain,

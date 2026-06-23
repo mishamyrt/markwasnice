@@ -1,10 +1,13 @@
 import AppKit
 
 extension NSToolbarItem.Identifier {
-    fileprivate static let fullScreenHistory = NSToolbarItem.Identifier("FullScreenHistory")
+    fileprivate static let fullScreenHistory = NSToolbarItem
+        .Identifier("FullScreenHistory")
     fileprivate static let fullScreenDocumentTitle = NSToolbarItem.Identifier(
-        "FullScreenDocumentTitle")
-    fileprivate static let fullScreenPreview = NSToolbarItem.Identifier("FullScreenPreview")
+        "FullScreenDocumentTitle"
+    )
+    fileprivate static let fullScreenPreview = NSToolbarItem
+        .Identifier("FullScreenPreview")
 }
 
 @MainActor
@@ -30,18 +33,18 @@ final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
         dirtyDotLabel.isHidden = !isEdited
     }
 
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+    func toolbarAllowedItemIdentifiers(_: NSToolbar) -> [NSToolbarItem.Identifier] {
         toolbarItemIdentifiers
     }
 
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+    func toolbarDefaultItemIdentifiers(_: NSToolbar) -> [NSToolbarItem.Identifier] {
         toolbarItemIdentifiers
     }
 
     func toolbar(
-        _ toolbar: NSToolbar,
+        _: NSToolbar,
         itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-        willBeInsertedIntoToolbar flag: Bool
+        willBeInsertedIntoToolbar _: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
         case .fullScreenHistory:

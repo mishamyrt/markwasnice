@@ -1,18 +1,18 @@
 import Foundation
 import Markdown
 
-struct MarkdownParseResult: Sendable {
+struct MarkdownParseResult {
     let textVersion: Int
     let sourceLength: Int
     let spans: [MarkdownStyleSpan]
 }
 
-struct MarkdownStyleSpan: Sendable {
+struct MarkdownStyleSpan {
     let range: SourceRange
     let kind: MarkdownStyleKind
 }
 
-struct ResolvedMarkdownStyleSpan: Sendable {
+struct ResolvedMarkdownStyleSpan {
     let range: NSRange
     let kind: MarkdownStyleKind
 
@@ -20,7 +20,7 @@ struct ResolvedMarkdownStyleSpan: Sendable {
         let lowerBound = range.location
         let upperBound = range.location + range.length
 
-        if location > lowerBound && location < upperBound {
+        if location > lowerBound, location < upperBound {
             return true
         }
 
@@ -28,8 +28,8 @@ struct ResolvedMarkdownStyleSpan: Sendable {
     }
 }
 
-enum MarkdownStyleKind: Sendable {
-    case heading(level: Int)
+enum MarkdownStyleKind {
+    case heading
     case strong
     case emphasis
     case inlineCode

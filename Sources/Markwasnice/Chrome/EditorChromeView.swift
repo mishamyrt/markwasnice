@@ -57,7 +57,7 @@ final class EditorChromeView: NSView {
         updateTopHover(isInTopZone)
     }
 
-    override func mouseExited(with event: NSEvent) {
+    override func mouseExited(with _: NSEvent) {
         updateTopHover(false)
     }
 
@@ -110,7 +110,7 @@ final class EditorChromeView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
@@ -171,23 +171,31 @@ final class EditorChromeView: NSView {
             topChrome.heightAnchor.constraint(equalToConstant: Self.topChromeHeight),
 
             historyControl.leadingAnchor.constraint(
-                equalTo: topChrome.contentView.leadingAnchor, constant: 94),
+                equalTo: topChrome.contentView.leadingAnchor, constant: 94
+            ),
             historyControl.centerYAnchor.constraint(
-                equalTo: topChrome.contentView.topAnchor, constant: 27),
+                equalTo: topChrome.contentView.topAnchor, constant: 27
+            ),
             historyControl.widthAnchor.constraint(equalToConstant: 72),
             historyControl.heightAnchor.constraint(equalToConstant: 36),
 
             titleLabel.centerXAnchor.constraint(
-                equalTo: topChrome.contentView.centerXAnchor, constant: -5),
+                equalTo: topChrome.contentView.centerXAnchor, constant: -5
+            ),
             titleLabel.centerYAnchor.constraint(equalTo: historyControl.centerYAnchor),
             titleLabel.widthAnchor.constraint(
-                lessThanOrEqualTo: topChrome.contentView.widthAnchor, multiplier: 0.42),
+                lessThanOrEqualTo: topChrome.contentView.widthAnchor, multiplier: 0.42
+            ),
 
-            dirtyDotLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4),
+            dirtyDotLabel.leadingAnchor.constraint(
+                equalTo: titleLabel.trailingAnchor,
+                constant: 4
+            ),
             dirtyDotLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
             previewButton.trailingAnchor.constraint(
-                equalTo: topChrome.contentView.trailingAnchor, constant: -9),
+                equalTo: topChrome.contentView.trailingAnchor, constant: -9
+            ),
             previewButton.centerYAnchor.constraint(equalTo: historyControl.centerYAnchor),
         ])
     }
@@ -212,7 +220,8 @@ final class EditorChromeView: NSView {
             statusBar.heightAnchor.constraint(equalToConstant: 28),
 
             wordCountLabel.trailingAnchor.constraint(
-                equalTo: statusBar.trailingAnchor, constant: -18),
+                equalTo: statusBar.trailingAnchor, constant: -18
+            ),
             wordCountLabel.centerYAnchor.constraint(equalTo: statusBar.centerYAnchor),
         ])
     }
@@ -232,8 +241,7 @@ final class EditorChromeView: NSView {
         previewButton.isEnabled = false
     }
 
-    @objc private func previewPressed(_ sender: Any?) {
-    }
+    @objc private func previewPressed(_: Any?) {}
 }
 
 @MainActor
@@ -247,7 +255,7 @@ final class HeaderChromeView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
@@ -305,12 +313,12 @@ final class PureBackdropBlurView: NSView {
         updateBackgroundGradient()
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
+    override func hitTest(_: NSPoint) -> NSView? {
         nil
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
@@ -350,7 +358,7 @@ final class PureBackdropBlurView: NSView {
     }
 
     private func makeGradientImage(
-        width: CGFloat = 100, height: CGFloat = 100, startOffset: CGFloat,
+        width: CGFloat = 100, height: CGFloat = 100, startOffset: CGFloat
     ) -> CGImage {
         let ciGradientFilter = CIFilter.smoothLinearGradient()
         ciGradientFilter.color0 = CIColor.black
@@ -359,7 +367,13 @@ final class PureBackdropBlurView: NSView {
         ciGradientFilter.point1 = CGPoint(x: 0, y: startOffset * height)
 
         return CIContext().createCGImage(
-            ciGradientFilter.outputImage!, from: CGRect(x: 0, y: 0, width: width, height: height))!
+            ciGradientFilter.outputImage!, from: CGRect(
+                x: 0,
+                y: 0,
+                width: width,
+                height: height
+            )
+        )!
     }
 
     private func updateBlurRadius() {
@@ -378,7 +392,8 @@ final class PureBackdropBlurView: NSView {
     }
 
     private static func makeBackdropLayer() -> CALayer {
-        guard let layerClass = NSClassFromString("CABackdropLayer") as? CALayer.Type else {
+        guard let layerClass = NSClassFromString("CABackdropLayer") as? CALayer.Type
+        else {
             assertionFailure("CABackdropLayer is unavailable")
             return CALayer()
         }
@@ -397,7 +412,8 @@ final class PureBackdropBlurView: NSView {
             NSSelectorFromString("filterWithName:"),
         ]
 
-        typealias Factory = @convention(c) (AnyClass, Selector, NSString) -> Unmanaged<AnyObject>?
+        typealias Factory = @convention(c) (AnyClass, Selector, NSString)
+            -> Unmanaged<AnyObject>?
 
         for selector in selectors {
             guard let method = class_getClassMethod(filterClass, selector) else {
@@ -478,12 +494,11 @@ final class ChromeHistoryControl: NSControl {
         updateHoverSegment(segment(at: convert(event.locationInWindow, from: nil)))
     }
 
-    override func mouseExited(with event: NSEvent) {
+    override func mouseExited(with _: NSEvent) {
         updateHoverSegment(nil)
     }
 
-    override func mouseDown(with event: NSEvent) {
-    }
+    override func mouseDown(with _: NSEvent) {}
 
     override func mouseUp(with event: NSEvent) {
         guard isEnabled else {
@@ -503,7 +518,7 @@ final class ChromeHistoryControl: NSControl {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
@@ -521,8 +536,8 @@ final class ChromeHistoryControl: NSControl {
         dividerView.wantsLayer = true
         dividerView.layer?.backgroundColor =
             NSColor.separatorColor
-            .withAlphaComponent(0.1)
-            .cgColor
+                .withAlphaComponent(0.1)
+                .cgColor
         dividerView.translatesAutoresizingMaskIntoConstraints = false
 
         configureImageView(undoImageView, symbolName: "chevron.left")
@@ -546,14 +561,18 @@ final class ChromeHistoryControl: NSControl {
             glassContentView.bottomAnchor.constraint(equalTo: glassView.bottomAnchor),
 
             undoHoverView.centerXAnchor.constraint(
-                equalTo: glassContentView.leadingAnchor, constant: 18),
-            undoHoverView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+                equalTo: glassContentView.leadingAnchor, constant: 18
+            ),
+            undoHoverView.centerYAnchor
+                .constraint(equalTo: glassContentView.centerYAnchor),
             undoHoverView.widthAnchor.constraint(equalToConstant: 28),
             undoHoverView.heightAnchor.constraint(equalToConstant: 28),
 
             redoHoverView.centerXAnchor.constraint(
-                equalTo: glassContentView.trailingAnchor, constant: -18),
-            redoHoverView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+                equalTo: glassContentView.trailingAnchor, constant: -18
+            ),
+            redoHoverView.centerYAnchor
+                .constraint(equalTo: glassContentView.centerYAnchor),
             redoHoverView.widthAnchor.constraint(equalToConstant: 28),
             redoHoverView.heightAnchor.constraint(equalToConstant: 28),
 
@@ -563,14 +582,18 @@ final class ChromeHistoryControl: NSControl {
             dividerView.heightAnchor.constraint(equalToConstant: 20),
 
             undoImageView.centerXAnchor.constraint(
-                equalTo: glassContentView.leadingAnchor, constant: 18),
-            undoImageView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+                equalTo: glassContentView.leadingAnchor, constant: 18
+            ),
+            undoImageView.centerYAnchor
+                .constraint(equalTo: glassContentView.centerYAnchor),
             undoImageView.widthAnchor.constraint(equalToConstant: 14),
             undoImageView.heightAnchor.constraint(equalToConstant: 14),
 
             redoImageView.centerXAnchor.constraint(
-                equalTo: glassContentView.trailingAnchor, constant: -18),
-            redoImageView.centerYAnchor.constraint(equalTo: glassContentView.centerYAnchor),
+                equalTo: glassContentView.trailingAnchor, constant: -18
+            ),
+            redoImageView.centerYAnchor
+                .constraint(equalTo: glassContentView.centerYAnchor),
             redoImageView.widthAnchor.constraint(equalToConstant: 14),
             redoImageView.heightAnchor.constraint(equalToConstant: 14),
         ])
@@ -585,8 +608,14 @@ final class ChromeHistoryControl: NSControl {
     }
 
     private func configureImageView(_ imageView: NSImageView, symbolName: String) {
-        imageView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        imageView.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: nil
+        )
+        imageView.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: 13,
+            weight: .medium
+        )
         imageView.contentTintColor = .labelColor
         imageView.imageScaling = .scaleProportionallyDown
         imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -614,7 +643,10 @@ final class ChromeIconButton: NSControl {
 
     init(symbolName: String) {
         super.init(frame: .zero)
-        imageView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        imageView.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: nil
+        )
         configureView()
     }
 
@@ -624,7 +656,7 @@ final class ChromeIconButton: NSControl {
         }
     }
 
-    override func mouseDown(with event: NSEvent) {
+    override func mouseDown(with _: NSEvent) {
         guard isEnabled else {
             return
         }
@@ -645,7 +677,7 @@ final class ChromeIconButton: NSControl {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
@@ -657,7 +689,10 @@ final class ChromeIconButton: NSControl {
 
         glassContentView.translatesAutoresizingMaskIntoConstraints = false
 
-        imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        imageView.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: 13,
+            weight: .medium
+        )
         imageView.contentTintColor = .labelColor
         imageView.imageScaling = .scaleProportionallyDown
         imageView.translatesAutoresizingMaskIntoConstraints = false

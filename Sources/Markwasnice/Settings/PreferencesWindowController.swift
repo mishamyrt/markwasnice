@@ -5,7 +5,8 @@ final class PreferencesWindowController: NSWindowController {
     private var settings: EditorSettings
     private let onChange: (EditorSettings) -> Void
     private let textSizeSlider = NSSlider(
-        value: 1, minValue: 0.05, maxValue: 1.95, target: nil, action: nil)
+        value: 1, minValue: 0.05, maxValue: 1.95, target: nil, action: nil
+    )
     private let smallTextSizeLabel = NSTextField(labelWithString: "A")
     private let largeTextSizeLabel = NSTextField(labelWithString: "A")
     private let widthPopup = NSPopUpButton()
@@ -41,7 +42,7 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
@@ -112,8 +113,10 @@ final class PreferencesWindowController: NSWindowController {
         tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
 
         for view in [
-            textSizeLabel, smallTextSizeLabel, textSizeSlider, largeTextSizeLabel, widthLabel,
-            widthPopup, widthCaption, tabModeLabel, tabModePopup, tabWidthLabel, tabWidthPopup,
+            textSizeLabel, smallTextSizeLabel, textSizeSlider, largeTextSizeLabel,
+            widthLabel,
+            widthPopup, widthCaption, tabModeLabel, tabModePopup, tabWidthLabel,
+            tabWidthPopup,
             tabWidthCaption,
         ] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -122,56 +125,85 @@ final class PreferencesWindowController: NSWindowController {
 
         NSLayoutConstraint.activate([
             textSizeLabel.leadingAnchor.constraint(
-                equalTo: contentView.leadingAnchor, constant: 24),
-            textSizeLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 30),
+                equalTo: contentView.leadingAnchor, constant: 24
+            ),
+            textSizeLabel.topAnchor.constraint(
+                equalTo: contentView.topAnchor,
+                constant: 30
+            ),
             textSizeLabel.widthAnchor.constraint(equalToConstant: 90),
 
             smallTextSizeLabel.leadingAnchor.constraint(
-                equalTo: textSizeLabel.trailingAnchor, constant: 12),
-            smallTextSizeLabel.centerYAnchor.constraint(equalTo: textSizeLabel.centerYAnchor),
+                equalTo: textSizeLabel.trailingAnchor, constant: 12
+            ),
+            smallTextSizeLabel.centerYAnchor
+                .constraint(equalTo: textSizeLabel.centerYAnchor),
 
             textSizeSlider.leadingAnchor.constraint(
-                equalTo: smallTextSizeLabel.trailingAnchor, constant: 8),
+                equalTo: smallTextSizeLabel.trailingAnchor, constant: 8
+            ),
             textSizeSlider.trailingAnchor.constraint(
-                equalTo: largeTextSizeLabel.leadingAnchor, constant: -8),
+                equalTo: largeTextSizeLabel.leadingAnchor, constant: -8
+            ),
             textSizeSlider.centerYAnchor.constraint(equalTo: textSizeLabel.centerYAnchor),
 
             largeTextSizeLabel.trailingAnchor.constraint(
-                equalTo: contentView.trailingAnchor, constant: -24),
-            largeTextSizeLabel.centerYAnchor.constraint(equalTo: textSizeLabel.centerYAnchor),
+                equalTo: contentView.trailingAnchor, constant: -24
+            ),
+            largeTextSizeLabel.centerYAnchor
+                .constraint(equalTo: textSizeLabel.centerYAnchor),
 
             widthLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
-            widthLabel.topAnchor.constraint(equalTo: textSizeLabel.bottomAnchor, constant: 28),
+            widthLabel.topAnchor.constraint(
+                equalTo: textSizeLabel.bottomAnchor,
+                constant: 28
+            ),
             widthLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
 
-            widthPopup.leadingAnchor.constraint(equalTo: widthLabel.trailingAnchor, constant: 12),
+            widthPopup.leadingAnchor.constraint(
+                equalTo: widthLabel.trailingAnchor,
+                constant: 12
+            ),
             widthPopup.centerYAnchor.constraint(equalTo: widthLabel.centerYAnchor),
             widthPopup.widthAnchor.constraint(equalToConstant: 90),
 
-            widthCaption.leadingAnchor.constraint(equalTo: widthPopup.trailingAnchor, constant: 8),
+            widthCaption.leadingAnchor.constraint(
+                equalTo: widthPopup.trailingAnchor,
+                constant: 8
+            ),
             widthCaption.centerYAnchor.constraint(equalTo: widthPopup.centerYAnchor),
 
             tabModeLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
-            tabModeLabel.topAnchor.constraint(equalTo: widthLabel.bottomAnchor, constant: 28),
+            tabModeLabel.topAnchor.constraint(
+                equalTo: widthLabel.bottomAnchor,
+                constant: 28
+            ),
             tabModeLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
 
             tabModePopup.leadingAnchor.constraint(
-                equalTo: tabModeLabel.trailingAnchor, constant: 12),
+                equalTo: tabModeLabel.trailingAnchor, constant: 12
+            ),
             tabModePopup.centerYAnchor.constraint(equalTo: tabModeLabel.centerYAnchor),
             tabModePopup.widthAnchor.constraint(equalToConstant: 120),
 
             tabWidthLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
-            tabWidthLabel.topAnchor.constraint(equalTo: tabModeLabel.bottomAnchor, constant: 28),
+            tabWidthLabel.topAnchor.constraint(
+                equalTo: tabModeLabel.bottomAnchor,
+                constant: 28
+            ),
             tabWidthLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
 
             tabWidthPopup.leadingAnchor.constraint(
-                equalTo: tabWidthLabel.trailingAnchor, constant: 12),
+                equalTo: tabWidthLabel.trailingAnchor, constant: 12
+            ),
             tabWidthPopup.centerYAnchor.constraint(equalTo: tabWidthLabel.centerYAnchor),
             tabWidthPopup.widthAnchor.constraint(equalToConstant: 90),
 
             tabWidthCaption.leadingAnchor.constraint(
-                equalTo: tabWidthPopup.trailingAnchor, constant: 8),
-            tabWidthCaption.centerYAnchor.constraint(equalTo: tabWidthPopup.centerYAnchor),
+                equalTo: tabWidthPopup.trailingAnchor, constant: 8
+            ),
+            tabWidthCaption.centerYAnchor
+                .constraint(equalTo: tabWidthPopup.centerYAnchor),
         ])
     }
 
@@ -183,5 +215,4 @@ final class PreferencesWindowController: NSWindowController {
             "Tab"
         }
     }
-
 }

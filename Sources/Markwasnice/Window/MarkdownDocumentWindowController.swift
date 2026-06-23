@@ -1,7 +1,9 @@
 import AppKit
 
 @MainActor
-final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditorViewDelegate, NSWindowDelegate {
+final class MarkdownDocumentWindowController: NSWindowController,
+    MarkdownEditorViewDelegate, NSWindowDelegate
+{
     private static var nextWindowTopLeft: NSPoint?
 
     private let editorView: MarkdownEditorView
@@ -11,6 +13,7 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
     private lazy var closeCoordinator = DocumentCloseCoordinator { [weak self] in
         self?.isAppTerminating == true
     }
+
     private let windowChromeToolbar = NSToolbar(identifier: "WindowChromeToolbar")
     private let fullScreenToolbarController = FullScreenToolbarController()
     private var wordCountTask: Task<Void, Never>?
@@ -45,7 +48,10 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
         window.title = document.fileURL?.lastPathComponent ?? "Untitled"
         window.center()
         Self.nextWindowTopLeft = window.cascadeTopLeft(
-            from: Self.nextWindowTopLeft ?? NSPoint(x: window.frame.minX, y: window.frame.maxY)
+            from: Self.nextWindowTopLeft ?? NSPoint(
+                x: window.frame.minX,
+                y: window.frame.maxY
+            )
         )
         window.contentView = contentView
 
@@ -82,7 +88,7 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
         stylingController.applySettings(settings)
     }
 
-    func windowDidResize(_ notification: Notification) {
+    func windowDidResize(_: Notification) {
         guard let window else {
             return
         }
@@ -91,8 +97,9 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
     }
 
     func window(
-        _ window: NSWindow,
-        willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions
+        _: NSWindow,
+        willUseFullScreenPresentationOptions proposedOptions: NSApplication
+            .PresentationOptions
     ) -> NSApplication.PresentationOptions {
         var options = proposedOptions
         options.insert(.autoHideMenuBar)
@@ -100,19 +107,19 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
         return options
     }
 
-    func windowWillEnterFullScreen(_ notification: Notification) {
+    func windowWillEnterFullScreen(_: Notification) {
         setFullScreenChromeMode(true)
     }
 
-    func windowDidEnterFullScreen(_ notification: Notification) {
+    func windowDidEnterFullScreen(_: Notification) {
         setFullScreenChromeMode(true)
     }
 
-    func windowWillExitFullScreen(_ notification: Notification) {
+    func windowWillExitFullScreen(_: Notification) {
         setFullScreenChromeMode(false)
     }
 
-    func windowDidExitFullScreen(_ notification: Notification) {
+    func windowDidExitFullScreen(_: Notification) {
         setFullScreenChromeMode(false)
     }
 
@@ -131,7 +138,7 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
         hideChrome()
     }
 
-    func markdownEditorViewDidScroll(_ editorView: MarkdownEditorView) {
+    func markdownEditorViewDidScroll(_: MarkdownEditorView) {
         hideChrome()
     }
 
@@ -145,7 +152,7 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
         }
     }
 
-    func windowWillClose(_ notification: Notification) {
+    func windowWillClose(_: Notification) {
         if isClosingDocument {
             return
         }
@@ -157,7 +164,7 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
@@ -222,7 +229,7 @@ final class MarkdownDocumentWindowController: NSWindowController, MarkdownEditor
             window.styleMask.insert(.fullSizeContentView)
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
-            if isChromeSuppressed && !isPointerInChromeRevealZone {
+            if isChromeSuppressed, !isPointerInChromeRevealZone {
                 hideChromeNow()
             }
         }

@@ -1,7 +1,10 @@
 import Foundation
 
 enum MarkdownLinkStyleResolver {
-    static func resolve(spans: [ResolvedMarkdownStyleSpan], in text: String) -> [ResolvedMarkdownStyleSpan] {
+    static func resolve(
+        spans: [ResolvedMarkdownStyleSpan],
+        in text: String
+    ) -> [ResolvedMarkdownStyleSpan] {
         spans.flatMap { span in
             switch span.kind {
             case .link:
@@ -20,19 +23,21 @@ enum MarkdownLinkStyleResolver {
         let string = text as NSString
         guard span.range.location >= 0,
               span.range.length >= 0,
-              span.range.location + span.range.length <= string.length else {
+              span.range.location + span.range.length <= string.length
+        else {
             return []
         }
 
         let syntax = string.substring(with: span.range) as NSString
         let labelStart = isImage ? 1 : 0
         guard syntax.length >= (isImage ? 5 : 4),
-              (!isImage || syntax.character(at: 0) == Self.exclamationMark),
+              !isImage || syntax.character(at: 0) == Self.exclamationMark,
               syntax.character(at: labelStart) == Self.openBracket,
               let labelEnd = matchingCloseBracket(in: syntax, after: labelStart),
               labelEnd + 1 < syntax.length,
               syntax.character(at: labelEnd + 1) == Self.openParen,
-              let destinationEnd = closingParen(in: syntax, after: labelEnd + 1) else {
+              let destinationEnd = closingParen(in: syntax, after: labelEnd + 1)
+        else {
             return []
         }
 
@@ -40,12 +45,28 @@ enum MarkdownLinkStyleResolver {
         var result: [ResolvedMarkdownStyleSpan] = []
 
         if isImage {
-            result.append(style(.linkSyntaxPunctuation, location: span.range.location, length: 1))
+            result.append(style(
+                .linkSyntaxPunctuation,
+                location: span.range.location,
+                length: 1
+            ))
         }
 
-        result.append(style(.linkSyntaxPunctuation, location: span.range.location + labelStart, length: 1))
-        result.append(style(.linkSyntaxPunctuation, location: span.range.location + labelEnd, length: 1))
-        result.append(style(.linkSyntaxPunctuation, location: span.range.location + openParen, length: 1))
+        result.append(style(
+            .linkSyntaxPunctuation,
+            location: span.range.location + labelStart,
+            length: 1
+        ))
+        result.append(style(
+            .linkSyntaxPunctuation,
+            location: span.range.location + labelEnd,
+            length: 1
+        ))
+        result.append(style(
+            .linkSyntaxPunctuation,
+            location: span.range.location + openParen,
+            length: 1
+        ))
 
         let destinationLength = destinationEnd - openParen - 1
         if destinationLength > 0 {
@@ -58,11 +79,18 @@ enum MarkdownLinkStyleResolver {
             )
         }
 
-        result.append(style(.linkSyntaxPunctuation, location: span.range.location + destinationEnd, length: 1))
+        result.append(style(
+            .linkSyntaxPunctuation,
+            location: span.range.location + destinationEnd,
+            length: 1
+        ))
         return result
     }
 
-    private static func matchingCloseBracket(in string: NSString, after openBracket: Int) -> Int? {
+    private static func matchingCloseBracket(
+        in string: NSString,
+        after openBracket: Int
+    ) -> Int? {
         var depth = 1
         var index = openBracket + 1
 
@@ -92,7 +120,7 @@ enum MarkdownLinkStyleResolver {
         var index = string.length - 1
         while index > openParen {
             let character = string.character(at: index)
-            if character == closeParen && !isEscapedCharacter(at: index, in: string) {
+            if character == closeParen, !isEscapedCharacter(at: index, in: string) {
                 return index
             }
 
@@ -114,8 +142,15 @@ enum MarkdownLinkStyleResolver {
         return !backslashCount.isMultiple(of: 2)
     }
 
-    private static func style(_ kind: MarkdownStyleKind, location: Int, length: Int) -> ResolvedMarkdownStyleSpan {
-        ResolvedMarkdownStyleSpan(range: NSRange(location: location, length: length), kind: kind)
+    private static func style(
+        _ kind: MarkdownStyleKind,
+        location: Int,
+        length: Int
+    ) -> ResolvedMarkdownStyleSpan {
+        ResolvedMarkdownStyleSpan(
+            range: NSRange(location: location, length: length),
+            kind: kind
+        )
     }
 
     private static let exclamationMark: unichar = 33

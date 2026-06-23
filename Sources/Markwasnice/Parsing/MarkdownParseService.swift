@@ -49,7 +49,10 @@ final class MarkdownParseService {
         }
     }
 
-    private nonisolated static func parse(text: String, version: Int) -> MarkdownParseResult {
+    nonisolated private static func parse(
+        text: String,
+        version: Int
+    ) -> MarkdownParseResult {
         let document = Document(parsing: text, options: [.disableSmartOpts])
         var collector = MarkdownStyleSpanCollector()
         collector.visit(document)

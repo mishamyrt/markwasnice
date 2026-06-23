@@ -4,7 +4,7 @@ struct MarkdownStyleSpanCollector: MarkupWalker {
     private(set) var spans: [MarkdownStyleSpan] = []
 
     mutating func visitHeading(_ heading: Heading) {
-        add(.heading(level: heading.level), for: heading)
+        add(.heading, for: heading)
         descendInto(heading)
     }
 

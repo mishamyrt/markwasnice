@@ -8,7 +8,10 @@ protocol MarkdownTextViewCommandDelegate: AnyObject {
         _ textView: NSTextView, wrapSelectionWith opening: String, closing: String
     ) -> Bool
     func markdownTextViewDraggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation
-    func markdownTextViewPerformDragOperation(_ sender: NSDraggingInfo, in textView: NSTextView)
+    func markdownTextViewPerformDragOperation(
+        _ sender: NSDraggingInfo,
+        in textView: NSTextView
+    )
         -> Bool
 }
 
@@ -17,7 +20,7 @@ final class MarkdownTextView: NSTextView {
     weak var commandDelegate: MarkdownTextViewCommandDelegate?
 
     override func keyDown(with event: NSEvent) {
-        guard event.modifierFlags.intersection([.command, .control]).isEmpty else {
+        guard event.modifierFlags.isDisjoint(with: [.command, .control]) else {
             super.keyDown(with: event)
             return
         }
@@ -36,10 +39,11 @@ final class MarkdownTextView: NSTextView {
 
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         if selectedRange().length > 0,
-            let string = plainString(from: insertString),
-            let pair = pairSymbol(for: string),
-            commandDelegate?.markdownTextView(
-                self, wrapSelectionWith: pair.opening, closing: pair.closing) == true
+           let string = plainString(from: insertString),
+           let pair = pairSymbol(for: string),
+           commandDelegate?.markdownTextView(
+               self, wrapSelectionWith: pair.opening, closing: pair.closing
+           ) == true
         {
             return
         }

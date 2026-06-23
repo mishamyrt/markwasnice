@@ -13,7 +13,10 @@ final class AutosaveStore {
     private let fileURL: URL
 
     init(fileManager: FileManager = .default) {
-        let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let directory = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
             .appendingPathComponent("Markwasnice", isDirectory: true)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         fileURL = directory.appendingPathComponent("AutosavedDraft.json")

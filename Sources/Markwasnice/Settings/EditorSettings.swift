@@ -49,17 +49,18 @@ final class EditorSettingsStore {
         let storedColumns = defaults.integer(forKey: Key.maxTextColumns)
         let maxTextColumns =
             EditorSettings.maxTextWidthOptions.contains(storedColumns)
-            ? storedColumns
-            : EditorSettings.defaultMaxTextColumns
+                ? storedColumns
+                : EditorSettings.defaultMaxTextColumns
         let storedTabInsertionMode = defaults.string(forKey: Key.tabInsertionMode)
         let tabInsertionMode =
-            storedTabInsertionMode.flatMap(EditorSettings.TabInsertionMode.init(rawValue:))
-            ?? EditorSettings.defaultTabInsertionMode
+            storedTabInsertionMode
+                .flatMap(EditorSettings.TabInsertionMode.init(rawValue:))
+                ?? EditorSettings.defaultTabInsertionMode
         let storedTabWidth = defaults.integer(forKey: Key.tabWidth)
         let tabWidth =
             EditorSettings.tabWidthOptions.contains(storedTabWidth)
-            ? storedTabWidth
-            : EditorSettings.defaultTabWidth
+                ? storedTabWidth
+                : EditorSettings.defaultTabWidth
 
         return EditorSettings(
             textSizeScale: textSizeScale,

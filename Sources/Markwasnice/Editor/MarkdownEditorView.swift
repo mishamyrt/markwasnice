@@ -8,14 +8,17 @@ protocol MarkdownEditorViewDelegate: AnyObject {
 }
 
 @MainActor
-final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewCommandDelegate {
+final class MarkdownEditorView: NSView, NSTextViewDelegate,
+    MarkdownTextViewCommandDelegate
+{
     weak var delegate: MarkdownEditorViewDelegate?
 
     private let scrollView = NSScrollView()
     private let textStorage = NSTextStorage()
     private let layoutManager = MarkdownCodeBackgroundLayoutManager()
     private let textContainer = NSTextContainer(
-        containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+    )
     private let textView: MarkdownTextView
     private var isApplyingStyles = false
     private var settings: EditorSettings
@@ -116,7 +119,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         textView.undoManager?.enableUndoRegistration()
         isApplyingStyles = false
 
-        restoreSelectionAndScroll(selectedRanges: selectedRanges, visibleOrigin: visibleOrigin)
+        restoreSelectionAndScroll(
+            selectedRanges: selectedRanges,
+            visibleOrigin: visibleOrigin
+        )
         updateTypingAttributesAtSelection(spans: spans)
     }
 
@@ -126,7 +132,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         applyStyles(spans)
     }
 
-    func updateWindowWidthFontScale(for windowWidth: CGFloat, spans: [ResolvedMarkdownStyleSpan]) {
+    func updateWindowWidthFontScale(
+        for windowWidth: CGFloat,
+        spans: [ResolvedMarkdownStyleSpan]
+    ) {
         let newScale = Self.windowWidthFontScale(for: windowWidth)
         let newHangsHeadingMarkers = Self.hangsHeadingMarkers(for: windowWidth)
         let didChangeFontScale = newScale != windowWidthFontScale
@@ -144,16 +153,22 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     func setChromeInsets(top: CGFloat, bottom: CGFloat) {
         topScrollInset = top
         bottomScrollInset = bottom
-        scrollView.contentInsets = NSEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
+        scrollView.contentInsets = NSEdgeInsets(
+            top: top,
+            left: 0,
+            bottom: bottom,
+            right: 0
+        )
         updateTextContainerInset()
     }
 
     func pasteAsLink() {
         let selectedRange = textView.selectedRange()
         guard selectedRange.length > 0,
-            let selectedText = (textView.string as NSString).substring(with: selectedRange)
-                .nilIfEmpty,
-            let urlString = pasteboardURLString()
+              let selectedText = (textView.string as NSString)
+              .substring(with: selectedRange)
+              .nilIfEmpty,
+              let urlString = pasteboardURLString()
         else {
             return
         }
@@ -165,7 +180,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         _ = wrapSelection(opening: opening, closing: closing)
     }
 
-    func markdownTextViewInsertTab(_ textView: NSTextView) {
+    func markdownTextViewInsertTab(_: NSTextView) {
         let insertedText: String
         switch settings.tabInsertionMode {
         case .spaces:
@@ -186,8 +201,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             return true
         }
 
-        guard
-            let continuation = listContinuationAtSelection() ?? quoteContinuationAtSelection()
+        guard let continuation = listContinuationAtSelection() ??
+            quoteContinuationAtSelection()
         else {
             return false
         }
@@ -197,7 +212,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     }
 
     func markdownTextView(
-        _ textView: NSTextView, wrapSelectionWith opening: String, closing: String
+        _: NSTextView, wrapSelectionWith opening: String, closing: String
     ) -> Bool {
         wrapSelection(opening: opening, closing: closing)
     }
@@ -206,7 +221,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         imageFileURL(from: sender.draggingPasteboard) == nil ? [] : .copy
     }
 
-    func markdownTextViewPerformDragOperation(_ sender: NSDraggingInfo, in textView: NSTextView)
+    func markdownTextViewPerformDragOperation(
+        _ sender: NSDraggingInfo,
+        in textView: NSTextView
+    )
         -> Bool
     {
         guard let url = imageFileURL(from: sender.draggingPasteboard) else {
@@ -233,7 +251,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         return true
     }
 
-    func textDidChange(_ notification: Notification) {
+    func textDidChange(_: Notification) {
         guard !isApplyingStyles else {
             return
         }
@@ -242,7 +260,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
@@ -254,7 +272,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         scrollView.drawsBackground = true
         scrollView.backgroundColor = colors.background
         scrollView.contentInsets = NSEdgeInsets(
-            top: topScrollInset, left: 0, bottom: bottomScrollInset, right: 0)
+            top: topScrollInset, left: 0, bottom: bottomScrollInset, right: 0
+        )
         scrollView.documentView = textView
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -266,7 +285,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         )
     }
 
-    @objc private func scrollViewBoundsDidChange(_ notification: Notification) {
+    @objc private func scrollViewBoundsDidChange(_: Notification) {
         delegate?.markdownEditorViewDidScroll(self)
     }
 
@@ -276,7 +295,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         textView.registerForDraggedTypes([.fileURL])
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(
-            width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -301,18 +322,26 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
     private func replaceSelectedText(with string: String) {
         let selectedRange = textView.selectedRange()
-        guard textView.shouldChangeText(in: selectedRange, replacementString: string) else {
+        guard textView.shouldChangeText(in: selectedRange, replacementString: string)
+        else {
             return
         }
 
         textView.textStorage?.replaceCharacters(in: selectedRange, with: string)
         textView.didChangeText()
         textView.setSelectedRange(
-            NSRange(location: selectedRange.location + (string as NSString).length, length: 0))
+            NSRange(
+                location: selectedRange.location + (string as NSString).length,
+                length: 0
+            )
+        )
     }
 
-    private func replaceText(in range: NSRange, with string: String, selectedLocation: Int) -> Bool
-    {
+    private func replaceText(
+        in range: NSRange,
+        with string: String,
+        selectedLocation: Int
+    ) -> Bool {
         guard textView.shouldChangeText(in: range, replacementString: string) else {
             return false
         }
@@ -332,7 +361,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
         let selectedText = (textView.string as NSString).substring(with: selectedRange)
         let replacement = opening + selectedText + closing
-        guard textView.shouldChangeText(in: selectedRange, replacementString: replacement) else {
+        guard textView
+            .shouldChangeText(in: selectedRange, replacementString: replacement)
+        else {
             return false
         }
 
@@ -341,7 +372,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         textView.setSelectedRange(
             NSRange(
                 location: selectedRange.location + (opening as NSString).length,
-                length: (selectedText as NSString).length))
+                length: (selectedText as NSString).length
+            )
+        )
         return true
     }
 
@@ -349,15 +382,22 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let nsString = textView.string as NSString
         let location = textView.selectedRange().location
         let lineLocation = location > 0 ? location - 1 : 0
-        let lineRange = nsString.lineRange(for: NSRange(location: lineLocation, length: 0))
+        let lineRange = nsString.lineRange(for: NSRange(
+            location: lineLocation,
+            length: 0
+        ))
         let cursorRange = NSRange(
-            location: lineRange.location, length: max(0, location - lineRange.location))
+            location: lineRange.location, length: max(0, location - lineRange.location)
+        )
         let linePrefix = nsString.substring(with: cursorRange)
-        guard
-            let expression = try? NSRegularExpression(
-                pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(.+)$"),
+        guard let expression = try? NSRegularExpression(
+            pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(.+)$"
+        ),
             let match = expression.firstMatch(
-                in: linePrefix, range: NSRange(location: 0, length: (linePrefix as NSString).length)
+                in: linePrefix, range: NSRange(
+                    location: 0,
+                    length: (linePrefix as NSString).length
+                )
             ),
             match.numberOfRanges == 4
         else {
@@ -374,10 +414,15 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let nsString = textView.string as NSString
         let location = textView.selectedRange().location
         let lineLocation = location > 0 ? location - 1 : 0
-        let lineRange = nsString.lineRange(for: NSRange(location: lineLocation, length: 0))
+        let lineRange = nsString.lineRange(for: NSRange(
+            location: lineLocation,
+            length: 0
+        ))
         let cursorRange = NSRange(
-            location: lineRange.location, length: max(0, location - lineRange.location))
-        let lineText = nsString.substring(with: lineRange).trimmingCharacters(in: .newlines)
+            location: lineRange.location, length: max(0, location - lineRange.location)
+        )
+        let lineText = nsString.substring(with: lineRange)
+            .trimmingCharacters(in: .newlines)
         guard lineMatchesEmptyMarkdownPrefix(lineText) else {
             return false
         }
@@ -385,9 +430,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let replacementRange = NSRange(
             location: lineRange.location,
             length: lineRange.location + lineRange.length > location
-                ? lineRange.length : cursorRange.length)
+                ? lineRange.length : cursorRange.length
+        )
         return replaceText(
-            in: replacementRange, with: "\n", selectedLocation: replacementRange.location + 1)
+            in: replacementRange, with: "\n",
+            selectedLocation: replacementRange.location + 1
+        )
     }
 
     private func lineMatchesEmptyMarkdownPrefix(_ line: String) -> Bool {
@@ -410,16 +458,22 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let nsString = textView.string as NSString
         let location = textView.selectedRange().location
         let lineLocation = location > 0 ? location - 1 : 0
-        let lineRange = nsString.lineRange(for: NSRange(location: lineLocation, length: 0))
+        let lineRange = nsString.lineRange(for: NSRange(
+            location: lineLocation,
+            length: 0
+        ))
         let cursorRange = NSRange(
-            location: lineRange.location, length: max(0, location - lineRange.location))
+            location: lineRange.location, length: max(0, location - lineRange.location)
+        )
         let linePrefix = nsString.substring(with: cursorRange)
-        guard
-            let expression = try? NSRegularExpression(pattern: "^([ \\t]*)>"),
-            let match = expression.firstMatch(
-                in: linePrefix, range: NSRange(location: 0, length: (linePrefix as NSString).length)
-            ),
-            match.numberOfRanges == 2
+        guard let expression = try? NSRegularExpression(pattern: "^([ \\t]*)>"),
+              let match = expression.firstMatch(
+                  in: linePrefix, range: NSRange(
+                      location: 0,
+                      length: (linePrefix as NSString).length
+                  )
+              ),
+              match.numberOfRanges == 2
         else {
             return nil
         }
@@ -431,10 +485,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
 
     private func nextListMarker(after marker: String) -> String {
         guard let expression = try? NSRegularExpression(pattern: "^(\\d+)([.)])$"),
-            let match = expression.firstMatch(
-                in: marker, range: NSRange(location: 0, length: (marker as NSString).length)),
-            match.numberOfRanges == 3,
-            let number = Int((marker as NSString).substring(with: match.range(at: 1)))
+              let match = expression.firstMatch(
+                  in: marker, range: NSRange(
+                      location: 0,
+                      length: (marker as NSString).length
+                  )
+              ),
+              match.numberOfRanges == 3,
+              let number = Int((marker as NSString).substring(with: match.range(at: 1)))
         else {
             return marker
         }
@@ -449,9 +507,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             return url.absoluteString
         }
 
-        guard
-            let string = pasteboard.string(forType: .string)?.trimmingCharacters(
-                in: .whitespacesAndNewlines),
+        guard let string = pasteboard.string(forType: .string)?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ),
             let url = URL(string: string),
             url.scheme != nil
         else {
@@ -466,14 +524,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     }
 
     private func imageFileURL(from pasteboard: NSPasteboard) -> URL? {
-        guard let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL]
+        guard let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: nil
+        ) as? [URL]
         else {
             return nil
         }
 
         return urls.first { url in
             guard url.isFileURL,
-                let type = UTType(filenameExtension: url.pathExtension)
+                  let type = UTType(filenameExtension: url.pathExtension)
             else {
                 return false
             }
@@ -506,8 +567,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         var sharedPrefixCount = 0
 
         while sharedPrefixCount < baseComponents.count,
-            sharedPrefixCount < targetComponents.count,
-            baseComponents[sharedPrefixCount] == targetComponents[sharedPrefixCount]
+              sharedPrefixCount < targetComponents.count,
+              baseComponents[sharedPrefixCount] == targetComponents[sharedPrefixCount]
         {
             sharedPrefixCount += 1
         }
@@ -516,7 +577,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             return targetURL.lastPathComponent
         }
 
-        let upComponents = Array(repeating: "..", count: baseComponents.count - sharedPrefixCount)
+        let upComponents = Array(
+            repeating: "..",
+            count: baseComponents.count - sharedPrefixCount
+        )
         let downComponents = targetComponents.dropFirst(sharedPrefixCount)
         return (upComponents + downComponents).joined(separator: "/")
     }
@@ -538,7 +602,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         }
 
         textStorage.setAttributes(
-            attributes, range: NSRange(location: 0, length: textStorage.length))
+            attributes, range: NSRange(location: 0, length: textStorage.length)
+        )
     }
 
     private var baseFont: NSFont {
@@ -550,7 +615,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     }
 
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
-        return [
+        [
             .font: baseFont,
             .foregroundColor: colors.foreground,
             .paragraphStyle: baseParagraphStyle(),
@@ -587,7 +652,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         return 1
     }
 
-    private static func minimumHorizontalPaddingCharacters(for width: CGFloat) -> CGFloat {
+    private static func minimumHorizontalPaddingCharacters(for width: CGFloat)
+        -> CGFloat
+    {
         if width > 980 {
             return 6
         }
@@ -626,20 +693,23 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         _ kind: MarkdownStyleKind, attributes: inout [NSAttributedString.Key: Any]
     ) {
         switch kind {
-        case .heading(_):
+        case .heading:
             attributes[.font] = font(
-                from: attributes, adding: .boldFontMask)
+                from: attributes, adding: .boldFontMask
+            )
         case .strong:
             attributes[.font] = font(from: attributes, adding: .boldFontMask)
         case .emphasis:
             attributes[.font] = font(from: attributes, adding: .italicFontMask)
             attributes[.foregroundColor] = colors.foreground
         case .inlineCode:
-            attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
+            attributes[.font] = LilexFontProvider
+                .regular(size: currentPointSize(from: attributes))
             attributes[.markdownCodeBackgroundColor] = colors.codeBackground
             attributes[.foregroundColor] = colors.foreground
         case .codeBlock:
-            attributes[.font] = LilexFontProvider.regular(size: currentPointSize(from: attributes))
+            attributes[.font] = LilexFontProvider
+                .regular(size: currentPointSize(from: attributes))
             attributes[.markdownCodeBlockBackgroundColor] = colors.codeBackground
             attributes[.foregroundColor] = colors.foreground
         case .linkDestination:
@@ -666,10 +736,15 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let currentFont = attributes[.font] as? NSFont ?? baseFont
         let targetSize = size ?? currentFont.pointSize
         let existingTraits = NSFontManager.shared.traits(of: currentFont)
-        return LilexFontProvider.font(size: targetSize, traits: existingTraits.union(traits))
+        return LilexFontProvider.font(
+            size: targetSize,
+            traits: existingTraits.union(traits)
+        )
     }
 
-    private func currentPointSize(from attributes: [NSAttributedString.Key: Any]) -> CGFloat {
+    private func currentPointSize(from attributes: [NSAttributedString.Key: Any])
+        -> CGFloat
+    {
         (attributes[.font] as? NSFont)?.pointSize ?? baseFont.pointSize
     }
 
@@ -679,37 +754,48 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         }
 
         switch kind {
-        case .heading(_):
+        case .heading:
             addFontTraits(.boldFontMask, range: range)
             applyHeadingHang(range: range)
         case .strong:
             addFontTraits(.boldFontMask, range: range)
         case .emphasis:
             addFontTraits(.italicFontMask, range: range)
-            textStorage.addAttribute(.foregroundColor, value: colors.foreground, range: range)
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: colors.foreground,
+                range: range
+            )
         case .inlineCode:
             setMonospaceFont(range: range)
             textStorage.addAttributes(
                 [
                     .markdownCodeBackgroundColor: colors.codeBackground,
                     .foregroundColor: colors.foreground,
-                ], range: range)
+                ], range: range
+            )
         case .codeBlock:
             setMonospaceFont(range: range)
             textStorage.addAttributes(
                 [
                     .markdownCodeBlockBackgroundColor: colors.codeBackground,
                     .foregroundColor: colors.foreground,
-                ], range: range)
+                ], range: range
+            )
         case .linkDestination:
             textStorage.addAttributes(
                 [
                     .foregroundColor: colors.punctuation,
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
                     .underlineColor: colors.underline,
-                ], range: range)
+                ], range: range
+            )
         case .linkSyntaxPunctuation:
-            textStorage.addAttribute(.foregroundColor, value: colors.punctuation, range: range)
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: colors.punctuation,
+                range: range
+            )
         case .link, .image:
             break
         case .blockQuote:
@@ -718,7 +804,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             applyLineMarkerStyle(pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+", range: range)
         case .thematicBreak:
             textStorage.addAttribute(
-                .foregroundColor, value: colors.thematicBreak, range: range)
+                .foregroundColor, value: colors.thematicBreak, range: range
+            )
         }
     }
 
@@ -749,17 +836,19 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         }
 
         let glyphRange = layoutManager.glyphRange(
-            forBoundingRect: textView.visibleRect, in: textContainer)
+            forBoundingRect: textView.visibleRect, in: textContainer
+        )
         let characterRange = layoutManager.characterRange(
-            forGlyphRange: glyphRange, actualGlyphRange: nil)
+            forGlyphRange: glyphRange, actualGlyphRange: nil
+        )
         return characterRange.length > 0 ? characterRange : nil
     }
 
     private func boundedRange(_ range: NSRange) -> NSRange? {
         guard range.location >= 0,
-            range.length >= 0,
-            range.location <= textStorage.length,
-            range.location + range.length <= textStorage.length
+              range.length >= 0,
+              range.location <= textStorage.length,
+              range.location + range.length <= textStorage.length
         else {
             return nil
         }
@@ -767,12 +856,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         return range
     }
 
-    private func addFontTraits(_ traits: NSFontTraitMask, size: CGFloat? = nil, range: NSRange) {
+    private func addFontTraits(
+        _ traits: NSFontTraitMask,
+        size: CGFloat? = nil,
+        range: NSRange
+    ) {
         textStorage.enumerateAttribute(.font, in: range) { value, subrange, _ in
             let currentFont = value as? NSFont ?? baseFont
             let existingTraits = NSFontManager.shared.traits(of: currentFont)
             let convertedFont = LilexFontProvider.font(
-                size: size ?? currentFont.pointSize, traits: existingTraits.union(traits))
+                size: size ?? currentFont.pointSize, traits: existingTraits.union(traits)
+            )
             textStorage.addAttribute(.font, value: convertedFont, range: subrange)
         }
     }
@@ -790,9 +884,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
             return
         }
 
-        guard
-            let expression = try? NSRegularExpression(
-                pattern: "^\\s*#{1,6}\\s+", options: [.anchorsMatchLines])
+        guard let expression = try? NSRegularExpression(
+            pattern: "^\\s*#{1,6}\\s+", options: [.anchorsMatchLines]
+        )
         else {
             return
         }
@@ -800,31 +894,43 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let string = textStorage.string as NSString
         let markerCharacterWidth = characterWidth()
         let lineRange = string.lineRange(for: range)
-        expression.enumerateMatches(in: textStorage.string, range: lineRange) { match, _, stop in
-            guard let markerRange = match?.range,
-                markerRange.location != NSNotFound,
-                markerRange.location + markerRange.length <= string.length
-            else {
-                return
-            }
+        expression
+            .enumerateMatches(
+                in: textStorage.string,
+                range: lineRange
+            ) { match, _, stop in
+                guard let markerRange = match?.range,
+                      markerRange.location != NSNotFound,
+                      markerRange.location + markerRange.length <= string.length
+                else {
+                    return
+                }
 
-            let paragraphStyle = baseParagraphStyle()
-            paragraphStyle.firstLineHeadIndent =
-                paragraphGutter - markerCharacterWidth * CGFloat(markerRange.length)
-            textStorage.addAttribute(.paragraphStyle, value: paragraphStyle, range: lineRange)
-            stop.pointee = true
-        }
+                let paragraphStyle = baseParagraphStyle()
+                paragraphStyle.firstLineHeadIndent =
+                    paragraphGutter - markerCharacterWidth * CGFloat(markerRange.length)
+                textStorage.addAttribute(
+                    .paragraphStyle,
+                    value: paragraphStyle,
+                    range: lineRange
+                )
+                stop.pointee = true
+            }
     }
 
     @discardableResult
     private func updateTextContainerInset() -> Bool {
         let availableWidth =
             scrollView.contentView.bounds.width > 0
-            ? scrollView.contentView.bounds.width : bounds.width
+                ? scrollView.contentView.bounds.width : bounds.width
         let minimumHorizontalInset =
-            (characterWidth() * Self.minimumHorizontalPaddingCharacters(for: availableWidth))
+            (characterWidth() * Self
+                .minimumHorizontalPaddingCharacters(for: availableWidth))
         let targetWidth = characterWidth() * CGFloat(settings.maxTextColumns)
-        let horizontalInset = max(minimumHorizontalInset, floor((availableWidth - targetWidth) / 2))
+        let horizontalInset = max(
+            minimumHorizontalInset,
+            floor((availableWidth - targetWidth) / 2)
+        )
         let markerGutter = characterWidth() * 7
         let containerInset = max(6, horizontalInset - markerGutter)
         let newParagraphGutter = max(0, horizontalInset - containerInset)
@@ -835,7 +941,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         return didChangeParagraphGutter
     }
 
-    private func restoreSelectionAndScroll(selectedRanges: [NSValue], visibleOrigin: NSPoint) {
+    private func restoreSelectionAndScroll(
+        selectedRanges: [NSValue],
+        visibleOrigin: NSPoint
+    ) {
         textView.selectedRanges = selectedRanges
         layoutManager.ensureLayout(for: textContainer)
 
@@ -845,7 +954,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
         let minOriginY = -scrollView.contentInsets.top
         let maxOriginY = max(
             minOriginY,
-            documentBounds.maxY - clipView.bounds.height + scrollView.contentInsets.bottom)
+            documentBounds.maxY - clipView.bounds.height + scrollView.contentInsets
+                .bottom
+        )
         let clampedOrigin = NSPoint(
             x: min(max(visibleOrigin.x, 0), maxOriginX),
             y: min(max(visibleOrigin.y, minOriginY), maxOriginY)
@@ -863,9 +974,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
     private func applyLineMarkerStyle(
         pattern: String, range: NSRange, markerCaptureGroup: Int? = nil
     ) {
-        guard
-            let expression = try? NSRegularExpression(
-                pattern: pattern, options: [.anchorsMatchLines])
+        guard let expression = try? NSRegularExpression(
+            pattern: pattern, options: [.anchorsMatchLines]
+        )
         else {
             return
         }
@@ -886,15 +997,15 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
                 markerRange = match.range
             }
 
-            guard
-                markerRange.location != NSNotFound,
-                markerRange.location + markerRange.length <= string.length
+            guard markerRange.location != NSNotFound,
+                  markerRange.location + markerRange.length <= string.length
             else {
                 return
             }
 
             textStorage.addAttribute(
-                .foregroundColor, value: colors.listMarker, range: markerRange)
+                .foregroundColor, value: colors.listMarker, range: markerRange
+            )
         }
     }
 
@@ -912,10 +1023,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate, MarkdownTextViewComm
                 [
                     .underlineStyle: NSUnderlineStyle.single.rawValue,
                     .underlineColor: colors.underline,
-                ], range: range)
+                ], range: range
+            )
 
             let nextLocation = range.location + range.length
-            searchRange = NSRange(location: nextLocation, length: string.length - nextLocation)
+            searchRange = NSRange(
+                location: nextLocation,
+                length: string.length - nextLocation
+            )
         }
     }
 }
