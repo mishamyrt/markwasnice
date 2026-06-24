@@ -923,7 +923,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         guard let expression = try? NSRegularExpression(
-            pattern: "^\\s*#{1,6}\\s+", options: [.anchorsMatchLines]
+            pattern: "^[ \t]*#{1,6}[ \t]+", options: [.anchorsMatchLines]
         )
         else {
             return
