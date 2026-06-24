@@ -66,6 +66,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     override func layout() {
         super.layout()
+        applyChromeInsets(clampsScrollPosition: false)
         let didChangeParagraphGutter = updateTextContainerInset()
         if didChangeParagraphGutter {
             applyStyles(currentStyleSpans)
@@ -153,13 +154,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     func setChromeInsets(top: CGFloat, bottom: CGFloat) {
         topScrollInset = top
         bottomScrollInset = bottom
-        scrollView.contentInsets = NSEdgeInsets(
-            top: top,
-            left: 0,
-            bottom: bottom,
-            right: 0
-        )
-        updateTextContainerInset()
+        applyChromeInsets(clampsScrollPosition: true)
     }
 
     func pasteAsLink() {
@@ -270,6 +265,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
+        scrollView.automaticallyAdjustsContentInsets = false
         scrollView.backgroundColor = colors.background
         scrollView.contentInsets = NSEdgeInsets(
             top: topScrollInset, left: 0, bottom: bottomScrollInset, right: 0
@@ -283,6 +279,29 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
+    }
+
+    private func applyChromeInsets(clampsScrollPosition: Bool) {
+        let contentInsets = NSEdgeInsets(
+            top: topScrollInset,
+            left: 0,
+            bottom: bottomScrollInset,
+            right: 0
+        )
+
+        if !edgeInsets(scrollView.contentInsets, equalTo: contentInsets) {
+            scrollView.contentInsets = contentInsets
+        }
+
+        updateTextContainerInset()
+        if clampsScrollPosition {
+            clampScrollPositionToInsets()
+        }
+    }
+
+    private func edgeInsets(_ lhs: NSEdgeInsets, equalTo rhs: NSEdgeInsets) -> Bool {
+        lhs.top == rhs.top && lhs.left == rhs.left && lhs.bottom == rhs.bottom
+            && lhs.right == rhs.right
     }
 
     @objc private func scrollViewBoundsDidChange(_: Notification) {
@@ -963,6 +982,24 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
 
         clipView.scroll(to: clampedOrigin)
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func clampScrollPositionToInsets() {
+        let clipView = scrollView.contentView
+        let documentBounds = scrollView.documentView?.bounds ?? .zero
+        let minOriginY = -scrollView.contentInsets.top
+        let maxOriginY = max(
+            minOriginY,
+            documentBounds.maxY - clipView.bounds.height
+        )
+        let clampedY = min(max(clipView.bounds.origin.y, minOriginY), maxOriginY)
+
+        guard clampedY != clipView.bounds.origin.y else {
+            return
+        }
+
+        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: clampedY))
         scrollView.reflectScrolledClipView(clipView)
     }
 

@@ -4,6 +4,10 @@ import AppKit
 final class MarkdownDocumentWindowController: NSWindowController,
     MarkdownEditorViewDelegate, NSWindowDelegate
 {
+    private static let fullScreenTextTopInset: CGFloat = 64
+    private static let fullScreenBottomInset: CGFloat = 120
+    private static let windowBottomInset: CGFloat = 72
+
     private static var nextWindowTopLeft: NSPoint?
 
     private let editorView: MarkdownEditorView
@@ -48,10 +52,11 @@ final class MarkdownDocumentWindowController: NSWindowController,
         window.title = document.fileURL?.lastPathComponent ?? "Untitled"
         window.center()
         Self.nextWindowTopLeft = window.cascadeTopLeft(
-            from: Self.nextWindowTopLeft ?? NSPoint(
-                x: window.frame.minX,
-                y: window.frame.maxY
-            )
+            from: Self.nextWindowTopLeft
+                ?? NSPoint(
+                    x: window.frame.minX,
+                    y: window.frame.maxY
+                )
         )
         window.contentView = contentView
 
@@ -74,7 +79,6 @@ final class MarkdownDocumentWindowController: NSWindowController,
         }
 
         editorView.delegate = self
-        editorView.setChromeInsets(top: EditorChromeView.topChromeHeight, bottom: 188)
         stylingController.updateWindowWidthFontScale(for: window.frame.width)
         editorView.documentURL = document.fileURL
         editorView.setString(document.editorText, clearsUndo: true)
@@ -82,6 +86,10 @@ final class MarkdownDocumentWindowController: NSWindowController,
         updateChromeTitle()
         stylingController.scheduleParse(text: editorView.string)
         scheduleWordCount()
+        editorView.setChromeInsets(
+            top: EditorChromeView.topChromeHeight,
+            bottom: Self.windowBottomInset
+        )
     }
 
     func applySettings(_ settings: EditorSettings) {
@@ -213,8 +221,9 @@ final class MarkdownDocumentWindowController: NSWindowController,
         isInFullScreen = isFullScreen
         contentView.setUsesSystemTopBar(isFullScreen)
         editorView.setChromeInsets(
-            top: isFullScreen ? 0 : EditorChromeView.topChromeHeight,
-            bottom: 188
+            top: isFullScreen ? Self.fullScreenTextTopInset : EditorChromeView
+                .topChromeHeight,
+            bottom: isFullScreen ? Self.fullScreenBottomInset : Self.windowBottomInset
         )
         setWindowButtonsVisible(true, animated: false)
 
