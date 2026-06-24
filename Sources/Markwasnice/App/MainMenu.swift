@@ -140,6 +140,61 @@ enum MainMenu {
             action: #selector(NSText.selectAll(_:)),
             keyEquivalent: "a"
         )
+        menu.addItem(NSMenuItem.separator())
+        addMarkupItem(
+            to: menu, title: "Bold", command: .bold,
+            keyEquivalent: "b", delegate: delegate
+        )
+        addMarkupItem(
+            to: menu, title: "Italic", command: .italic,
+            keyEquivalent: "i", delegate: delegate
+        )
+        addMarkupItem(
+            to: menu, title: "Strikethrough", command: .strikethrough,
+            keyEquivalent: "u", modifiers: [.command, .option],
+            delegate: delegate
+        )
+        addMarkupItem(
+            to: menu, title: "Highlight", command: .highlight,
+            keyEquivalent: "u", modifiers: [.command, .shift],
+            delegate: delegate
+        )
+        addMarkupItem(
+            to: menu, title: "Link", command: .link,
+            keyEquivalent: "k", delegate: delegate
+        )
+        addMarkupItem(
+            to: menu, title: "Image Link", command: .imageLink,
+            keyEquivalent: "k", modifiers: [.command, .option],
+            delegate: delegate
+        )
+        addMarkupItem(
+            to: menu, title: "Code", command: .code,
+            keyEquivalent: "j", delegate: delegate
+        )
+        addMarkupItem(
+            to: menu, title: "Code Block", command: .codeBlock,
+            keyEquivalent: "j", modifiers: [.command, .shift],
+            delegate: delegate
+        )
         return menu
+    }
+
+    private static func addMarkupItem(
+        to menu: NSMenu,
+        title: String,
+        command: MarkdownMarkupCommand,
+        keyEquivalent: String,
+        modifiers: NSEvent.ModifierFlags = [.command],
+        delegate: AppDelegate
+    ) {
+        let item = menu.addItem(
+            withTitle: title,
+            action: #selector(AppDelegate.applyMarkdownMarkup(_:)),
+            keyEquivalent: keyEquivalent
+        )
+        item.keyEquivalentModifierMask = modifiers
+        item.target = delegate
+        item.tag = command.rawValue
     }
 }

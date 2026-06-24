@@ -153,6 +153,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         currentWindowController()?.pasteAsLink()
     }
 
+    @objc func applyMarkdownMarkup(_ sender: NSMenuItem) {
+        guard let command = MarkdownMarkupCommand(rawValue: sender.tag) else {
+            return
+        }
+
+        currentWindowController()?.applyMarkup(command)
+    }
+
     @objc func showPreferences(_ sender: Any?) {
         if preferencesWindowController == nil {
             preferencesWindowController =

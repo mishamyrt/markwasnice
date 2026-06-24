@@ -135,6 +135,10 @@ final class MarkdownDocumentWindowController: NSWindowController,
         editorView.pasteAsLink()
     }
 
+    func applyMarkup(_ command: MarkdownMarkupCommand) {
+        editorView.applyMarkup(command)
+    }
+
     func wrapSelectionWithQuotes(opening: String, closing: String) {
         editorView.wrapSelectionWithQuotes(opening: opening, closing: closing)
     }

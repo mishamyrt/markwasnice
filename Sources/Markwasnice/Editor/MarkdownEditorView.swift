@@ -171,6 +171,25 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         replaceSelectedText(with: "[\(escapeLinkText(selectedText))](\(urlString))")
     }
 
+    func applyMarkup(_ command: MarkdownMarkupCommand) {
+        guard let edit = command.edit(
+            in: textView.string, selectedRange: textView.selectedRange()
+        ),
+            textView.shouldChangeText(
+                in: edit.replacementRange,
+                replacementString: edit.replacementString
+            )
+        else {
+            return
+        }
+
+        textView.textStorage?.replaceCharacters(
+            in: edit.replacementRange, with: edit.replacementString
+        )
+        textView.didChangeText()
+        textView.setSelectedRange(edit.selectedRange)
+    }
+
     func wrapSelectionWithQuotes(opening: String, closing: String) {
         _ = wrapSelection(opening: opening, closing: closing)
     }
