@@ -7,109 +7,82 @@
         {
           "fill-specializations" : [
             {
+              "appearance" : "dark",
               "value" : {
-                "solid" : "display-p3:1.00000,0.95294,0.95294,1.00000"
-              }
-            },
-            {
-              "appearance" : "light",
-              "value" : {
-                "solid" : "display-p3:0.00000,0.00000,0.00000,1.00000"
+                "solid" : "srgb:1.00000,1.00000,1.00000,0.90006"
               }
             },
             {
               "appearance" : "tinted",
               "value" : {
-                "solid" : "gray:0.81258,1.00000"
+                "solid" : "gray:1.00000,0.85167"
               }
             }
           ],
-          "image-name" : "lips.svg",
-          "name" : "lips",
-          "position" : {
-            "scale" : 1,
-            "translation-in-points" : [
-              0,
-              2
-            ]
-          }
+          "image-name" : "eye.svg",
+          "name" : "eye"
         }
       ],
       "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 0.1
+        "kind" : "neutral",
+        "opacity" : 0.15000000000000002
       },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.2
-      }
-    },
-    {
-      "blend-mode-specializations" : [
+      "translucency-specializations" : [
         {
-          "value" : "normal"
+          "value" : {
+            "enabled" : true,
+            "value" : 0.1
+          }
         },
         {
           "appearance" : "dark",
-          "value" : "normal"
+          "value" : {
+            "enabled" : true,
+            "value" : 0.45
+          }
         }
-      ],
-      "blur-material" : null,
+      ]
+    },
+    {
       "layers" : [
         {
           "fill-specializations" : [
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
+                "solid" : "srgb:1.00000,1.00000,1.00000,0.89900"
               }
             },
             {
               "appearance" : "tinted",
               "value" : {
-                "solid" : "gray:0.88749,1.00000"
+                "solid" : "gray:0.85156,1.00000"
               }
             }
           ],
-          "image-name" : ">.svg",
-          "name" : ">",
-          "position" : {
-            "scale" : 1,
-            "translation-in-points" : [
-              0,
-              2
-            ]
-          }
+          "image-name" : "mouth.svg",
+          "name" : "mouth"
         }
       ],
-      "lighting" : "individual",
-      "shadow-specializations" : [
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.15
+      },
+      "translucency-specializations" : [
         {
           "value" : {
-            "kind" : "layer-color",
-            "opacity" : 0.1
+            "enabled" : true,
+            "value" : 0.2
           }
         },
         {
           "appearance" : "dark",
           "value" : {
-            "kind" : "layer-color",
-            "opacity" : 0.09
-          }
-        },
-        {
-          "appearance" : "tinted",
-          "value" : {
-            "kind" : "layer-color",
-            "opacity" : 1
+            "enabled" : true,
+            "value" : 0.45
           }
         }
-      ],
-      "specular" : true,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.1
-      }
+      ]
     }
   ],
   "supported-platforms" : {
