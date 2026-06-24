@@ -18,6 +18,19 @@ protocol MarkdownTextViewCommandDelegate: AnyObject {
 @MainActor
 final class MarkdownTextView: NSTextView {
     weak var commandDelegate: MarkdownTextViewCommandDelegate?
+    var textContentInsets = NSEdgeInsetsZero {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    override var textContainerOrigin: NSPoint {
+        let origin = super.textContainerOrigin
+        return NSPoint(
+            x: origin.x + textContentInsets.left,
+            y: origin.y + textContentInsets.top
+        )
+    }
 
     override func keyDown(with event: NSEvent) {
         guard event.modifierFlags.isDisjoint(with: [.command, .control]) else {

@@ -27,8 +27,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var themeColors = EditorThemeColors.default
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var paragraphGutter: CGFloat = 0
-    private var topScrollInset: CGFloat = 0
-    private var bottomScrollInset: CGFloat = 160
+    private var protectedTopScrollInset: CGFloat = 0
+    private var textTopPadding: CGFloat = 0
+    private var textBottomPadding: CGFloat = 160
 
     var documentURL: URL?
 
@@ -88,6 +89,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             textView.undoManager?.removeAllActions()
         }
 
+        updateTextDocumentSize()
         let boundedLocation = min(selectedRange.location, (string as NSString).length)
         textView.setSelectedRange(NSRange(location: boundedLocation, length: 0))
     }
@@ -119,6 +121,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textStorage.endEditing()
         textView.undoManager?.enableUndoRegistration()
         isApplyingStyles = false
+        updateTextDocumentSize()
 
         restoreSelectionAndScroll(
             selectedRanges: selectedRanges,
@@ -151,9 +154,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
     }
 
-    func setChromeInsets(top: CGFloat, bottom: CGFloat) {
-        topScrollInset = top
-        bottomScrollInset = bottom
+    func setChromeInsets(
+        top: CGFloat,
+        bottom: CGFloat,
+        protectedTop: CGFloat = 0
+    ) {
+        protectedTopScrollInset = protectedTop
+        textTopPadding = max(0, top - protectedTop)
+        textBottomPadding = bottom
         applyChromeInsets(clampsScrollPosition: true)
     }
 
@@ -270,6 +278,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
+        updateTextDocumentSize()
         delegate?.markdownEditorViewDidChangeText(self)
     }
 
@@ -287,7 +296,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.backgroundColor = colors.background
         scrollView.contentInsets = NSEdgeInsets(
-            top: topScrollInset, left: 0, bottom: bottomScrollInset, right: 0
+            top: protectedTopScrollInset, left: 0, bottom: 0, right: 0
         )
         scrollView.documentView = textView
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -302,17 +311,27 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     private func applyChromeInsets(clampsScrollPosition: Bool) {
         let contentInsets = NSEdgeInsets(
-            top: topScrollInset,
+            top: protectedTopScrollInset,
             left: 0,
-            bottom: bottomScrollInset,
+            bottom: 0,
+            right: 0
+        )
+        let textInsets = NSEdgeInsets(
+            top: textTopPadding,
+            left: 0,
+            bottom: textBottomPadding,
             right: 0
         )
 
         if !edgeInsets(scrollView.contentInsets, equalTo: contentInsets) {
             scrollView.contentInsets = contentInsets
         }
+        if !edgeInsets(textView.textContentInsets, equalTo: textInsets) {
+            textView.textContentInsets = textInsets
+        }
 
         updateTextContainerInset()
+        updateTextDocumentSize()
         if clampsScrollPosition {
             clampScrollPositionToInsets()
         }
@@ -979,6 +998,34 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         return didChangeParagraphGutter
     }
 
+    private func updateTextDocumentSize() {
+        let clipSize = scrollView.contentView.bounds.size
+        let targetWidth = clipSize.width > 0 ? clipSize.width : bounds.width
+        guard targetWidth > 0 else {
+            return
+        }
+
+        if textView.frame.width != targetWidth {
+            textView.setFrameSize(NSSize(
+                width: targetWidth,
+                height: textView.frame.height
+            ))
+        }
+
+        layoutManager.ensureLayout(for: textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        let targetHeight = max(
+            clipSize.height,
+            ceil(textTopPadding + usedRect.maxY + textBottomPadding)
+        )
+
+        guard textView.frame.height != targetHeight else {
+            return
+        }
+
+        textView.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
+    }
+
     private func restoreSelectionAndScroll(
         selectedRanges: [NSValue],
         visibleOrigin: NSPoint
@@ -992,8 +1039,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let minOriginY = -scrollView.contentInsets.top
         let maxOriginY = max(
             minOriginY,
-            documentBounds.maxY - clipView.bounds.height + scrollView.contentInsets
-                .bottom
+            documentBounds.maxY - clipView.bounds.height
         )
         let clampedOrigin = NSPoint(
             x: min(max(visibleOrigin.x, 0), maxOriginX),

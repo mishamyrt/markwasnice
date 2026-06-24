@@ -88,7 +88,8 @@ final class MarkdownDocumentWindowController: NSWindowController,
         scheduleWordCount()
         editorView.setChromeInsets(
             top: EditorChromeView.topChromeHeight,
-            bottom: Self.windowBottomInset
+            bottom: Self.windowBottomInset,
+            protectedTop: EditorChromeView.topChromeHeight
         )
     }
 
@@ -227,7 +228,8 @@ final class MarkdownDocumentWindowController: NSWindowController,
         editorView.setChromeInsets(
             top: isFullScreen ? Self.fullScreenTextTopInset : EditorChromeView
                 .topChromeHeight,
-            bottom: isFullScreen ? Self.fullScreenBottomInset : Self.windowBottomInset
+            bottom: isFullScreen ? Self.fullScreenBottomInset : Self.windowBottomInset,
+            protectedTop: isFullScreen ? 0 : EditorChromeView.topChromeHeight
         )
         setWindowButtonsVisible(true, animated: false)
 

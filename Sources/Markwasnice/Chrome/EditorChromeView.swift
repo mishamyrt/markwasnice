@@ -14,7 +14,7 @@ final class EditorChromeView: NSView {
 
     private let editorView: MarkdownEditorView
     private let topChrome = HeaderChromeView()
-    private let statusBar = NSVisualEffectView()
+    private let statusBar = PassthroughVisualEffectView()
     private let titleLabel = NSTextField(labelWithString: "Untitled")
     private let dirtyDotLabel = NSTextField(labelWithString: "•")
     private let wordCountLabel = NSTextField(labelWithString: "0 words")
@@ -242,6 +242,12 @@ final class EditorChromeView: NSView {
     }
 
     @objc private func previewPressed(_: Any?) {}
+}
+
+final class PassthroughVisualEffectView: NSVisualEffectView {
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
+    }
 }
 
 @MainActor
