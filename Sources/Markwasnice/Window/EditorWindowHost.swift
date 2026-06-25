@@ -237,34 +237,27 @@ private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
     ) -> NSToolbarItem? {
         guard let session else { return nil }
 
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        item.isBordered = false
-        item.visibilityPriority = .high
-
         switch itemIdentifier {
         case historyItemIdentifier:
-            item.label = "History"
-            item.paletteLabel = "History"
-            item.view = hostingView(
-                EditorTopBarHistoryControls(state: session.shellState),
-                width: 82
-            )
+            return historyToolbarItem()
         case titleItemIdentifier:
+            let item = toolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Title"
             item.paletteLabel = "Title"
             item.view = hostingView(
                 EditorTopBarTitle(state: session.shellState),
                 width: 420
             )
+            return item
         case previewItemIdentifier:
+            let item = toolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Preview"
             item.paletteLabel = "Preview"
             item.view = hostingView(EditorTopBarPreviewButton(), width: 50)
+            return item
         default:
             return nil
         }
-
-        return item
     }
 
     private var toolbarItemIdentifiers: [NSToolbarItem.Identifier] {
@@ -275,6 +268,60 @@ private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
             .flexibleSpace,
             previewItemIdentifier,
         ]
+    }
+
+    private func toolbarItem(
+        itemIdentifier: NSToolbarItem.Identifier
+    ) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.isBordered = false
+        item.visibilityPriority = .high
+        return item
+    }
+
+    private func historyToolbarItem() -> NSToolbarItemGroup {
+        let item = NSToolbarItemGroup(
+            itemIdentifier: historyItemIdentifier,
+            images: [
+                NSImage(
+                    systemSymbolName: "chevron.left",
+                    accessibilityDescription: "Undo"
+                )!,
+                NSImage(
+                    systemSymbolName: "chevron.right",
+                    accessibilityDescription: "Redo"
+                )!,
+            ],
+            selectionMode: .momentary,
+            labels: ["Undo", "Redo"],
+            target: self,
+            action: #selector(performHistoryAction(_:))
+        )
+        item.label = "History"
+        item.paletteLabel = "History"
+        item.controlRepresentation = .expanded
+        item.visibilityPriority = .high
+        return item
+    }
+
+    @objc private func performHistoryAction(_ sender: Any) {
+        let selectedIndex: Int
+        if let item = sender as? NSToolbarItemGroup {
+            selectedIndex = item.selectedIndex
+        } else if let control = sender as? NSSegmentedControl {
+            selectedIndex = control.selectedSegment
+        } else {
+            return
+        }
+
+        switch selectedIndex {
+        case 0:
+            session?.shellState.onUndo?()
+        case 1:
+            session?.shellState.onRedo?()
+        default:
+            break
+        }
     }
 
     private func hostingView(

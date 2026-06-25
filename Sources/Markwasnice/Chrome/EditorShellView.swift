@@ -127,18 +127,92 @@ struct EditorTopBarContent: View {
 
 struct EditorTopBarHistoryControls: View {
     @ObservedObject private var state: EditorShellState
+    @State private var hoveredItem: EditorTopBarHistoryItem?
 
     init(state: EditorShellState) {
         self.state = state
     }
 
     var body: some View {
-        HStack(spacing: 14) {
-            EditorToolbarButton(systemName: "chevron.left", help: "Undo") {
+        HStack(spacing: 0) {
+            EditorTopBarHistoryButton(
+                item: .undo,
+                hoveredItem: $hoveredItem
+            ) {
                 state.onUndo?()
             }
-            EditorToolbarButton(systemName: "chevron.right", help: "Redo") {
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.14))
+                .frame(width: 1, height: 18)
+                .opacity(hoveredItem == nil ? 1 : 0)
+
+            EditorTopBarHistoryButton(
+                item: .redo,
+                hoveredItem: $hoveredItem
+            ) {
                 state.onRedo?()
+            }
+        }
+        .animation(.easeOut(duration: 0.08), value: hoveredItem)
+        .glassEffect(.regular.interactive(), in: .capsule)
+    }
+}
+
+private enum EditorTopBarHistoryItem {
+    case undo
+    case redo
+
+    var systemName: String {
+        switch self {
+        case .undo:
+            "chevron.left"
+        case .redo:
+            "chevron.right"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .undo:
+            "Undo"
+        case .redo:
+            "Redo"
+        }
+    }
+}
+
+private struct EditorTopBarHistoryButton: View {
+    let item: EditorTopBarHistoryItem
+    @Binding var hoveredItem: EditorTopBarHistoryItem?
+    let action: () -> Void
+
+    private var isHovered: Bool {
+        hoveredItem == item
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.22))
+                    .frame(width: 30, height: 26)
+                    .opacity(isHovered ? 1 : 0)
+
+                Image(systemName: item.systemName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.primary.opacity(0.72))
+            }
+            .frame(width: 34, height: 34)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(item.help)
+        .onHover { isHovering in
+            if isHovering {
+                hoveredItem = item
+            } else if hoveredItem == item {
+                hoveredItem = nil
             }
         }
     }
@@ -209,6 +283,7 @@ private struct EditorToolbarButton: View {
     let systemName: String
     let help: String
     var isDisabled = false
+    var hasBackground = true
     let action: () -> Void
 
     var body: some View {
@@ -219,7 +294,7 @@ private struct EditorToolbarButton: View {
                     isDisabled
                         ? Color.secondary.opacity(0.45)
                         : Color.primary
-                        .opacity(0.72)
+                            .opacity(0.72)
                 )
                 .frame(width: 34, height: 34)
                 .contentShape(Circle())
@@ -227,7 +302,19 @@ private struct EditorToolbarButton: View {
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .help(help)
-        .glassEffect(.regular.interactive(), in: .circle)
+        .modifier(EditorToolbarButtonBackground(isVisible: hasBackground))
+    }
+}
+
+private struct EditorToolbarButtonBackground: ViewModifier {
+    let isVisible: Bool
+
+    func body(content: Content) -> some View {
+        if isVisible {
+            content.glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            content
+        }
     }
 }
 
@@ -360,6 +447,8 @@ private final class TopHoverTrackingView: NSView {
 
     private var trackingArea: NSTrackingArea?
     private var isHovering = false
+    private weak var cursorOverrideWindow: NSWindow?
+    private var isCursorOverrideActive = false
 
     override var mouseDownCanMoveWindow: Bool {
         isDragEnabled
@@ -396,26 +485,30 @@ private final class TopHoverTrackingView: NSView {
         self.trackingArea = trackingArea
     }
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            deactivateCursorOverride()
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
     override func mouseEntered(with _: NSEvent) {
-        updateCursor()
+        activateCursorOverride()
         setHovering(true)
     }
 
     override func mouseMoved(with _: NSEvent) {
-        updateCursor()
+        activateCursorOverride()
         setHovering(true)
     }
 
-    override func cursorUpdate(with event: NSEvent) {
-        guard isDragEnabled else {
-            super.cursorUpdate(with: event)
-            return
-        }
-
+    override func cursorUpdate(with _: NSEvent) {
+        activateCursorOverride()
         updateCursor()
     }
 
     override func mouseExited(with _: NSEvent) {
+        deactivateCursorOverride()
         setHovering(false)
     }
 
@@ -433,11 +526,36 @@ private final class TopHoverTrackingView: NSView {
     }
 
     private func updateCursor() {
-        guard isDragEnabled else {
+        NSCursor.arrow.set()
+    }
+
+    private func activateCursorOverride() {
+        guard let window else {
             return
         }
 
-        NSCursor.arrow.set()
+        if cursorOverrideWindow !== window {
+            deactivateCursorOverride()
+            cursorOverrideWindow = window
+        }
+
+        if !isCursorOverrideActive {
+            window.disableCursorRects()
+            isCursorOverrideActive = true
+        }
+
+        updateCursor()
+    }
+
+    private func deactivateCursorOverride() {
+        guard isCursorOverrideActive else {
+            cursorOverrideWindow = nil
+            return
+        }
+
+        cursorOverrideWindow?.enableCursorRects()
+        isCursorOverrideActive = false
+        cursorOverrideWindow = nil
     }
 
     private func setHovering(_ isHovering: Bool) {
