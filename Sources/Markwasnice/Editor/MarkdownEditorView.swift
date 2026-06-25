@@ -683,8 +683,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         [
             .font: baseFont,
             .foregroundColor: colors.foreground,
+            .kern: baseLetterSpacing,
             .paragraphStyle: baseParagraphStyle(),
         ]
+    }
+
+    private var baseLetterSpacing: CGFloat {
+        basePointSize * 0.0305
     }
 
     private func baseParagraphStyle() -> NSMutableParagraphStyle {
@@ -964,7 +969,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         let string = textStorage.string as NSString
-        let markerCharacterWidth = characterWidth()
         let lineRange = string.lineRange(for: range)
         expression
             .enumerateMatches(
@@ -978,9 +982,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                     return
                 }
 
+                let marker = string.substring(with: markerRange) as NSString
+                let markerWidth = marker.size(withAttributes: baseAttributes()).width
                 let paragraphStyle = baseParagraphStyle()
                 paragraphStyle.firstLineHeadIndent =
-                    paragraphGutter - markerCharacterWidth * CGFloat(markerRange.length)
+                    paragraphGutter - markerWidth
                 textStorage.addAttribute(
                     .paragraphStyle,
                     value: paragraphStyle,
