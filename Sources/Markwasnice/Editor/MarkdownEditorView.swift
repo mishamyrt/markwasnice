@@ -27,9 +27,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var themeColors = EditorThemeColors.default
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var paragraphGutter: CGFloat = 0
-    private var protectedTopScrollInset: CGFloat = 0
     private var textTopPadding: CGFloat = 0
     private var textBottomPadding: CGFloat = 160
+    private var visibleScrollerTopInset: CGFloat = 0
+    private var isChromeVisible = true
+    private var lastScrollOffsetY: CGFloat?
 
     var documentURL: URL?
 
@@ -67,8 +69,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     override func layout() {
         super.layout()
-        applyChromeInsets(clampsScrollPosition: false)
-        let didChangeParagraphGutter = updateTextContainerInset()
+        let didChangeParagraphGutter = applyChromeInsets()
         if didChangeParagraphGutter {
             applyStyles(currentStyleSpans)
         }
@@ -104,8 +105,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         currentStyleSpans = spans
-        let selectedRanges = textView.selectedRanges
-        let visibleOrigin = scrollView.contentView.bounds.origin
         let orderedSpans = orderedForVisibleRange(spans)
 
         isApplyingStyles = true
@@ -123,10 +122,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         isApplyingStyles = false
         updateTextDocumentSize()
 
-        restoreSelectionAndScroll(
-            selectedRanges: selectedRanges,
-            visibleOrigin: visibleOrigin
-        )
         updateTypingAttributesAtSelection(spans: spans)
     }
 
@@ -157,12 +152,18 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     func setChromeInsets(
         top: CGFloat,
         bottom: CGFloat,
-        protectedTop: CGFloat = 0
+        protectedTop _: CGFloat = 0
     ) {
-        protectedTopScrollInset = protectedTop
-        textTopPadding = max(0, top - protectedTop)
+        textTopPadding = top
         textBottomPadding = bottom
-        applyChromeInsets(clampsScrollPosition: true)
+        visibleScrollerTopInset = top
+        applyChromeInsets()
+        setScrollerTopInset(isChromeVisible ? visibleScrollerTopInset : 0)
+    }
+
+    func setChromeVisible(_ isVisible: Bool) {
+        isChromeVisible = isVisible
+        setScrollerTopInset(isVisible ? visibleScrollerTopInset : 0)
     }
 
     func pasteAsLink() {
@@ -295,8 +296,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         scrollView.drawsBackground = true
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.backgroundColor = colors.background
-        scrollView.contentInsets = NSEdgeInsets(
-            top: protectedTopScrollInset, left: 0, bottom: 0, right: 0
+        scrollView.contentInsets = NSEdgeInsetsZero
+        scrollView.scrollerInsets = NSEdgeInsets(
+            top: visibleScrollerTopInset, left: 0, bottom: 0, right: 0
         )
         scrollView.documentView = textView
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -309,13 +311,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
-    private func applyChromeInsets(clampsScrollPosition: Bool) {
-        let contentInsets = NSEdgeInsets(
-            top: protectedTopScrollInset,
-            left: 0,
-            bottom: 0,
-            right: 0
-        )
+    @discardableResult
+    private func applyChromeInsets() -> Bool {
         let textInsets = NSEdgeInsets(
             top: textTopPadding,
             left: 0,
@@ -323,18 +320,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             right: 0
         )
 
-        if !edgeInsets(scrollView.contentInsets, equalTo: contentInsets) {
-            scrollView.contentInsets = contentInsets
+        if !edgeInsets(scrollView.contentInsets, equalTo: NSEdgeInsetsZero) {
+            scrollView.contentInsets = NSEdgeInsetsZero
         }
         if !edgeInsets(textView.textContentInsets, equalTo: textInsets) {
             textView.textContentInsets = textInsets
         }
 
-        updateTextContainerInset()
+        let didChangeParagraphGutter = updateTextContainerInset()
         updateTextDocumentSize()
-        if clampsScrollPosition {
-            clampScrollPositionToInsets()
-        }
+        return didChangeParagraphGutter
     }
 
     private func edgeInsets(_ lhs: NSEdgeInsets, equalTo rhs: NSEdgeInsets) -> Bool {
@@ -342,7 +337,20 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             && lhs.right == rhs.right
     }
 
-    @objc private func scrollViewBoundsDidChange(_: Notification) {
+    @objc private func scrollViewBoundsDidChange(_ notification: Notification) {
+        guard let clipView = notification.object as? NSClipView else {
+            return
+        }
+
+        let offsetY = clipView.bounds.origin.y
+        defer { lastScrollOffsetY = offsetY }
+
+        guard let lastScrollOffsetY,
+              abs(offsetY - lastScrollOffsetY) > 0.5
+        else {
+            return
+        }
+
         delegate?.markdownEditorViewDidScroll(self)
     }
 
@@ -355,7 +363,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude
         )
-        textView.isVerticallyResizable = true
+        textView.isVerticallyResizable = false
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         updateTextContainerInset()
@@ -893,12 +901,19 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         let glyphRange = layoutManager.glyphRange(
-            forBoundingRect: textView.visibleRect, in: textContainer
+            forBoundingRect: visibleTextContainerRect(), in: textContainer
         )
         let characterRange = layoutManager.characterRange(
             forGlyphRange: glyphRange, actualGlyphRange: nil
         )
         return characterRange.length > 0 ? characterRange : nil
+    }
+
+    private func visibleTextContainerRect() -> NSRect {
+        var visibleRect = textView.visibleRect
+        visibleRect.origin.x -= textView.textContainerOrigin.x
+        visibleRect.origin.y -= textView.textContainerOrigin.y
+        return visibleRect
     }
 
     private func boundedRange(_ range: NSRange) -> NSRange? {
@@ -992,9 +1007,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let containerInset = max(6, horizontalInset - markerGutter)
         let newParagraphGutter = max(0, horizontalInset - containerInset)
         let didChangeParagraphGutter = newParagraphGutter != paragraphGutter
+        let containerInsetSize = NSSize(width: containerInset, height: 0)
 
         paragraphGutter = newParagraphGutter
-        textView.textContainerInset = NSSize(width: containerInset, height: 0)
+        if textView.textContainerInset != containerInsetSize {
+            textView.textContainerInset = containerInsetSize
+        }
         return didChangeParagraphGutter
     }
 
@@ -1014,9 +1032,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
+        let textMaxY = max(usedRect.maxY, extraLineFragmentMaxY())
         let targetHeight = max(
             clipSize.height,
-            ceil(textTopPadding + usedRect.maxY + textBottomPadding)
+            ceil(textTopPadding + textMaxY + textBottomPadding)
         )
 
         guard textView.frame.height != targetHeight else {
@@ -1026,46 +1045,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.setFrameSize(NSSize(width: targetWidth, height: targetHeight))
     }
 
-    private func restoreSelectionAndScroll(
-        selectedRanges: [NSValue],
-        visibleOrigin: NSPoint
-    ) {
-        textView.selectedRanges = selectedRanges
-        layoutManager.ensureLayout(for: textContainer)
+    private func extraLineFragmentMaxY() -> CGFloat {
+        guard layoutManager.extraLineFragmentTextContainer === textContainer else {
+            return 0
+        }
 
-        let clipView = scrollView.contentView
-        let documentBounds = scrollView.documentView?.bounds ?? .zero
-        let maxOriginX = max(0, documentBounds.maxX - clipView.bounds.width)
-        let minOriginY = -scrollView.contentInsets.top
-        let maxOriginY = max(
-            minOriginY,
-            documentBounds.maxY - clipView.bounds.height
-        )
-        let clampedOrigin = NSPoint(
-            x: min(max(visibleOrigin.x, 0), maxOriginX),
-            y: min(max(visibleOrigin.y, minOriginY), maxOriginY)
-        )
-
-        clipView.scroll(to: clampedOrigin)
-        scrollView.reflectScrolledClipView(clipView)
+        return layoutManager.extraLineFragmentRect.maxY
     }
 
-    private func clampScrollPositionToInsets() {
-        let clipView = scrollView.contentView
-        let documentBounds = scrollView.documentView?.bounds ?? .zero
-        let minOriginY = -scrollView.contentInsets.top
-        let maxOriginY = max(
-            minOriginY,
-            documentBounds.maxY - clipView.bounds.height
-        )
-        let clampedY = min(max(clipView.bounds.origin.y, minOriginY), maxOriginY)
-
-        guard clampedY != clipView.bounds.origin.y else {
+    private func setScrollerTopInset(_ top: CGFloat) {
+        let scrollerInsets = NSEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
+        guard !edgeInsets(scrollView.scrollerInsets, equalTo: scrollerInsets) else {
             return
         }
 
-        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: clampedY))
-        scrollView.reflectScrolledClipView(clipView)
+        scrollView.scrollerInsets = scrollerInsets
     }
 
     private func characterWidth() -> CGFloat {
