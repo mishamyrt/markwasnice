@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class EditorShellState: ObservableObject {
     static let toolbarRevealHeight: CGFloat = 86
+    static let toolbarCursorExclusionHeight: CGFloat = 52
     static let toolbarContentHeight: CGFloat = 50
 
     @Published var title = "Untitled"
@@ -294,7 +295,7 @@ private struct EditorToolbarButton: View {
                     isDisabled
                         ? Color.secondary.opacity(0.45)
                         : Color.primary
-                            .opacity(0.72)
+                        .opacity(0.72)
                 )
                 .frame(width: 34, height: 34)
                 .contentShape(Circle())
@@ -447,8 +448,6 @@ private final class TopHoverTrackingView: NSView {
 
     private var trackingArea: NSTrackingArea?
     private var isHovering = false
-    private weak var cursorOverrideWindow: NSWindow?
-    private var isCursorOverrideActive = false
 
     override var mouseDownCanMoveWindow: Bool {
         isDragEnabled
@@ -460,7 +459,7 @@ private final class TopHoverTrackingView: NSView {
             return
         }
 
-        addCursorRect(bounds, cursor: .arrow)
+        addCursorRect(cursorExclusionRect, cursor: .arrow)
     }
 
     override func updateTrackingAreas() {
@@ -476,7 +475,6 @@ private final class TopHoverTrackingView: NSView {
                 .inVisibleRect,
                 .mouseMoved,
                 .mouseEnteredAndExited,
-                .cursorUpdate,
             ],
             owner: self,
             userInfo: nil
@@ -485,35 +483,26 @@ private final class TopHoverTrackingView: NSView {
         self.trackingArea = trackingArea
     }
 
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow == nil {
-            deactivateCursorOverride()
-        }
-        super.viewWillMove(toWindow: newWindow)
-    }
-
-    override func mouseEntered(with _: NSEvent) {
-        activateCursorOverride()
+    override func mouseEntered(with event: NSEvent) {
+        updateCursor(with: event)
         setHovering(true)
     }
 
-    override func mouseMoved(with _: NSEvent) {
-        activateCursorOverride()
+    override func mouseMoved(with event: NSEvent) {
+        updateCursor(with: event)
         setHovering(true)
     }
 
-    override func cursorUpdate(with _: NSEvent) {
-        activateCursorOverride()
-        updateCursor()
+    override func cursorUpdate(with event: NSEvent) {
+        updateCursor(with: event)
     }
 
     override func mouseExited(with _: NSEvent) {
-        deactivateCursorOverride()
         setHovering(false)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        isDragEnabled && bounds.contains(point) ? self : nil
+        isDragEnabled && cursorExclusionRect.contains(point) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -525,37 +514,26 @@ private final class TopHoverTrackingView: NSView {
         window?.performDrag(with: event)
     }
 
-    private func updateCursor() {
+    private func updateCursor(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let isCursorExcluded = cursorExclusionRect.contains(point)
+
+        guard isCursorExcluded else {
+            return
+        }
+
         NSCursor.arrow.set()
     }
 
-    private func activateCursorOverride() {
-        guard let window else {
-            return
-        }
-
-        if cursorOverrideWindow !== window {
-            deactivateCursorOverride()
-            cursorOverrideWindow = window
-        }
-
-        if !isCursorOverrideActive {
-            window.disableCursorRects()
-            isCursorOverrideActive = true
-        }
-
-        updateCursor()
-    }
-
-    private func deactivateCursorOverride() {
-        guard isCursorOverrideActive else {
-            cursorOverrideWindow = nil
-            return
-        }
-
-        cursorOverrideWindow?.enableCursorRects()
-        isCursorOverrideActive = false
-        cursorOverrideWindow = nil
+    private var cursorExclusionRect: NSRect {
+        let height = min(EditorShellState.toolbarCursorExclusionHeight, bounds.height)
+        let y = isFlipped ? bounds.minY : bounds.maxY - height
+        return NSRect(
+            x: bounds.minX,
+            y: y,
+            width: bounds.width,
+            height: height
+        )
     }
 
     private func setHovering(_ isHovering: Bool) {

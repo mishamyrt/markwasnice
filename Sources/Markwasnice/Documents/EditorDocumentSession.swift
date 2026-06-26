@@ -273,10 +273,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     private func applyChromeInsets(isFullScreen: Bool) {
         let toolbarHeight = isFullScreen ? 0 : EditorShellState.toolbarRevealHeight
+        let cursorExclusionHeight = isFullScreen
+            ? 0 : EditorShellState.toolbarCursorExclusionHeight
         editorView.setChromeInsets(
             top: toolbarHeight + Self.editorTopInset,
             bottom: Self.editorBottomInset,
-            protectedTop: toolbarHeight
+            protectedTop: cursorExclusionHeight
         )
     }
 
@@ -292,6 +294,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func hideChrome() {
+        updatePointerInChromeRevealZone()
+
         guard !isPointerInChromeRevealZone else {
             return
         }
@@ -309,5 +313,29 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         if isHovering {
             showChrome()
         }
+    }
+
+    private func updatePointerInChromeRevealZone() {
+        guard let window = editorView.window,
+              let contentView = window.contentView,
+              let revealRect = TopChromeGeometry.revealRectInContentView(
+                  window: window,
+                  revealHeight: shellState.isFullScreen
+                      ? 0 : EditorShellState.toolbarRevealHeight
+              )
+        else {
+            isPointerInChromeRevealZone = false
+            return
+        }
+
+        let pointInWindow = window.mouseLocationOutsideOfEventStream
+        let pointInContentView = contentView.convert(pointInWindow, from: nil)
+        let isHovering = revealRect.contains(pointInContentView)
+
+        guard isHovering != isPointerInChromeRevealZone else {
+            return
+        }
+
+        handleTopHoverChanged(isHovering)
     }
 }

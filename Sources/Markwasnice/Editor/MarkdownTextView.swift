@@ -18,6 +18,9 @@ protocol MarkdownTextViewCommandDelegate: AnyObject {
 @MainActor
 final class MarkdownTextView: NSTextView {
     weak var commandDelegate: MarkdownTextViewCommandDelegate?
+    var isWindowPointInTopChrome: ((NSPoint, NSWindow) -> Bool)?
+    var topChromeRectProvider: (() -> NSRect?)?
+
     var textContentInsets = NSEdgeInsetsZero {
         didSet {
             needsDisplay = true
@@ -30,6 +33,62 @@ final class MarkdownTextView: NSTextView {
             x: origin.x + textContentInsets.left,
             y: origin.y + textContentInsets.top
         )
+    }
+
+    override func resetCursorRects() {
+        guard let window,
+              let contentView = window.contentView,
+              let chromeRectInContentView = topChromeRectProvider?()
+        else {
+            addCursorRect(visibleRect, cursor: .iBeam)
+            return
+        }
+
+        let visible = visibleRect
+        let chromeRect = convert(chromeRectInContentView, from: contentView)
+        let blocked = visible.intersection(chromeRect)
+
+        guard !blocked.isNull, !blocked.isEmpty else {
+            addCursorRect(visible, cursor: .iBeam)
+            return
+        }
+
+        for rect in visible.subtracting(blocked) where !rect.isEmpty {
+            addCursorRect(rect, cursor: .iBeam)
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let isTopChrome = eventIsInTopChrome(event)
+
+        if isTopChrome {
+            NSCursor.arrow.set()
+            return
+        }
+
+        super.mouseMoved(with: event)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        let isTopChrome = eventIsInTopChrome(event)
+
+        if isTopChrome {
+            NSCursor.arrow.set()
+            return
+        }
+
+        super.mouseEntered(with: event)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        let isTopChrome = eventIsInTopChrome(event)
+
+        if isTopChrome {
+            NSCursor.arrow.set()
+            return
+        }
+
+        super.cursorUpdate(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -80,6 +139,14 @@ final class MarkdownTextView: NSTextView {
         return (insertString as? NSAttributedString)?.string
     }
 
+    private func eventIsInTopChrome(_ event: NSEvent) -> Bool {
+        guard let window = event.window ?? window else {
+            return false
+        }
+
+        return isWindowPointInTopChrome?(event.locationInWindow, window) == true
+    }
+
     private func pairSymbol(for string: String) -> (opening: String, closing: String)? {
         switch string {
         case "\"":
@@ -103,5 +170,54 @@ final class MarkdownTextView: NSTextView {
         default:
             return nil
         }
+    }
+}
+
+extension NSRect {
+    func subtracting(_ cut: NSRect) -> [NSRect] {
+        let cut = intersection(cut)
+        guard !cut.isNull, !cut.isEmpty else {
+            return [self]
+        }
+
+        var result: [NSRect] = []
+
+        if cut.maxY < maxY {
+            result.append(NSRect(
+                x: minX,
+                y: cut.maxY,
+                width: width,
+                height: maxY - cut.maxY
+            ))
+        }
+
+        if cut.minY > minY {
+            result.append(NSRect(
+                x: minX,
+                y: minY,
+                width: width,
+                height: cut.minY - minY
+            ))
+        }
+
+        if cut.minX > minX {
+            result.append(NSRect(
+                x: minX,
+                y: cut.minY,
+                width: cut.minX - minX,
+                height: cut.height
+            ))
+        }
+
+        if cut.maxX < maxX {
+            result.append(NSRect(
+                x: cut.maxX,
+                y: cut.minY,
+                width: maxX - cut.maxX,
+                height: cut.height
+            ))
+        }
+
+        return result
     }
 }

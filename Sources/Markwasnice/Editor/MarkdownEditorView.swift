@@ -14,6 +14,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     weak var delegate: MarkdownEditorViewDelegate?
 
     private let scrollView = NSScrollView()
+    private let clipView = EditorClipView()
     private let textStorage = NSTextStorage()
     private let layoutManager = MarkdownCodeBackgroundLayoutManager()
     private let textContainer = NSTextContainer(
@@ -29,6 +30,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var paragraphGutter: CGFloat = 0
     private var textTopPadding: CGFloat = 0
     private var textBottomPadding: CGFloat = 160
+    private var protectedTopPadding: CGFloat = 0
     private var visibleScrollerTopInset: CGFloat = 0
     private var isChromeVisible = true
     private var lastScrollOffsetY: CGFloat?
@@ -56,6 +58,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         configureTextView()
         configureScrollView()
+        configureCursorGeometry()
         registerForDraggedTypes([.fileURL])
 
         addSubview(scrollView)
@@ -73,6 +76,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         if didChangeParagraphGutter {
             applyStyles(currentStyleSpans)
         }
+        invalidateEditorCursorRects()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -152,13 +156,15 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     func setChromeInsets(
         top: CGFloat,
         bottom: CGFloat,
-        protectedTop _: CGFloat = 0
+        protectedTop: CGFloat = 0
     ) {
         textTopPadding = top
         textBottomPadding = bottom
+        protectedTopPadding = protectedTop
         visibleScrollerTopInset = top
         applyChromeInsets()
         setScrollerTopInset(isChromeVisible ? visibleScrollerTopInset : 0)
+        invalidateEditorCursorRects()
     }
 
     func setChromeVisible(_ isVisible: Bool) {
@@ -289,6 +295,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     private func configureScrollView() {
+        let defaultClipView = scrollView.contentView
+        clipView.frame = defaultClipView.frame
+        clipView.translatesAutoresizingMaskIntoConstraints = false
+        clipView.drawsBackground = defaultClipView.drawsBackground
+
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -300,14 +311,15 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         scrollView.scrollerInsets = NSEdgeInsets(
             top: visibleScrollerTopInset, left: 0, bottom: 0, right: 0
         )
+        scrollView.contentView = clipView
         scrollView.documentView = textView
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.contentView.postsBoundsChangedNotifications = true
+        clipView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(scrollViewBoundsDidChange(_:)),
             name: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView
+            object: clipView
         )
     }
 
@@ -341,6 +353,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         guard let clipView = notification.object as? NSClipView else {
             return
         }
+
+        invalidateEditorCursorRects()
 
         let offsetY = clipView.bounds.origin.y
         defer { lastScrollOffsetY = offsetY }
@@ -383,6 +397,46 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         applyEditorColors()
         applyBaseStyleToText()
+    }
+
+    private func configureCursorGeometry() {
+        let topChromeRectProvider: () -> NSRect? = { [weak self] in
+            guard let self, let window = self.window else {
+                return nil
+            }
+
+            return self.topChromeRectInContentView(window: window)
+        }
+        let isWindowPointInTopChrome: (NSPoint, NSWindow) -> Bool = { [weak self]
+            pointInWindow, window in
+                self?.windowPointIsInTopChrome(pointInWindow, window: window) == true
+        }
+
+        textView.topChromeRectProvider = topChromeRectProvider
+        textView.isWindowPointInTopChrome = isWindowPointInTopChrome
+        clipView.topChromeRectProvider = topChromeRectProvider
+        clipView.isWindowPointInTopChrome = isWindowPointInTopChrome
+    }
+
+    private func topChromeRectInContentView(window: NSWindow) -> NSRect? {
+        TopChromeGeometry.revealRectInContentView(
+            window: window,
+            revealHeight: protectedTopPadding
+        )
+    }
+
+    private func windowPointIsInTopChrome(
+        _ pointInWindow: NSPoint,
+        window: NSWindow
+    ) -> Bool {
+        guard let contentView = window.contentView,
+              let chromeRect = topChromeRectInContentView(window: window)
+        else {
+            return false
+        }
+
+        let pointInContentView = contentView.convert(pointInWindow, from: nil)
+        return chromeRect.contains(pointInContentView)
     }
 
     private func replaceSelectedText(with string: String) {
@@ -1066,6 +1120,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         scrollView.scrollerInsets = scrollerInsets
+    }
+
+    private func invalidateEditorCursorRects() {
+        window?.invalidateCursorRects(for: textView)
+        window?.invalidateCursorRects(for: clipView)
     }
 
     private func characterWidth() -> CGFloat {
