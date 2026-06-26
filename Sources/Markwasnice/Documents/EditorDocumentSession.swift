@@ -17,7 +17,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private var wordCountTask: Task<Void, Never>?
     private var isCloseApproved = false
     private var isPromptVisible = false
-    private var isChromeSuppressed = false
     private var isPointerInChromeRevealZone = false
     private var text: String
 
@@ -293,7 +292,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func hideChrome() {
-        isChromeSuppressed = true
         guard !isPointerInChromeRevealZone else {
             return
         }
@@ -310,8 +308,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         isPointerInChromeRevealZone = isHovering
         if isHovering {
             showChrome()
-        } else if isChromeSuppressed {
-            hideChromeNow()
         }
     }
 }
