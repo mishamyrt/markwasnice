@@ -50,8 +50,15 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
-        appState?.flushAutosave(force: true)
-        return .terminateNow
+        guard let appState else {
+            return .terminateNow
+        }
+
+        Task {
+            await appState.flushAutosaveAndWait(force: true)
+            NSApplication.shared.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func application(_: NSApplication, openFile filename: String) -> Bool {
@@ -72,9 +79,12 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func queueOpen(_ url: URL) {
-        if appState?.queueOpen(url) != true {
+        guard let appState else {
             pendingOpenURLs.append(url)
+            return
         }
+
+        appState.queueOpen(url)
     }
 
     private func flushPendingOpenURLs() {

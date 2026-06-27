@@ -12,6 +12,7 @@ final class MarkwasniceAppState: ObservableObject {
     private let settingsStore = EditorSettingsStore()
     private let autosaveStore: AutosaveStore
     private var autosaveWorkItem: DispatchWorkItem?
+    private var autosaveTask: Task<Void, Never>?
     private var preferencesWindowController: PreferencesWindowController?
     private var didCreateInitialSessions = false
     private var activeSessionID: EditorDocumentSession.ID?
@@ -29,7 +30,7 @@ final class MarkwasniceAppState: ObservableObject {
         return sessions[id]
     }
 
-    func initialSessionID() -> EditorDocumentSession.ID? {
+    func initialSessionID() async -> EditorDocumentSession.ID? {
         if !pendingWindowIDs.isEmpty {
             return pendingWindowIDs.removeFirst()
         }
@@ -39,8 +40,8 @@ final class MarkwasniceAppState: ObservableObject {
         }
 
         didCreateInitialSessions = true
-        if let session = autosaveStore.loadSession(), !session.drafts.isEmpty {
-            let restoredSessions = session.drafts.map(makeSession(from:))
+        if let session = await autosaveStore.loadSession(), !session.drafts.isEmpty {
+            let restoredSessions = await restoredSessions(from: session.drafts)
             for session in restoredSessions {
                 sessions[session.id] = session
             }
@@ -69,11 +70,9 @@ final class MarkwasniceAppState: ObservableObject {
 
     @discardableResult
     func queueOpen(_ url: URL) -> Bool {
-        guard let session = open(url) else {
-            return false
+        Task {
+            await open(url, queuesWindow: true)
         }
-
-        pendingWindowIDs.append(session.id)
         return true
     }
 
@@ -90,7 +89,10 @@ final class MarkwasniceAppState: ObservableObject {
             return []
         }
 
-        return panel.urls.compactMap { open($0)?.id }
+        for url in panel.urls {
+            queueOpen(url)
+        }
+        return []
     }
 
     func takePendingWindowIDs() -> [EditorDocumentSession.ID] {
@@ -149,23 +151,37 @@ final class MarkwasniceAppState: ObservableObject {
 
         autosaveWorkItem?.cancel()
         autosaveWorkItem = nil
-        autosaveStore.saveSession(AutosavedSession(
-            drafts: sessions.values.map(\.autosavedDraft)
-        ))
+        autosaveTask?.cancel()
+        let session = AutosavedSession(drafts: sessions.values.map(\.autosavedDraft))
+        autosaveTask = Task.detached(priority: .utility) { [autosaveStore, session] in
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await autosaveStore.saveSession(session)
+        }
+    }
+
+    func flushAutosaveAndWait(force: Bool = false) async {
+        flushAutosave(force: force)
+        await autosaveTask?.value
     }
 
     private var activeSession: EditorDocumentSession? {
         activeSessionID.flatMap { sessions[$0] }
     }
 
-    private func open(_ url: URL) -> EditorDocumentSession? {
+    private func open(_ url: URL, queuesWindow: Bool) async {
         if let existing = sessions.values.first(where: { $0.fileURL == url }) {
             activate(existing)
-            return existing
+            if queuesWindow {
+                pendingWindowIDs.append(existing.id)
+            }
+            return
         }
 
         do {
-            let text = try String(contentsOf: url, encoding: .utf8)
+            let text = try await FileIO.readUTF8(from: url)
             let session = EditorDocumentSession(
                 text: text,
                 fileURL: url,
@@ -178,22 +194,40 @@ final class MarkwasniceAppState: ObservableObject {
             activate(session)
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             scheduleAutosave()
-            return session
+            if queuesWindow {
+                pendingWindowIDs.append(session.id)
+            }
         } catch {
             NSAlert(error: error).runModal()
-            return nil
         }
     }
 
-    private func makeSession(from draft: AutosavedDraft) -> EditorDocumentSession {
+    private func makeSession(
+        from draft: AutosavedDraft,
+        isEdited: Bool
+    ) -> EditorDocumentSession {
         EditorDocumentSession(
             text: draft.text,
             fileURL: draft.fileURL,
-            isEdited: isDraftEdited(draft),
+            isEdited: isEdited,
             settings: settings
         ) { [weak self] in
             self?.scheduleAutosave()
         }
+    }
+
+    private func restoredSessions(from drafts: [AutosavedDraft]) async
+        -> [EditorDocumentSession]
+    {
+        var restoredSessions: [EditorDocumentSession] = []
+        for draft in drafts {
+            let isEdited = await isDraftEdited(draft)
+            restoredSessions.append(makeSession(
+                from: draft,
+                isEdited: isEdited
+            ))
+        }
+        return restoredSessions
     }
 
     private func applySettings(_ settings: EditorSettings) {
@@ -213,7 +247,7 @@ final class MarkwasniceAppState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: workItem)
     }
 
-    private func isDraftEdited(_ draft: AutosavedDraft) -> Bool {
+    private func isDraftEdited(_ draft: AutosavedDraft) async -> Bool {
         guard !draft.text.isEmpty else {
             return false
         }
@@ -222,7 +256,7 @@ final class MarkwasniceAppState: ObservableObject {
             return true
         }
 
-        return (try? String(contentsOf: fileURL, encoding: .utf8)) != draft.text
+        return await FileIO.hasDifferentUTF8Contents(at: fileURL, from: draft.text)
     }
 }
 

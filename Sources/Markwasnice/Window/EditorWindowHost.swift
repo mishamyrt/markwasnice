@@ -15,7 +15,7 @@ struct EditorWindowHost: View {
             } else {
                 ProgressView()
                     .task {
-                        guard let id = appState.initialSessionID() else {
+                        guard let id = await appState.initialSessionID() else {
                             dismiss()
                             return
                         }

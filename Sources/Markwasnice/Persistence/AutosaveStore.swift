@@ -9,7 +9,7 @@ struct AutosavedSession: Codable {
     var drafts: [AutosavedDraft]
 }
 
-final class AutosaveStore {
+actor AutosaveStore {
     private let fileURL: URL
 
     init(fileManager: FileManager = .default) {

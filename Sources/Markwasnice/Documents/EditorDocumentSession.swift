@@ -19,6 +19,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private var isPromptVisible = false
     private var isPointerInChromeRevealZone = false
     private var text: String
+    private var saveTask: Task<Void, Never>?
 
     private(set) var fileURL: URL? {
         didSet {
@@ -118,7 +119,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        _ = save(to: fileURL)
+        save(to: fileURL)
     }
 
     func saveAs() {
@@ -133,7 +134,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        _ = save(to: url)
+        save(to: url)
     }
 
     func windowShouldClose(_ window: NSWindow, onApprovedClose: @escaping () -> Void)
@@ -158,19 +159,36 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         fileURL?.lastPathComponent ?? "Untitled"
     }
 
-    @discardableResult
-    private func save(to url: URL) -> Bool {
-        do {
-            try Data(text.utf8).write(to: url, options: .atomic)
+    private func save(
+        to url: URL,
+        onCompletion: ((Bool) -> Void)? = nil
+    ) {
+        let savedText = text
+        saveTask?.cancel()
+        saveTask = Task { [weak self, savedText, url] in
+            do {
+                try await FileIO.writeUTF8(savedText, to: url)
+            } catch {
+                NSAlert(error: error).runModal()
+                onCompletion?(false)
+                return
+            }
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            guard let self else {
+                return
+            }
+
             fileURL = url
             editorView.documentURL = url
-            hasUnsavedFileChanges = false
+            let didSaveCurrentText = text == savedText
+            hasUnsavedFileChanges = !didSaveCurrentText
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             onAutosaveNeeded()
-            return true
-        } catch {
-            NSAlert(error: error).runModal()
-            return false
+            onCompletion?(didSaveCurrentText)
         }
     }
 
@@ -209,10 +227,16 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         onApprovedClose: @escaping () -> Void
     ) {
         if let fileURL {
-            if save(to: fileURL) {
-                closeAfterUserApproval(onApprovedClose)
-            } else {
-                isPromptVisible = false
+            save(to: fileURL) { [weak self] didSave in
+                guard let self else {
+                    return
+                }
+
+                if didSave {
+                    self.closeAfterUserApproval(onApprovedClose)
+                } else {
+                    self.isPromptVisible = false
+                }
             }
             return
         }
@@ -233,10 +257,16 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 return
             }
 
-            if self.save(to: url) {
-                self.closeAfterUserApproval(onApprovedClose)
-            } else {
-                self.isPromptVisible = false
+            self.save(to: url) { [weak self] didSave in
+                guard let self else {
+                    return
+                }
+
+                if didSave {
+                    self.closeAfterUserApproval(onApprovedClose)
+                } else {
+                    self.isPromptVisible = false
+                }
             }
         }
     }
