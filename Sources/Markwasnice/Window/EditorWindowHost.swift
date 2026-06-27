@@ -1,4 +1,4 @@
-import AppKit
+@preconcurrency import AppKit
 import SwiftUI
 
 struct EditorWindowHost: View {
@@ -148,7 +148,7 @@ private final class WindowLifecycleView: NSView {
         }
         window.toolbarStyle = .unified
         window.acceptsMouseMovedEvents = true
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.isOpaque = false
         window.backgroundColor =
             EditorThemeColors.default

@@ -147,6 +147,10 @@ struct EditorShellView: View {
             MarkdownEditorRepresentable(editorView: editorView)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+            if !state.isFullScreen {
+                topChromeBackdropLayer
+            }
+
             VStack(spacing: 0) {
                 if !state.isFullScreen {
                     toolbarHoverLayer
@@ -186,6 +190,21 @@ struct EditorShellView: View {
         }
     }
 
+    private var topChromeBackdropLayer: some View {
+        // Unmount the backdrop entirely while the chrome is hidden: a
+        // CABackdropLayer can keep sampling the content beneath it even at
+        // zero opacity, taxing every frame of a scroll. The opacity change
+        // was not animated anyway, so conditional mounting looks identical.
+        ZStack(alignment: .top) {
+            if state.isToolbarVisible {
+                BackdropBlurOverlay(isSearchActive: state.isSearchPresented)
+                    .frame(height: state.topChromeInsetHeight)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
     private var toolbarHoverLayer: some View {
         ZStack(alignment: .top) {
             TopHoverTrackingBridge { isHovering in
@@ -193,11 +212,6 @@ struct EditorShellView: View {
             }
             .isDragEnabled(state.isToolbarVisible)
             .frame(height: EditorShellState.toolbarRevealHeight)
-
-            BackdropBlurOverlay(isSearchActive: state.isSearchPresented)
-                .frame(height: EditorShellState.toolbarRevealHeight)
-                .opacity(toolbarContentOpacity)
-                .allowsHitTesting(false)
 
             EditorTopBarContent(state: state)
                 .opacity(toolbarContentOpacity)
@@ -209,13 +223,9 @@ struct EditorShellView: View {
 
     private var windowedSearchLayer: some View {
         ZStack(alignment: .top) {
-            BackdropBlurOverlay(isSearchActive: true)
-                .frame(height: EditorShellState.searchAreaHeight)
-                .allowsHitTesting(false)
-
             EditorSearchBar(state: state)
-                .padding(.leading, 132)
-                .padding(.trailing, 78)
+                .frame(maxWidth: 785)
+                .padding(.horizontal, 6)
         }
         .frame(height: EditorShellState.searchAreaHeight)
         .offset(y: EditorShellState.toolbarRevealHeight)
@@ -294,8 +304,9 @@ private struct EditorSearchBar: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 20, height: 22)
                 }
+                // .buttonStyle(.plain)
+                // .controlSize(.small)
                 .disabled(state.searchMatchCount == 0)
 
                 Button {
@@ -303,29 +314,26 @@ private struct EditorSearchBar: View {
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 20, height: 22)
                 }
+                // .buttonStyle(.plain)
+                // .controlSize(.small)
                 .disabled(state.searchMatchCount == 0)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.primary.opacity(0.66))
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.primary.opacity(0.06))
-            )
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(Color.primary)
+            // .foregroundStyle(Color.primary.opacity(0.66))
+            // .background(
+            //     RoundedRectangle(cornerRadius: 6, style: .continuous)
+            //         .fill(Color.primary.opacity(0.06))
+            // )
 
             Button("Done") {
                 state.closeSearch()
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(Color.primary.opacity(0.82))
-            .padding(.horizontal, 10)
-            .frame(height: 22)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.primary.opacity(0.10))
-            )
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(Color.primary)
 
             Toggle("Replace", isOn: .constant(false))
                 .toggleStyle(.checkbox)

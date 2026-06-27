@@ -4,7 +4,12 @@ import Markdown
 struct MarkdownParseResult {
     let textVersion: Int
     let sourceLength: Int
+    let source: String
     let spans: [ResolvedMarkdownStyleSpan]
+    /// Line ranges (in `source` coordinates) whose styling differs from the
+    /// previous parse. `nil` means "unknown" (first parse) and requires a full
+    /// restyle. Empty means nothing changed.
+    let dirtyRanges: [NSRange]?
 }
 
 struct MarkdownStyleSpan {

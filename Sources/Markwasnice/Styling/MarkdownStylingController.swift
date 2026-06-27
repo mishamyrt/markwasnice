@@ -26,11 +26,14 @@ final class MarkdownStylingController {
     }
 
     private func applyParseResult(_ result: MarkdownParseResult) {
-        guard result.sourceLength == editorView.string.utf16.count else {
+        guard result.source == editorView.string else {
             return
         }
 
         resolvedStyleSpans = result.spans
-        editorView.applyParsedStyles(resolvedStyleSpans)
+        editorView.applyParsedStyles(
+            resolvedStyleSpans,
+            dirtyRanges: result.dirtyRanges
+        )
     }
 }

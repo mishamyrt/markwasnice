@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class EditorDocumentSession: ObservableObject, Identifiable,
-    MarkdownEditorViewDelegate
+    @preconcurrency MarkdownEditorViewDelegate
 {
     static let editorTopInset: CGFloat = 0
     static let editorBottomInset: CGFloat = 72
@@ -351,8 +351,14 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func showChrome() {
-        shellState.isToolbarVisible = true
-        shellState.isStatusBarVisible = true
+        // @Published fires objectWillChange even for equal values; writing on
+        // every scroll tick invalidates the whole SwiftUI shell per frame.
+        if !shellState.isToolbarVisible {
+            shellState.isToolbarVisible = true
+        }
+        if !shellState.isStatusBarVisible {
+            shellState.isStatusBarVisible = true
+        }
     }
 
     private func hideChrome() {
@@ -374,8 +380,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        shellState.isToolbarVisible = false
-        shellState.isStatusBarVisible = false
+        if shellState.isToolbarVisible {
+            shellState.isToolbarVisible = false
+        }
+        if shellState.isStatusBarVisible {
+            shellState.isStatusBarVisible = false
+        }
     }
 
     private func handleTopHoverChanged(_ isHovering: Bool) {
@@ -448,8 +458,13 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func clearSearchMatches() {
+        let hadMatches = !searchMatches.isEmpty || selectedSearchMatchIndex != nil
         searchMatches = []
         selectedSearchMatchIndex = nil
+        guard hadMatches else {
+            return
+        }
+
         shellState.updateSearchResults(count: 0, selectedIndex: nil)
         editorView.setSearchMatches([], selectedIndex: nil)
     }

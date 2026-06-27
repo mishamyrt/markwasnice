@@ -1,4 +1,4 @@
-import AppKit
+@preconcurrency import AppKit
 import CoreImage.CIFilterBuiltins
 import ObjectiveC
 
@@ -10,19 +10,22 @@ final class BackdropBlurView: NSView {
 
     var blurRadius: CGFloat = 2 {
         didSet {
-            updateBlurRadius()
+            guard blurRadius != oldValue else { return }
+            withoutImplicitAnimations {
+                updateBlurRadius()
+            }
         }
     }
 
     var isSearchActive = false {
         didSet {
-            guard isSearchActive != oldValue else {
-                return
-            }
+            guard isSearchActive != oldValue else { return }
 
-            blurRadius = isSearchActive ? 4 : 2
-            updateBackdropFilter()
-            updateBackgroundGradient()
+            withoutImplicitAnimations {
+                blurRadius = isSearchActive ? 4 : 2
+                updateBackdropFilter()
+                updateBackgroundGradient()
+            }
         }
     }
 
@@ -44,7 +47,9 @@ final class BackdropBlurView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateBackgroundGradient()
+        withoutImplicitAnimations {
+            updateBackgroundGradient()
+        }
     }
 
     override func hitTest(_: NSPoint) -> NSView? {
@@ -164,8 +169,9 @@ final class BackdropBlurView: NSView {
             NSSelectorFromString("filterWithName:"),
         ]
 
-        typealias Factory = @convention(c) (AnyClass, Selector, NSString)
-            -> Unmanaged<AnyObject>?
+        typealias Factory =
+            @convention(c) (AnyClass, Selector, NSString)
+                -> Unmanaged<AnyObject>?
 
         for selector in selectors {
             guard let method = class_getClassMethod(filterClass, selector) else {
@@ -180,5 +186,19 @@ final class BackdropBlurView: NSView {
 
         assertionFailure("No usable CAFilter factory selector found")
         return nil
+    }
+
+    private func withoutImplicitAnimations(_ updates: () -> Void) {
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        NSAnimationContext.current.allowsImplicitAnimation = false
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        updates()
+
+        CATransaction.commit()
+        NSAnimationContext.endGrouping()
     }
 }

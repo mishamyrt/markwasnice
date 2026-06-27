@@ -1,0 +1,385 @@
+import AppKit
+import Testing
+@testable import Markwasnice
+
+/// Regression harness for typing-time visual stability.
+///
+/// Flicker means: the state right after a keystroke (local heuristic styling)
+/// differs from the state right after the parse result lands. These tests
+/// drive the real input path (`insertText` → `didProcessEditing` → local
+/// styling), then apply the real parse pipeline, and assert the two states
+/// are identical — both text attributes and drawn code-background ranges.
+@MainActor
+struct EditorTypingStabilityTests {
+    private static let settings = EditorSettings(
+        textSizeScale: 1,
+        maxTextColumns: 64,
+        tabInsertionMode: .spaces,
+        tabWidth: 4
+    )
+
+    // MARK: - Scenarios
+
+    @Test func typingInsideNestedImageLinkLabelKeepsStylingAligned() throws {
+        let source = """
+        Intro line
+
+        [![IMAGE Aasda](https://upload.wikimedia.org/img.png)](https://www.youtube.com/watch?v=ciawICBvQoE)
+
+        Tail line
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        let insertLocation = (source as NSString).range(of: "Aasda").upperBound
+        harness.type("sdd", at: insertLocation)
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func typingOnLineAboveLinkKeepsLinkStylingAligned() throws {
+        let source = """
+        Intro line
+
+        [![IMAGE Aasda](https://upload.wikimedia.org/img.png)](https://www.youtube.com/watch?v=ciawICBvQoE)
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type("abc", at: (source as NSString).range(of: "Intro line").upperBound)
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func typingInParagraphBeforeCodeBlockKeepsBlockRangesStable() throws {
+        let source = """
+        Paragraph before
+
+        ```swift
+        let a = 1
+        let b = 2
+        ```
+
+        Paragraph after
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type(
+            "x",
+            at: (source as NSString).range(of: "Paragraph before").upperBound
+        )
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func typingInsideCodeBlockKeepsNeighborBlocksStable() throws {
+        let source = """
+        # Doc
+
+        ```swift
+        let first = 1
+        ```
+
+        Middle paragraph
+
+        ```swift
+        let second = 2
+        ```
+
+        ```swift
+        let third = 3
+        ```
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type(
+            "23",
+            at: (source as NSString).range(of: "let second = 2").upperBound
+        )
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func typingMarkdownTokensInsideCodeBlockStaysPlain() throws {
+        let source = """
+        ```swift
+        let bold = "**not markdown**"
+        ```
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type(
+            "*x*",
+            at: (source as NSString).range(of: "markdown**").upperBound
+        )
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    /// Reproduces the real per-keystroke sequence of the app: after every
+    /// text change `EditorDocumentSession.markdownEditorViewDidChangeText`
+    /// calls `refreshSearchMatches` → `clearSearchMatches` →
+    /// `editorView.setSearchMatches([], selectedIndex: nil)`, which triggers
+    /// a full restyle BEFORE the parse result arrives.
+    @Test func sessionSearchClearBetweenKeystrokeAndParseDoesNotShiftStyling() throws {
+        let source = """
+        Intro line
+
+        [![IMAGE Aasda](https://upload.wikimedia.org/img.png)](https://www.youtube.com/watch?v=ciawICBvQoE)
+
+        ```swift
+        let a = 1
+        ```
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type("sdd", at: (source as NSString).range(of: "Aasda").upperBound)
+        // The session-level per-keystroke call that lands between the edit
+        // and the parse result.
+        harness.editor.setSearchMatches([], selectedIndex: nil)
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func sessionSearchClearWhileTypingBeforeCodeBlockKeepsBlockStable() throws {
+        let source = """
+        Paragraph before
+
+        ```swift
+        let a = 1
+        let b = 2
+        ```
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type(
+            "xy",
+            at: (source as NSString).range(of: "Paragraph before").upperBound
+        )
+        harness.editor.setSearchMatches([], selectedIndex: nil)
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    /// When a restyle genuinely runs between a keystroke and the parse
+    /// result (e.g. live search recomputing matches while typing), it must
+    /// use span positions translated across the edit — not the stale ones.
+    @Test func activeSearchRestyleWhileTypingUsesTranslatedSpans() throws {
+        let source = """
+        Paragraph findme here
+
+        ```swift
+        let a = 1
+        ```
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+        let match = (source as NSString).range(of: "findme")
+        harness.editor.setSearchMatches([match], selectedIndex: 0)
+
+        harness.type("xy", at: (source as NSString).range(of: "Paragraph").upperBound)
+        // Session recomputes matches on the changed text and pushes the
+        // shifted range — this triggers a full restyle before the parse.
+        let shiftedMatch = NSRange(location: match.location + 2, length: match.length)
+        harness.editor.setSearchMatches([shiftedMatch], selectedIndex: 0)
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    /// Pressing Enter after a heading must leave the new empty line with the
+    /// base paragraph style: the heading's outdented first-line indent would
+    /// otherwise park the caret in the hash gutter.
+    @Test func enterAfterHeadingLeavesCaretLineWithBaseIndent() throws {
+        let source = "## Heading\n\nBody"
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type("\n", at: ("## Heading" as NSString).length)
+
+        guard let storage = harness.editor.textView.textStorage else {
+            Issue.record("missing text storage")
+            return
+        }
+
+        // The newline terminating the new empty caret line (index 11).
+        let caretLineNewlineIndex = ("## Heading\n" as NSString).length
+        let style = storage.attribute(
+            .paragraphStyle,
+            at: caretLineNewlineIndex,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        #expect(style != nil)
+        #expect(
+            style?.firstLineHeadIndent == style?.headIndent,
+            "empty line after heading must not inherit the heading outdent"
+        )
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func enterAfterHeadingAtEndOfDocumentStaysConsistent() throws {
+        // Note: the trailing newline itself keeps the heading paragraph style
+        // (TextKit conforms paragraph styles to whole paragraphs); the caret
+        // in the extra line fragment is positioned from typingAttributes,
+        // which are base. Here we only assert local/parse consistency.
+        let source = "## Heading"
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type("\n", at: (source as NSString).length)
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func deletingInParagraphBeforeCodeBlockKeepsBlockRangesStable() throws {
+        let source = """
+        Paragraph before
+
+        ```swift
+        let a = 1
+        ```
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.deleteBackward(
+            count: 3,
+            at: (source as NSString).range(of: "Paragraph before").upperBound
+        )
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+}
+
+// MARK: - Harness
+
+@MainActor
+private final class EditorHarness {
+    let editor: MarkdownEditorView
+    private var previousParse: MarkdownParseResult?
+    private var version = 0
+
+    init(source: String, settings: EditorSettings) {
+        editor = MarkdownEditorView(
+            settings: settings,
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600)
+        )
+        editor.setString(source, clearsUndo: true)
+        applyFreshParse()
+    }
+
+    func type(_ text: String, at location: Int) {
+        editor.textView.setSelectedRange(NSRange(location: location, length: 0))
+        for character in text {
+            editor.textView.insertText(
+                String(character),
+                replacementRange: editor.textView.selectedRange()
+            )
+        }
+    }
+
+    func deleteBackward(count: Int, at location: Int) {
+        editor.textView.setSelectedRange(NSRange(location: location, length: 0))
+        for _ in 0..<count {
+            editor.textView.deleteBackward(nil)
+        }
+    }
+
+    /// Captures the post-keystroke (local styling) state, applies the real
+    /// parse result, captures the post-parse state, and asserts equality.
+    func assertLocalStateMatchesParsedState(
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) throws {
+        let localAttributes = attributeSnapshot()
+        let localInlineRanges = editor.textView.inlineCodeRanges
+        let localBlockRanges = editor.textView.codeBlockRanges
+
+        applyFreshParse()
+
+        let parsedAttributes = attributeSnapshot()
+        let parsedInlineRanges = editor.textView.inlineCodeRanges
+        let parsedBlockRanges = editor.textView.codeBlockRanges
+
+        #expect(
+            localBlockRanges == parsedBlockRanges,
+            "code block draw ranges flicker: local \(localBlockRanges) vs parsed \(parsedBlockRanges)",
+            sourceLocation: sourceLocation
+        )
+        #expect(
+            localInlineRanges == parsedInlineRanges,
+            "inline code draw ranges flicker: local \(localInlineRanges) vs parsed \(parsedInlineRanges)",
+            sourceLocation: sourceLocation
+        )
+
+        let differences = Self.diff(local: localAttributes, parsed: parsedAttributes)
+        #expect(
+            differences.isEmpty,
+            "attribute flicker at:\n\(differences.joined(separator: "\n"))",
+            sourceLocation: sourceLocation
+        )
+    }
+
+    private func applyFreshParse() {
+        version += 1
+        let result = MarkdownParseService.parse(
+            text: editor.string,
+            version: version,
+            previous: previousParse
+        )
+        previousParse = result
+        editor.applyParsedStyles(result.spans, dirtyRanges: result.dirtyRanges)
+    }
+
+    // MARK: Attribute snapshots
+
+    private struct CharacterStyle: Equatable {
+        var foreground: String
+        var underline: Int
+        var fontTraits: UInt
+        var firstLineHeadIndent: CGFloat
+    }
+
+    private func attributeSnapshot() -> [CharacterStyle] {
+        guard let storage = editor.textView.textStorage else {
+            return []
+        }
+
+        var styles: [CharacterStyle] = []
+        styles.reserveCapacity(storage.length)
+        storage.enumerateAttributes(
+            in: NSRange(location: 0, length: storage.length)
+        ) { attributes, range, _ in
+            let foreground = (attributes[.foregroundColor] as? NSColor)?
+                .description ?? "nil"
+            let underline = attributes[.underlineStyle] as? Int ?? 0
+            let font = attributes[.font] as? NSFont
+            let traits = font.map { NSFontManager.shared.traits(of: $0).rawValue } ?? 0
+            let paragraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
+            let style = CharacterStyle(
+                foreground: foreground,
+                underline: underline,
+                fontTraits: traits,
+                firstLineHeadIndent: paragraphStyle?.firstLineHeadIndent ?? 0
+            )
+            for _ in 0..<range.length {
+                styles.append(style)
+            }
+        }
+        return styles
+    }
+
+    private static func diff(
+        local: [CharacterStyle],
+        parsed: [CharacterStyle]
+    ) -> [String] {
+        guard local.count == parsed.count else {
+            return ["length mismatch: local \(local.count) vs parsed \(parsed.count)"]
+        }
+
+        var differences: [String] = []
+        for index in 0..<local.count where local[index] != parsed[index] {
+            differences.append(
+                "index \(index): local \(local[index]) vs parsed \(parsed[index])"
+            )
+            if differences.count >= 12 {
+                differences.append("…")
+                break
+            }
+        }
+        return differences
+    }
+}

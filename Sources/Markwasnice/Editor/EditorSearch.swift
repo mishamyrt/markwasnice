@@ -38,9 +38,10 @@ enum EditorSearchMatcher {
             return []
         }
 
-        let findOptions: NSString.CompareOptions = options.ignoresCase
-            ? [.caseInsensitive]
-            : []
+        let findOptions: NSString.CompareOptions =
+            options.ignoresCase
+                ? [.caseInsensitive]
+                : []
         var result: [NSRange] = []
         var searchRange = NSRange(location: 0, length: nsText.length)
 
@@ -110,7 +111,8 @@ enum EditorSearchMatcher {
         }
 
         let scalar = UnicodeScalar(text.character(at: location))
-        return scalar
-            .map { CharacterSet.alphanumerics.contains($0) || $0 == "_" } ?? false
+        return
+            scalar
+                .map { CharacterSet.alphanumerics.contains($0) || $0 == "_" } ?? false
     }
 }
