@@ -2,6 +2,7 @@ import AppKit
 
 @MainActor
 protocol MarkdownTextViewCommandDelegate: AnyObject {
+    func markdownTextViewShowFind(_ textView: NSTextView)
     func markdownTextViewInsertTab(_ textView: NSTextView)
     func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool
     func markdownTextView(
@@ -94,6 +95,11 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if isFindShortcut(event) {
+            commandDelegate?.markdownTextViewShowFind(self)
+            return
+        }
+
         guard event.modifierFlags.isDisjoint(with: [.command, .control]) else {
             super.keyDown(with: event)
             return
@@ -149,6 +155,11 @@ final class MarkdownTextView: NSTextView {
         }
 
         return (insertString as? NSAttributedString)?.string
+    }
+
+    private func isFindShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return flags == .command && event.charactersIgnoringModifiers == "f"
     }
 
     private func eventIsInTopChrome(_ event: NSEvent) -> Bool {

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
     func markdownEditorViewDidScroll(_ editorView: MarkdownEditorView)
+    func markdownEditorViewShowSearch(_ editorView: MarkdownEditorView)
 }
 
 @MainActor
@@ -40,6 +41,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var isFocusTemporarilySuppressed = false
     private var activeFocusParagraphRange: NSRange?
     private var isAdjustingFocusScroll = false
+    private var searchMatchRanges: [NSRange] = []
+    private var selectedSearchMatchIndex: Int?
 
     var documentURL: URL?
 
@@ -133,6 +136,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
         applyNonbreakingSpaceStyle()
         applyFocusDimmingToVisibleText()
+        applySearchHighlightsToText()
 
         textStorage.endEditing()
         textView.undoManager?.enableUndoRegistration()
@@ -192,6 +196,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             applyNonbreakingSpaceStyle(range: range)
         }
         applyFocusDimmingToVisibleIntersections(for: ranges)
+        applySearchHighlights(intersecting: ranges)
 
         textStorage.endEditing()
         textView.undoManager?.enableUndoRegistration()
@@ -301,6 +306,22 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
     }
 
+    func setSearchMatches(_ ranges: [NSRange], selectedIndex: Int?) {
+        searchMatchRanges = ranges
+        selectedSearchMatchIndex = selectedIndex
+        refreshSearchHighlightAppearance()
+    }
+
+    func selectSearchMatch(_ range: NSRange) {
+        guard boundedRange(range) != nil else {
+            return
+        }
+
+        textView.setSelectedRange(range)
+        textView.scrollRangeToVisible(range)
+        textView.showFindIndicator(for: range)
+    }
+
     func pasteAsLink() {
         let selectedRange = textView.selectedRange()
         guard selectedRange.length > 0,
@@ -336,6 +357,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     func wrapSelectionWithQuotes(opening: String, closing: String) {
         _ = wrapSelection(opening: opening, closing: closing)
+    }
+
+    func markdownTextViewShowFind(_: NSTextView) {
+        delegate?.markdownEditorViewShowSearch(self)
     }
 
     func markdownTextViewInsertTab(_: NSTextView) {
@@ -540,7 +565,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.isRichText = false
         textView.importsGraphics = false
         textView.allowsUndo = true
-        textView.usesFindBar = true
+        textView.usesFindBar = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -807,6 +832,62 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 range: change.range
             )
         }
+    }
+
+    private func refreshSearchHighlightAppearance() {
+        guard !isApplyingStyles,
+              !textView.hasMarkedText(),
+              textStorage.length > 0
+        else {
+            return
+        }
+
+        applyStyleRanges([
+            NSRange(location: 0, length: textStorage.length),
+        ], spans: currentStyleSpans)
+    }
+
+    private func applySearchHighlightsToText() {
+        applySearchHighlights(intersecting: [
+            NSRange(location: 0, length: textStorage.length),
+        ])
+    }
+
+    private func applySearchHighlights(intersecting ranges: [NSRange]) {
+        guard !searchMatchRanges.isEmpty else {
+            return
+        }
+
+        for (index, matchRange) in searchMatchRanges.enumerated() {
+            for range in ranges {
+                let intersection = NSIntersectionRange(matchRange, range)
+                guard intersection.length > 0,
+                      boundedRange(intersection) != nil
+                else {
+                    continue
+                }
+
+                textStorage.addAttribute(
+                    .backgroundColor,
+                    value: searchHighlightColor(isSelected: index ==
+                        selectedSearchMatchIndex),
+                    range: intersection
+                )
+            }
+        }
+    }
+
+    private func searchHighlightColor(isSelected: Bool) -> NSColor {
+        let match = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        if isSelected {
+            return match == .darkAqua
+                ? NSColor.systemOrange.withAlphaComponent(0.52)
+                : NSColor.systemOrange.withAlphaComponent(0.38)
+        }
+
+        return match == .darkAqua
+            ? NSColor.systemYellow.withAlphaComponent(0.34)
+            : NSColor.systemYellow.withAlphaComponent(0.28)
     }
 
     private func replaceSelectedText(with string: String) {

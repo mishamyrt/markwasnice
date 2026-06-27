@@ -129,6 +129,10 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.applyMarkup(command)
     }
 
+    func showSearch() {
+        activeSession?.showSearch()
+    }
+
     func showPreferences(_ sender: Any?) {
         if preferencesWindowController == nil {
             preferencesWindowController = PreferencesWindowController(
@@ -310,6 +314,11 @@ struct MarkwasniceCommands: Commands {
         }
 
         CommandGroup(after: .textEditing) {
+            Button("Find") {
+                appState.showSearch()
+            }
+            .keyboardShortcut("f")
+
             Divider()
             markdownCommand("Bold", .bold, keyEquivalent: "b")
             markdownCommand("Italic", .italic, keyEquivalent: "i")

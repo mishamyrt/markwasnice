@@ -20,6 +20,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private var isPointerInChromeRevealZone = false
     private var text: String
     private var saveTask: Task<Void, Never>?
+    private var searchMatches: [NSRange] = []
+    private var selectedSearchMatchIndex: Int?
 
     private(set) var fileURL: URL? {
         didSet {
@@ -57,6 +59,21 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         shellState.onFocusModeSelected = { [weak self] mode in
             self?.editorView.setFocusMode(mode)
         }
+        shellState.onSearchPresentationChanged = { [weak self] isPresented in
+            self?.handleSearchPresentationChanged(isPresented)
+        }
+        shellState.onSearchQueryChanged = { [weak self] _ in
+            self?.refreshSearchMatches(selectsFirstMatch: true)
+        }
+        shellState.onSearchOptionsChanged = { [weak self] _ in
+            self?.refreshSearchMatches(selectsFirstMatch: true)
+        }
+        shellState.onNextSearchMatch = { [weak self] in
+            self?.selectNextSearchMatch()
+        }
+        shellState.onPreviousSearchMatch = { [weak self] in
+            self?.selectPreviousSearchMatch()
+        }
 
         editorView.delegate = self
         editorView.documentURL = fileURL
@@ -77,11 +94,16 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         onAutosaveNeeded()
         stylingController.scheduleParse(text: editorView.string)
         scheduleWordCount()
+        refreshSearchMatches(selectsFirstMatch: false)
         hideChrome()
     }
 
     func markdownEditorViewDidScroll(_: MarkdownEditorView) {
         hideChrome()
+    }
+
+    func markdownEditorViewShowSearch(_: MarkdownEditorView) {
+        showSearch()
     }
 
     func updateWindowWidth(_ width: CGFloat) {
@@ -107,6 +129,13 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     func applyMarkup(_ command: MarkdownMarkupCommand) {
         editorView.applyMarkup(command)
+    }
+
+    func showSearch() {
+        showChrome()
+        shellState.showSearch()
+        applyChromeInsets(isFullScreen: shellState.isFullScreen)
+        refreshSearchMatches(selectsFirstMatch: true)
     }
 
     func save() {
@@ -298,14 +327,21 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func applyChromeInsets(isFullScreen: Bool) {
-        let toolbarHeight = isFullScreen ? 0 : EditorShellState.toolbarRevealHeight
+        let toolbarHeight = isFullScreen
+            ? fullScreenSearchChromeHeight
+            : shellState.topChromeInsetHeight
         let cursorExclusionHeight = isFullScreen
-            ? 0 : EditorShellState.toolbarCursorExclusionHeight
+            ? fullScreenSearchChromeHeight
+            : shellState.topChromeCursorExclusionHeight
         editorView.setChromeInsets(
             top: toolbarHeight + Self.editorTopInset,
             bottom: Self.editorBottomInset,
             protectedTop: cursorExclusionHeight
         )
+    }
+
+    private var fullScreenSearchChromeHeight: CGFloat {
+        shellState.isSearchPresented ? EditorShellState.searchAreaHeight : 0
     }
 
     nonisolated private static func wordCount(in text: String) -> Int {
@@ -320,6 +356,10 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func hideChrome() {
+        guard !shellState.isSearchPresented else {
+            return
+        }
+
         updatePointerInChromeRevealZone()
 
         guard !isPointerInChromeRevealZone else {
@@ -330,6 +370,10 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func hideChromeNow() {
+        guard !shellState.isSearchPresented else {
+            return
+        }
+
         shellState.isToolbarVisible = false
         shellState.isStatusBarVisible = false
     }
@@ -347,7 +391,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
               let revealRect = TopChromeGeometry.revealRectInContentView(
                   window: window,
                   revealHeight: shellState.isFullScreen
-                      ? 0 : EditorShellState.toolbarRevealHeight
+                      ? 0 : shellState.topChromeInsetHeight
               )
         else {
             isPointerInChromeRevealZone = false
@@ -363,5 +407,93 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
 
         handleTopHoverChanged(isHovering)
+    }
+
+    private func handleSearchPresentationChanged(_ isPresented: Bool) {
+        showChrome()
+        applyChromeInsets(isFullScreen: shellState.isFullScreen)
+        if isPresented {
+            refreshSearchMatches(selectsFirstMatch: true)
+        } else {
+            clearSearchMatches()
+            editorView.focus()
+        }
+    }
+
+    private func refreshSearchMatches(selectsFirstMatch: Bool) {
+        guard shellState.isSearchPresented,
+              !shellState.searchQuery.isEmpty
+        else {
+            clearSearchMatches()
+            return
+        }
+
+        searchMatches = EditorSearchMatcher.matches(
+            for: shellState.searchQuery,
+            in: text,
+            options: shellState.searchOptions
+        )
+
+        if searchMatches.isEmpty {
+            selectedSearchMatchIndex = nil
+        } else if selectsFirstMatch || selectedSearchMatchIndex == nil {
+            selectedSearchMatchIndex = 0
+        } else if let selectedSearchMatchIndex,
+                  selectedSearchMatchIndex >= searchMatches.count
+        {
+            self.selectedSearchMatchIndex = searchMatches.count - 1
+        }
+
+        applySearchMatches(selectsMatch: selectsFirstMatch)
+    }
+
+    private func clearSearchMatches() {
+        searchMatches = []
+        selectedSearchMatchIndex = nil
+        shellState.updateSearchResults(count: 0, selectedIndex: nil)
+        editorView.setSearchMatches([], selectedIndex: nil)
+    }
+
+    private func selectNextSearchMatch() {
+        guard !searchMatches.isEmpty else {
+            return
+        }
+
+        selectedSearchMatchIndex =
+            ((selectedSearchMatchIndex ?? -1) + 1)
+                % searchMatches.count
+        applySearchMatches(selectsMatch: true)
+    }
+
+    private func selectPreviousSearchMatch() {
+        guard !searchMatches.isEmpty else {
+            return
+        }
+
+        let currentIndex = selectedSearchMatchIndex ?? 0
+        selectedSearchMatchIndex =
+            (currentIndex - 1 + searchMatches.count)
+                % searchMatches.count
+        applySearchMatches(selectsMatch: true)
+    }
+
+    private func applySearchMatches(selectsMatch: Bool) {
+        shellState.updateSearchResults(
+            count: searchMatches.count,
+            selectedIndex: selectedSearchMatchIndex
+        )
+        editorView.setSearchMatches(
+            searchMatches,
+            selectedIndex: selectedSearchMatchIndex
+        )
+
+        guard selectsMatch,
+              let selectedSearchMatchIndex,
+              searchMatches.indices.contains(selectedSearchMatchIndex)
+        else {
+            return
+        }
+
+        editorView.selectSearchMatch(searchMatches[selectedSearchMatchIndex])
     }
 }

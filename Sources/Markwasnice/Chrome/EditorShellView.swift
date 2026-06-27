@@ -4,9 +4,10 @@ import SwiftUI
 
 @MainActor
 final class EditorShellState: ObservableObject {
-    static let toolbarRevealHeight: CGFloat = 86
+    static let toolbarRevealHeight: CGFloat = 60
     static let toolbarCursorExclusionHeight: CGFloat = 52
     static let toolbarContentHeight: CGFloat = 50
+    static let searchAreaHeight: CGFloat = 40
 
     @Published var title = "Untitled"
     @Published var isEdited = false
@@ -16,13 +17,32 @@ final class EditorShellState: ObservableObject {
     @Published var isFullScreen = false
     @Published var isFocusModeEnabled = false
     @Published var focusMode: EditorFocusMode = .focus
+    @Published var isSearchPresented = false
+    @Published var searchQuery = ""
+    @Published var searchOptions = EditorSearchOptions()
+    @Published var searchMatchCount = 0
+    @Published var selectedSearchMatchIndex: Int?
+    @Published var searchFocusRequest = 0
 
     var onTopHoverChanged: ((Bool) -> Void)?
     var onFocusModeEnabledChanged: ((Bool) -> Void)?
     var onFocusModeSelected: ((EditorFocusMode) -> Void)?
+    var onSearchPresentationChanged: ((Bool) -> Void)?
+    var onSearchQueryChanged: ((String) -> Void)?
+    var onSearchOptionsChanged: ((EditorSearchOptions) -> Void)?
+    var onNextSearchMatch: (() -> Void)?
+    var onPreviousSearchMatch: (() -> Void)?
 
     var wordCountText: String {
         wordCount == 1 ? "1 word" : "\(wordCount) words"
+    }
+
+    var topChromeInsetHeight: CGFloat {
+        Self.toolbarRevealHeight + (isSearchPresented ? Self.searchAreaHeight : 0)
+    }
+
+    var topChromeCursorExclusionHeight: CGFloat {
+        isSearchPresented ? topChromeInsetHeight : Self.toolbarCursorExclusionHeight
     }
 
     func updateTitle(_ title: String, isEdited: Bool) {
@@ -50,6 +70,65 @@ final class EditorShellState: ObservableObject {
 
         focusMode = mode
         onFocusModeSelected?(mode)
+    }
+
+    func showSearch() {
+        searchFocusRequest += 1
+        guard !isSearchPresented else {
+            return
+        }
+
+        isSearchPresented = true
+        onSearchPresentationChanged?(true)
+    }
+
+    func closeSearch() {
+        guard isSearchPresented else {
+            return
+        }
+
+        isSearchPresented = false
+        onSearchPresentationChanged?(false)
+    }
+
+    func setSearchQuery(_ query: String) {
+        guard searchQuery != query else {
+            return
+        }
+
+        searchQuery = query
+        onSearchQueryChanged?(query)
+    }
+
+    func setSearchIgnoresCase(_ ignoresCase: Bool) {
+        guard searchOptions.ignoresCase != ignoresCase else {
+            return
+        }
+
+        searchOptions.ignoresCase = ignoresCase
+        onSearchOptionsChanged?(searchOptions)
+    }
+
+    func setSearchMode(_ mode: EditorSearchMode) {
+        guard searchOptions.mode != mode else {
+            return
+        }
+
+        searchOptions.mode = mode
+        onSearchOptionsChanged?(searchOptions)
+    }
+
+    func updateSearchResults(count: Int, selectedIndex: Int?) {
+        searchMatchCount = count
+        selectedSearchMatchIndex = selectedIndex
+    }
+
+    func selectNextSearchMatch() {
+        onNextSearchMatch?()
+    }
+
+    func selectPreviousSearchMatch() {
+        onPreviousSearchMatch?()
     }
 }
 
@@ -82,6 +161,14 @@ struct EditorShellView: View {
                         value: state.isStatusBarVisible
                     )
             }
+
+            if !state.isFullScreen, state.isSearchPresented {
+                windowedSearchLayer
+            }
+
+            if state.isFullScreen, state.isSearchPresented {
+                fullScreenSearchLayer
+            }
         }
         .background(
             ToolbarVisibilityBridge(
@@ -107,11 +194,10 @@ struct EditorShellView: View {
             .isDragEnabled(state.isToolbarVisible)
             .frame(height: EditorShellState.toolbarRevealHeight)
 
-            BackdropBlurOverlay()
+            BackdropBlurOverlay(isSearchActive: state.isSearchPresented)
                 .frame(height: EditorShellState.toolbarRevealHeight)
                 .opacity(toolbarContentOpacity)
                 .allowsHitTesting(false)
-                .animation(.easeOut(duration: 0.1), value: state.isToolbarVisible)
 
             EditorTopBarContent(state: state)
                 .opacity(toolbarContentOpacity)
@@ -119,6 +205,35 @@ struct EditorShellView: View {
                 .animation(.easeOut(duration: 0.1), value: state.isToolbarVisible)
         }
         .frame(height: EditorShellState.toolbarRevealHeight)
+    }
+
+    private var windowedSearchLayer: some View {
+        ZStack(alignment: .top) {
+            BackdropBlurOverlay(isSearchActive: true)
+                .frame(height: EditorShellState.searchAreaHeight)
+                .allowsHitTesting(false)
+
+            EditorSearchBar(state: state)
+                .padding(.leading, 132)
+                .padding(.trailing, 78)
+        }
+        .frame(height: EditorShellState.searchAreaHeight)
+        .offset(y: EditorShellState.toolbarRevealHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var fullScreenSearchLayer: some View {
+        ZStack(alignment: .top) {
+            BackdropBlurOverlay(isSearchActive: true)
+                .frame(height: EditorShellState.searchAreaHeight)
+                .allowsHitTesting(false)
+
+            EditorSearchBar(state: state)
+                .padding(.leading, 132)
+                .padding(.trailing, 78)
+        }
+        .frame(height: EditorShellState.searchAreaHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -157,6 +272,174 @@ struct EditorTopBarControls: View {
             EditorTopBarFocusModeButton(state: state)
             EditorTopBarPreviewButton()
         }
+    }
+}
+
+private struct EditorSearchBar: View {
+    @ObservedObject private var state: EditorShellState
+
+    @FocusState private var isSearchFieldFocused: Bool
+
+    init(state: EditorShellState) {
+        self.state = state
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            searchField
+
+            HStack(spacing: 2) {
+                Button {
+                    state.selectPreviousSearchMatch()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 20, height: 22)
+                }
+                .disabled(state.searchMatchCount == 0)
+
+                Button {
+                    state.selectNextSearchMatch()
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 20, height: 22)
+                }
+                .disabled(state.searchMatchCount == 0)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.primary.opacity(0.66))
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.06))
+            )
+
+            Button("Done") {
+                state.closeSearch()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Color.primary.opacity(0.82))
+            .padding(.horizontal, 10)
+            .frame(height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.10))
+            )
+
+            Toggle("Replace", isOn: .constant(false))
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11, weight: .medium))
+                .disabled(true)
+        }
+        .frame(height: EditorShellState.searchAreaHeight)
+        .onAppear {
+            isSearchFieldFocused = true
+        }
+        .onChange(of: state.searchFocusRequest) { _, _ in
+            isSearchFieldFocused = true
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 5) {
+            Menu {
+                Button {
+                    state.setSearchIgnoresCase(!state.searchOptions.ignoresCase)
+                } label: {
+                    Label {
+                        Text("Ignore Case")
+                    } icon: {
+                        if state.searchOptions.ignoresCase {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+
+                Divider()
+
+                ForEach(EditorSearchMode.allCases, id: \.self) { mode in
+                    Button {
+                        state.setSearchMode(mode)
+                    } label: {
+                        Label {
+                            Text(mode.title)
+                        } icon: {
+                            if state.searchOptions.mode == mode {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.secondary)
+                    .frame(width: 16, height: 18)
+            }
+            .buttonStyle(.plain)
+            .menuStyle(.button)
+            .fixedSize()
+
+            TextField(
+                "Find",
+                text: Binding(
+                    get: { state.searchQuery },
+                    set: { state.setSearchQuery($0) }
+                )
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .focused($isSearchFieldFocused)
+            .onKeyPress(.escape) {
+                state.closeSearch()
+                return .handled
+            }
+            .onSubmit {
+                state.selectNextSearchMatch()
+            }
+
+            if !state.searchQuery.isEmpty {
+                Text("\(state.searchMatchCount)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.secondary)
+                    .monospacedDigit()
+                    .padding(.trailing, 3)
+            }
+
+            if !state.searchQuery.isEmpty {
+                Button {
+                    state.setSearchQuery("")
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.secondary.opacity(0.72))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.leading, 7)
+        .padding(.trailing, 5)
+        .frame(height: 22)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.76))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(searchFieldBorderColor, lineWidth: searchFieldBorderWidth)
+        )
+    }
+
+    private var searchFieldBorderColor: Color {
+        isSearchFieldFocused
+            ? Color(nsColor: .keyboardFocusIndicatorColor)
+            : Color.primary.opacity(0.08)
+    }
+
+    private var searchFieldBorderWidth: CGFloat {
+        isSearchFieldFocused ? 3 : 1
     }
 }
 
@@ -351,11 +634,17 @@ extension EditorShellView {
 }
 
 private struct BackdropBlurOverlay: NSViewRepresentable {
+    let isSearchActive: Bool
+
     func makeNSView(context _: Context) -> BackdropBlurView {
-        BackdropBlurView(frame: .zero)
+        let view = BackdropBlurView(frame: .zero)
+        view.isSearchActive = isSearchActive
+        return view
     }
 
-    func updateNSView(_: BackdropBlurView, context _: Context) {}
+    func updateNSView(_ view: BackdropBlurView, context _: Context) {
+        view.isSearchActive = isSearchActive
+    }
 }
 
 private struct EditorToolbarButton: View {
