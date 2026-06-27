@@ -145,7 +145,7 @@ struct EditorTopBarHistoryControls: View {
 
             Rectangle()
                 .fill(Color.primary.opacity(0.14))
-                .frame(width: 1, height: 18)
+                .frame(width: 1, height: 20)
                 .opacity(hoveredItem == nil ? 1 : 0)
 
             EditorTopBarHistoryButton(
@@ -155,7 +155,6 @@ struct EditorTopBarHistoryControls: View {
                 state.onRedo?()
             }
         }
-        .animation(.easeOut(duration: 0.08), value: hoveredItem)
         .glassEffect(.regular.interactive(), in: .capsule)
     }
 }
@@ -196,15 +195,15 @@ private struct EditorTopBarHistoryButton: View {
         Button(action: action) {
             ZStack {
                 Capsule()
-                    .fill(Color.secondary.opacity(0.22))
-                    .frame(width: 30, height: 26)
+                    .fill(Color.secondary)
+                    .frame(width: 31, height: 28)
                     .opacity(isHovered ? 1 : 0)
 
                 Image(systemName: item.systemName)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(Color.primary.opacity(0.72))
             }
-            .frame(width: 34, height: 34)
+            .frame(width: 36, height: 36)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

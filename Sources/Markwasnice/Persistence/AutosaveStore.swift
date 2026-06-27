@@ -22,6 +22,10 @@ final class AutosaveStore {
         fileURL = directory.appendingPathComponent("AutosavedDraft.json")
     }
 
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
     func load() -> AutosavedDraft? {
         guard let data = try? Data(contentsOf: fileURL) else {
             return nil

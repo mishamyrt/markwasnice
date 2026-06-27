@@ -4,6 +4,7 @@ import SwiftUI
 struct EditorWindowHost: View {
     @Binding var sessionID: EditorDocumentSession.ID?
 
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var appState: MarkwasniceAppState
 
@@ -14,7 +15,12 @@ struct EditorWindowHost: View {
             } else {
                 ProgressView()
                     .task {
-                        sessionID = appState.initialSessionID()
+                        guard let id = appState.initialSessionID() else {
+                            dismiss()
+                            return
+                        }
+
+                        sessionID = id
                         openPendingWindows()
                     }
             }

@@ -10,13 +10,14 @@ final class MarkwasniceAppState: ObservableObject {
     @Published private(set) var settings: EditorSettings
 
     private let settingsStore = EditorSettingsStore()
-    private let autosaveStore = AutosaveStore()
+    private let autosaveStore: AutosaveStore
     private var autosaveWorkItem: DispatchWorkItem?
     private var preferencesWindowController: PreferencesWindowController?
     private var didCreateInitialSessions = false
     private var activeSessionID: EditorDocumentSession.ID?
 
-    init() {
+    init(autosaveStore: AutosaveStore = AutosaveStore()) {
+        self.autosaveStore = autosaveStore
         settings = settingsStore.load()
     }
 
@@ -28,13 +29,13 @@ final class MarkwasniceAppState: ObservableObject {
         return sessions[id]
     }
 
-    func initialSessionID() -> EditorDocumentSession.ID {
+    func initialSessionID() -> EditorDocumentSession.ID? {
         if !pendingWindowIDs.isEmpty {
             return pendingWindowIDs.removeFirst()
         }
 
         guard !didCreateInitialSessions else {
-            return newSession().id
+            return nil
         }
 
         didCreateInitialSessions = true
