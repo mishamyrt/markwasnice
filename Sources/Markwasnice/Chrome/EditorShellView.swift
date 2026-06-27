@@ -106,56 +106,21 @@ struct EditorTopBarContent: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
-            Spacer()
-                .frame(width: 64)
-
-            EditorTopBarHistoryControls(state: state)
-
-            Spacer(minLength: 16)
-
+        ZStack {
             EditorTopBarTitle(state: state)
+                .frame(maxWidth: .infinity, alignment: .center)
+            HStack(spacing: 14) {
+                Spacer(minLength: 16)
 
-            Spacer(minLength: 16)
+                Spacer(minLength: 16)
 
-            EditorTopBarPreviewButton()
-        }
-        .padding(.horizontal, 18)
-        .frame(height: EditorShellState.toolbarContentHeight)
-        .frame(maxWidth: .infinity)
-    }
-}
-
-struct EditorTopBarHistoryControls: View {
-    @ObservedObject private var state: EditorShellState
-    @State private var hoveredItem: EditorTopBarHistoryItem?
-
-    init(state: EditorShellState) {
-        self.state = state
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            EditorTopBarHistoryButton(
-                item: .undo,
-                hoveredItem: $hoveredItem
-            ) {
-                state.onUndo?()
+                EditorTopBarPreviewButton()
             }
-
-            Rectangle()
-                .fill(Color.primary.opacity(0.14))
-                .frame(width: 1, height: 20)
-                .opacity(hoveredItem == nil ? 1 : 0)
-
-            EditorTopBarHistoryButton(
-                item: .redo,
-                hoveredItem: $hoveredItem
-            ) {
-                state.onRedo?()
-            }
+            .padding(.leading, 18)
+            .padding(.trailing, 9)
+            .frame(height: EditorShellState.toolbarContentHeight)
+            .frame(maxWidth: .infinity)
         }
-        .glassEffect(.regular.interactive(), in: .capsule)
     }
 }
 
@@ -243,7 +208,7 @@ struct EditorTopBarTitle: View {
 
 struct EditorTopBarPreviewButton: View {
     var body: some View {
-        EditorToolbarButton(systemName: "eye", help: "Preview", isDisabled: true) {}
+        EditorToolbarButton(systemName: "play.fill", help: "Preview", isDisabled: true) {}
     }
 }
 
