@@ -4,7 +4,7 @@ import Markdown
 struct MarkdownParseResult {
     let textVersion: Int
     let sourceLength: Int
-    let spans: [MarkdownStyleSpan]
+    let spans: [ResolvedMarkdownStyleSpan]
 }
 
 struct MarkdownStyleSpan {
@@ -12,7 +12,7 @@ struct MarkdownStyleSpan {
     let kind: MarkdownStyleKind
 }
 
-struct ResolvedMarkdownStyleSpan {
+struct ResolvedMarkdownStyleSpan: Equatable {
     let range: NSRange
     let kind: MarkdownStyleKind
 
@@ -28,7 +28,7 @@ struct ResolvedMarkdownStyleSpan {
     }
 }
 
-enum MarkdownStyleKind {
+enum MarkdownStyleKind: Equatable, Hashable {
     case heading
     case strong
     case emphasis

@@ -27,6 +27,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var hangsHeadingMarkers = true
     private var themeColors = EditorThemeColors.default
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
+    private var deferredStyleTask: Task<Void, Never>?
     private var paragraphGutter: CGFloat = 0
     private var textTopPadding: CGFloat = 0
     private var textBottomPadding: CGFloat = 160
@@ -70,6 +71,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         ])
     }
 
+    deinit {
+        deferredStyleTask?.cancel()
+    }
+
     override func layout() {
         super.layout()
         let didChangeParagraphGutter = applyChromeInsets()
@@ -108,6 +113,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
+        deferredStyleTask?.cancel()
+        deferredStyleTask = nil
         currentStyleSpans = spans
         let orderedSpans = orderedForVisibleRange(spans)
 
@@ -127,6 +134,84 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         updateTextDocumentSize()
 
         updateTypingAttributesAtSelection(spans: spans)
+    }
+
+    func applyParsedStyles(_ spans: [ResolvedMarkdownStyleSpan]) {
+        guard !textView.hasMarkedText() else {
+            return
+        }
+
+        let dirtyRanges = dirtyStyleRanges(from: currentStyleSpans, to: spans)
+        currentStyleSpans = spans
+        deferredStyleTask?.cancel()
+        deferredStyleTask = nil
+
+        guard !dirtyRanges.isEmpty else {
+            updateTypingAttributesAtSelection(spans: spans)
+            return
+        }
+
+        let splitRanges = splitStyleRangesByVisibility(dirtyRanges)
+        applyStyleRanges(splitRanges.visible, spans: spans)
+        scheduleDeferredStyleRanges(splitRanges.deferred, spans: spans)
+        updateTypingAttributesAtSelection(spans: spans)
+    }
+
+    private func applyStyleRanges(
+        _ ranges: [NSRange],
+        spans: [ResolvedMarkdownStyleSpan]
+    ) {
+        guard !ranges.isEmpty else {
+            return
+        }
+
+        isApplyingStyles = true
+        textView.undoManager?.disableUndoRegistration()
+        textStorage.beginEditing()
+
+        for range in ranges {
+            guard let range = boundedRange(range), range.length > 0 else {
+                continue
+            }
+
+            applyBaseStyleToText(range: range)
+            for span in spans {
+                let rangeToStyle = NSIntersectionRange(span.range, range)
+                guard rangeToStyle.length > 0 else {
+                    continue
+                }
+
+                applyStyle(span.kind, range: rangeToStyle)
+            }
+            applyNonbreakingSpaceStyle(range: range)
+        }
+
+        textStorage.endEditing()
+        textView.undoManager?.enableUndoRegistration()
+        isApplyingStyles = false
+    }
+
+    private func scheduleDeferredStyleRanges(
+        _ ranges: [NSRange],
+        spans: [ResolvedMarkdownStyleSpan]
+    ) {
+        guard !ranges.isEmpty else {
+            return
+        }
+
+        let deferredRanges = chunkedStyleRanges(ranges)
+        deferredStyleTask = Task { @MainActor [weak self, deferredRanges, spans] in
+            await Task.yield()
+
+            for range in deferredRanges {
+                guard !Task.isCancelled, let self else {
+                    return
+                }
+
+                applyStyleRanges([range], spans: spans)
+                await Task.yield()
+            }
+        }
     }
 
     func applySettings(_ settings: EditorSettings, spans: [ResolvedMarkdownStyleSpan]) {
@@ -720,8 +805,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
+        applyBaseStyleToText(range: NSRange(location: 0, length: textStorage.length))
+    }
+
+    private func applyBaseStyleToText(range: NSRange) {
+        guard let range = boundedRange(range), range.length > 0 else {
+            return
+        }
+
         textStorage.setAttributes(
-            attributes, range: NSRange(location: 0, length: textStorage.length)
+            baseAttributes(), range: range
         )
     }
 
@@ -931,6 +1024,168 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 .foregroundColor, value: colors.thematicBreak, range: range
             )
         }
+    }
+
+    private func dirtyStyleRanges(
+        from previousSpans: [ResolvedMarkdownStyleSpan],
+        to currentSpans: [ResolvedMarkdownStyleSpan]
+    ) -> [NSRange] {
+        let previousKeys = Set(previousSpans.map(StyleSpanKey.init))
+        let currentKeys = Set(currentSpans.map(StyleSpanKey.init))
+        var ranges: [NSRange] = []
+
+        for span in previousSpans where !currentKeys.contains(StyleSpanKey(span)) {
+            if let range = lineExpandedRange(for: span.range) {
+                ranges.append(range)
+            }
+        }
+
+        for span in currentSpans where !previousKeys.contains(StyleSpanKey(span)) {
+            if let range = lineExpandedRange(for: span.range) {
+                ranges.append(range)
+            }
+        }
+
+        return mergedRanges(ranges)
+    }
+
+    private func splitStyleRangesByVisibility(_ ranges: [NSRange])
+        -> (visible: [NSRange], deferred: [NSRange])
+    {
+        guard let visibleRange = visibleCharacterRange()
+            .flatMap({ lineExpandedRange(for: $0) })
+        else {
+            return (ranges, [])
+        }
+
+        var visibleRanges: [NSRange] = []
+        var deferredRanges: [NSRange] = []
+
+        for range in ranges {
+            let visiblePart = NSIntersectionRange(range, visibleRange)
+            if visiblePart.length > 0 {
+                visibleRanges.append(visiblePart)
+            }
+
+            deferredRanges.append(contentsOf: subtract(visibleRange, from: range))
+        }
+
+        return (mergedRanges(visibleRanges), mergedRanges(deferredRanges))
+    }
+
+    private func lineExpandedRange(for range: NSRange) -> NSRange? {
+        guard let clippedRange = clippedRange(range), clippedRange.length > 0 else {
+            return nil
+        }
+
+        return (textStorage.string as NSString).lineRange(for: clippedRange)
+    }
+
+    private func clippedRange(_ range: NSRange) -> NSRange? {
+        guard range.location >= 0,
+              range.length >= 0,
+              range.location <= textStorage.length
+        else {
+            return nil
+        }
+
+        let upperBound = min(range.location + range.length, textStorage.length)
+        return NSRange(location: range.location, length: upperBound - range.location)
+    }
+
+    private func subtract(_ excludedRange: NSRange, from range: NSRange) -> [NSRange] {
+        let intersection = NSIntersectionRange(range, excludedRange)
+        guard intersection.length > 0 else {
+            return [range]
+        }
+
+        var result: [NSRange] = []
+        if intersection.location > range.location {
+            result.append(NSRange(
+                location: range.location,
+                length: intersection.location - range.location
+            ))
+        }
+
+        let excludedUpperBound = intersection.location + intersection.length
+        let rangeUpperBound = range.location + range.length
+        if excludedUpperBound < rangeUpperBound {
+            result.append(NSRange(
+                location: excludedUpperBound,
+                length: rangeUpperBound - excludedUpperBound
+            ))
+        }
+
+        return result
+    }
+
+    private func mergedRanges(_ ranges: [NSRange]) -> [NSRange] {
+        let sortedRanges = ranges
+            .filter { $0.length > 0 }
+            .sorted { lhs, rhs in
+                if lhs.location == rhs.location {
+                    return lhs.length < rhs.length
+                }
+
+                return lhs.location < rhs.location
+            }
+        guard var currentRange = sortedRanges.first else {
+            return []
+        }
+
+        var result: [NSRange] = []
+        for range in sortedRanges.dropFirst() {
+            let currentUpperBound = currentRange.location + currentRange.length
+            let rangeUpperBound = range.location + range.length
+            if range.location <= currentUpperBound {
+                currentRange.length = max(currentUpperBound, rangeUpperBound)
+                    - currentRange.location
+            } else {
+                result.append(currentRange)
+                currentRange = range
+            }
+        }
+
+        result.append(currentRange)
+        return result
+    }
+
+    private func chunkedStyleRanges(_ ranges: [NSRange]) -> [NSRange] {
+        ranges.flatMap { chunkedStyleRange($0) }
+    }
+
+    private func chunkedStyleRange(_ range: NSRange) -> [NSRange] {
+        let maximumLength = 20000
+        guard range.length > maximumLength else {
+            return [range]
+        }
+
+        let string = textStorage.string as NSString
+        let upperBound = range.location + range.length
+        var chunks: [NSRange] = []
+        var location = range.location
+
+        while location < upperBound {
+            let candidateUpperBound = min(location + maximumLength, upperBound)
+            let candidate = NSRange(
+                location: location,
+                length: candidateUpperBound - location
+            )
+            let lineRange = string.lineRange(for: candidate)
+            let chunkUpperBound = min(lineRange.location + lineRange.length, upperBound)
+
+            guard chunkUpperBound > location else {
+                break
+            }
+
+            chunks.append(NSRange(
+                location: location,
+                length: chunkUpperBound - location
+            ))
+            location = chunkUpperBound
+        }
+
+        return chunks
     }
 
     private func orderedForVisibleRange(_ spans: [ResolvedMarkdownStyleSpan])
@@ -1171,8 +1426,20 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     private func applyNonbreakingSpaceStyle() {
+        applyNonbreakingSpaceStyle(range: NSRange(
+            location: 0,
+            length: textStorage.length
+        ))
+    }
+
+    private func applyNonbreakingSpaceStyle(range: NSRange) {
+        guard let range = boundedRange(range), range.length > 0 else {
+            return
+        }
+
         let string = textStorage.string as NSString
-        var searchRange = NSRange(location: 0, length: string.length)
+        var searchRange = range
+        let searchUpperBound = range.location + range.length
 
         while searchRange.length > 0 {
             let range = string.range(of: "\u{00A0}", options: [], range: searchRange)
@@ -1190,9 +1457,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             let nextLocation = range.location + range.length
             searchRange = NSRange(
                 location: nextLocation,
-                length: string.length - nextLocation
+                length: searchUpperBound - nextLocation
             )
         }
+    }
+}
+
+private struct StyleSpanKey: Hashable {
+    let location: Int
+    let length: Int
+    let kind: MarkdownStyleKind
+
+    init(_ span: ResolvedMarkdownStyleSpan) {
+        location = span.range.location
+        length = span.range.length
+        kind = span.kind
     }
 }
 

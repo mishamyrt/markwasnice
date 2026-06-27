@@ -56,11 +56,20 @@ final class MarkdownParseService {
         let document = Document(parsing: text, options: [.disableSmartOpts])
         var collector = MarkdownStyleSpanCollector()
         collector.visit(document)
+        let sourceMap = SourceMap(text: text)
+        let resolvedSpans: [ResolvedMarkdownStyleSpan] = collector.spans
+            .compactMap { span in
+                guard let range = sourceMap.nsRange(for: span.range) else {
+                    return nil
+                }
+
+                return ResolvedMarkdownStyleSpan(range: range, kind: span.kind)
+            }
 
         return MarkdownParseResult(
             textVersion: version,
             sourceLength: text.utf16.count,
-            spans: collector.spans
+            spans: MarkdownLinkStyleResolver.resolve(spans: resolvedSpans, in: text)
         )
     }
 }

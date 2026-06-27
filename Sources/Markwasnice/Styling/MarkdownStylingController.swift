@@ -30,18 +30,7 @@ final class MarkdownStylingController {
             return
         }
 
-        let sourceMap = SourceMap(text: editorView.string)
-        let resolvedStyleSpans: [ResolvedMarkdownStyleSpan] = result.spans
-            .compactMap { span in
-                guard let range = sourceMap.nsRange(for: span.range) else {
-                    return nil
-                }
-
-                return ResolvedMarkdownStyleSpan(range: range, kind: span.kind)
-            }
-        self.resolvedStyleSpans = MarkdownLinkStyleResolver.resolve(
-            spans: resolvedStyleSpans, in: editorView.string
-        )
-        editorView.applyStyles(self.resolvedStyleSpans)
+        resolvedStyleSpans = result.spans
+        editorView.applyParsedStyles(resolvedStyleSpans)
     }
 }
