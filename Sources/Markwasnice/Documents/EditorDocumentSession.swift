@@ -51,15 +51,11 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         shellState.onTopHoverChanged = { [weak self] isHovering in
             self?.handleTopHoverChanged(isHovering)
         }
-        shellState.onUndo = { [weak self] in
-            self?.editorView.window?.firstResponder?.tryToPerform(
-                Selector(("undo:")), with: nil
-            )
+        shellState.onFocusModeEnabledChanged = { [weak self] isEnabled in
+            self?.editorView.setFocusModeEnabled(isEnabled)
         }
-        shellState.onRedo = { [weak self] in
-            self?.editorView.window?.firstResponder?.tryToPerform(
-                Selector(("redo:")), with: nil
-            )
+        shellState.onFocusModeSelected = { [weak self] mode in
+            self?.editorView.setFocusMode(mode)
         }
 
         editorView.delegate = self

@@ -21,7 +21,8 @@ let package = Package(
                 .product(name: "Markdown", package: "swift-markdown")
             ],
             resources: [
-                .copy("../../Assets/Fonts")
+                .copy("../../Assets/Fonts"),
+                .copy("../../Assets/text.line.middle.and.arrowtriangle.svg"),
             ]
         ),
         .testTarget(

@@ -35,6 +35,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var visibleScrollerTopInset: CGFloat = 0
     private var isChromeVisible = true
     private var lastScrollOffsetY: CGFloat?
+    private var isFocusModeEnabled = false
+    private var focusMode: EditorFocusMode = .focus
+    private var isFocusTemporarilySuppressed = false
+    private var activeFocusParagraphRange: NSRange?
+    private var isAdjustingFocusScroll = false
 
     var documentURL: URL?
 
@@ -127,6 +132,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             applyStyle(span.kind, range: span.range)
         }
         applyNonbreakingSpaceStyle()
+        applyFocusDimmingToVisibleText()
 
         textStorage.endEditing()
         textView.undoManager?.enableUndoRegistration()
@@ -185,6 +191,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             }
             applyNonbreakingSpaceStyle(range: range)
         }
+        applyFocusDimmingToVisibleIntersections(for: ranges)
 
         textStorage.endEditing()
         textView.undoManager?.enableUndoRegistration()
@@ -255,6 +262,43 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     func setChromeVisible(_ isVisible: Bool) {
         isChromeVisible = isVisible
         setScrollerTopInset(isVisible ? visibleScrollerTopInset : 0)
+    }
+
+    func setFocusModeEnabled(_ isEnabled: Bool) {
+        guard isFocusModeEnabled != isEnabled else {
+            return
+        }
+
+        isFocusModeEnabled = isEnabled
+        isFocusTemporarilySuppressed = false
+
+        if isEnabled {
+            updateFocusForSelection(refreshAppearance: true, centerLine: true)
+        } else {
+            activeFocusParagraphRange = nil
+            refreshAllFocusAppearance()
+        }
+    }
+
+    func setFocusMode(_ mode: EditorFocusMode) {
+        guard focusMode != mode else {
+            return
+        }
+
+        let previousMode = focusMode
+        focusMode = mode
+        guard isFocusModeEnabled else {
+            return
+        }
+
+        isFocusTemporarilySuppressed = false
+        updateFocusForSelection(
+            refreshAppearance: previousMode != .focus,
+            centerLine: true
+        )
+        if previousMode == .focus {
+            refreshAllFocusAppearance()
+        }
     }
 
     func pasteAsLink() {
@@ -371,7 +415,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         updateTextDocumentSize()
+        restoreFocusAfterEditorInteraction()
         delegate?.markdownEditorViewDidChangeText(self)
+    }
+
+    func textViewDidChangeSelection(_: Notification) {
+        guard !isApplyingStyles else {
+            return
+        }
+
+        updateTypingAttributesAtSelection(spans: currentStyleSpans)
+        restoreFocusAfterEditorInteraction()
     }
 
     @available(*, unavailable)
@@ -444,6 +498,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let offsetY = clipView.bounds.origin.y
         defer { lastScrollOffsetY = offsetY }
 
+        guard !isAdjustingFocusScroll else {
+            return
+        }
+
+        if isFocusModeEnabled, isFocusTemporarilySuppressed {
+            refreshVisibleFocusAppearance()
+        }
+
         guard let lastScrollOffsetY,
               abs(offsetY - lastScrollOffsetY) > 0.5
         else {
@@ -456,6 +518,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private func configureTextView() {
         textView.delegate = self
         textView.commandDelegate = self
+        textView.onMouseDown = { [weak self] in
+            self?.restoreFocusAfterEditorInteraction()
+        }
+        textView.onScrollWheel = { [weak self] in
+            self?.temporarilySuppressFocusForUserScroll()
+        }
         textView.registerForDraggedTypes([.fileURL])
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(
@@ -522,6 +590,223 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         let pointInContentView = contentView.convert(pointInWindow, from: nil)
         return chromeRect.contains(pointInContentView)
+    }
+
+    private func restoreFocusAfterEditorInteraction(refreshAppearance: Bool = false) {
+        guard isFocusModeEnabled else {
+            return
+        }
+
+        let wasFocusTemporarilySuppressed = isFocusTemporarilySuppressed
+        isFocusTemporarilySuppressed = false
+        updateFocusForSelection(
+            refreshAppearance: refreshAppearance || wasFocusTemporarilySuppressed,
+            centerLine: true
+        )
+    }
+
+    private func temporarilySuppressFocusForUserScroll() {
+        guard isFocusModeEnabled, !isAdjustingFocusScroll else {
+            return
+        }
+
+        guard !isFocusTemporarilySuppressed else {
+            return
+        }
+
+        isFocusTemporarilySuppressed = true
+        refreshVisibleFocusAppearance()
+    }
+
+    private func updateFocusForSelection(
+        refreshAppearance: Bool,
+        centerLine: Bool
+    ) {
+        guard isFocusModeEnabled else {
+            return
+        }
+
+        let previousParagraphRange = activeFocusParagraphRange
+        let nextParagraphRange = activeParagraphRangeAtSelection()
+        activeFocusParagraphRange = nextParagraphRange
+        let didChangeActiveParagraph = previousParagraphRange?.location
+            != nextParagraphRange?.location
+
+        if centerLine, !isFocusTemporarilySuppressed {
+            centerCaretLineInVisibleArea()
+        }
+
+        if refreshAppearance || didChangeActiveParagraph {
+            refreshVisibleFocusAppearance()
+        }
+    }
+
+    private func refreshVisibleFocusAppearance() {
+        guard !isApplyingStyles,
+              let range = visibleFocusRefreshRange()
+        else {
+            return
+        }
+
+        applyStyleRanges([range], spans: currentStyleSpans)
+    }
+
+    private func refreshAllFocusAppearance() {
+        guard !isApplyingStyles, textStorage.length > 0 else {
+            return
+        }
+
+        applyStyleRanges([
+            NSRange(location: 0, length: textStorage.length),
+        ], spans: currentStyleSpans)
+    }
+
+    private func activeParagraphRangeAtSelection() -> NSRange? {
+        guard textStorage.length > 0 else {
+            return nil
+        }
+
+        let string = textStorage.string as NSString
+        let location = min(textView.selectedRange().location, string.length)
+        return string.paragraphRange(for: NSRange(location: location, length: 0))
+    }
+
+    private func visibleFocusRefreshRange() -> NSRange? {
+        if let visibleRange = visibleCharacterRange()
+            .flatMap({ lineExpandedRange(for: $0) })
+        {
+            return visibleRange
+        }
+
+        guard textStorage.length > 0 else {
+            return nil
+        }
+
+        return NSRange(location: 0, length: textStorage.length)
+    }
+
+    private func centerCaretLineInVisibleArea() {
+        guard let lineRect = caretLineRectAtSelection() else {
+            return
+        }
+
+        let clipHeight = clipView.bounds.height
+        guard clipHeight > 0 else {
+            return
+        }
+
+        let lineMidY = textView.textContainerOrigin.y + lineRect.midY
+        let maximumOffsetY = max(0, textView.frame.height - clipHeight)
+        let targetOffsetY = min(max(0, lineMidY - (clipHeight / 2)), maximumOffsetY)
+        let currentOffsetY = clipView.bounds.origin.y
+        guard abs(currentOffsetY - targetOffsetY) > 0.5 else {
+            return
+        }
+
+        isAdjustingFocusScroll = true
+        defer { isAdjustingFocusScroll = false }
+
+        clipView.setBoundsOrigin(NSPoint(
+            x: clipView.bounds.origin.x,
+            y: targetOffsetY
+        ))
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func caretLineRectAtSelection() -> NSRect? {
+        layoutManager.ensureLayout(for: textContainer)
+
+        guard textStorage.length > 0 else {
+            return emptyCaretLineRect()
+        }
+
+        let location = min(textView.selectedRange().location, textStorage.length)
+        if location == textStorage.length,
+           layoutManager.extraLineFragmentTextContainer === textContainer
+        {
+            return layoutManager.extraLineFragmentRect
+        }
+
+        let characterIndex = min(location, textStorage.length - 1)
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: characterIndex)
+        guard glyphIndex < layoutManager.numberOfGlyphs else {
+            return emptyCaretLineRect()
+        }
+
+        return layoutManager.lineFragmentRect(
+            forGlyphAt: glyphIndex,
+            effectiveRange: nil,
+            withoutAdditionalLayout: true
+        )
+    }
+
+    private func emptyCaretLineRect() -> NSRect {
+        let extraLineRect = layoutManager.extraLineFragmentRect
+        guard extraLineRect.height > 0 else {
+            return NSRect(x: 0, y: 0, width: textContainer.size.width, height: lineHeight)
+        }
+
+        return extraLineRect
+    }
+
+    private func applyFocusDimmingToVisibleText() {
+        guard let range = visibleFocusRefreshRange() else {
+            return
+        }
+
+        applyFocusDimming(ranges: [range])
+    }
+
+    private func applyFocusDimmingToVisibleIntersections(for ranges: [NSRange]) {
+        guard let visibleRange = visibleFocusRefreshRange() else {
+            return
+        }
+
+        let visibleRanges = ranges.compactMap { range -> NSRange? in
+            let intersection = NSIntersectionRange(range, visibleRange)
+            return intersection.length > 0 ? intersection : nil
+        }
+        applyFocusDimming(ranges: visibleRanges)
+    }
+
+    private func applyFocusDimming(ranges: [NSRange]) {
+        guard isFocusModeEnabled,
+              !isFocusTemporarilySuppressed,
+              focusMode == .focus,
+              let activeRange = activeFocusParagraphRange
+        else {
+            return
+        }
+
+        var colorChanges: [(range: NSRange, color: NSColor)] = []
+        for range in ranges {
+            guard let range = boundedRange(range), range.length > 0 else {
+                continue
+            }
+
+            textStorage
+                .enumerateAttribute(.foregroundColor, in: range) { value, subrange, _ in
+                    let color = value as? NSColor ?? colors.foreground
+                    for dimmedRange in subtract(activeRange, from: subrange) {
+                        guard dimmedRange.length > 0 else {
+                            continue
+                        }
+
+                        colorChanges.append((
+                            range: dimmedRange,
+                            color: color.withAlphaComponent(color.alphaComponent * 0.5)
+                        ))
+                    }
+                }
+        }
+
+        for change in colorChanges {
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: change.color,
+                range: change.range
+            )
+        }
     }
 
     private func replaceSelectedText(with string: String) {

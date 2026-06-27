@@ -141,7 +141,10 @@ private final class WindowLifecycleView: NSView {
         window.titlebarAppearsTransparent = true
         window.styleMask.insert(.fullSizeContentView)
         if window.toolbar == nil {
-            window.toolbar = NSToolbar()
+            let toolbar = NSToolbar()
+            toolbar.allowsUserCustomization = false
+            toolbar.displayMode = .iconOnly
+            window.toolbar = toolbar
         }
         window.toolbarStyle = .unified
         window.acceptsMouseMovedEvents = true
@@ -168,14 +171,11 @@ private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
     private let toolbarIdentifier = NSToolbar.Identifier(
         "Markwasnice.FullScreenToolbar"
     )
-    private let historyItemIdentifier = NSToolbarItem.Identifier(
-        "Markwasnice.FullScreenHistory"
-    )
     private let titleItemIdentifier = NSToolbarItem.Identifier(
         "Markwasnice.FullScreenTitle"
     )
-    private let previewItemIdentifier = NSToolbarItem.Identifier(
-        "Markwasnice.FullScreenPreview"
+    private let controlsItemIdentifier = NSToolbarItem.Identifier(
+        "Markwasnice.FullScreenControls"
     )
 
     private weak var window: NSWindow?
@@ -244,8 +244,6 @@ private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
         guard let session else { return nil }
 
         switch itemIdentifier {
-        case historyItemIdentifier:
-            return historyToolbarItem()
         case titleItemIdentifier:
             let item = toolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Title"
@@ -255,11 +253,14 @@ private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
                 width: 420
             )
             return item
-        case previewItemIdentifier:
+        case controlsItemIdentifier:
             let item = toolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Preview"
-            item.paletteLabel = "Preview"
-            item.view = hostingView(EditorTopBarPreviewButton(), width: 50)
+            item.label = "Controls"
+            item.paletteLabel = "Controls"
+            item.view = hostingView(
+                EditorTopBarControls(state: session.shellState),
+                width: 112
+            )
             return item
         default:
             return nil
@@ -268,11 +269,10 @@ private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
 
     private var toolbarItemIdentifiers: [NSToolbarItem.Identifier] {
         [
-            historyItemIdentifier,
             .flexibleSpace,
             titleItemIdentifier,
             .flexibleSpace,
-            previewItemIdentifier,
+            controlsItemIdentifier,
         ]
     }
 
@@ -283,51 +283,6 @@ private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
         item.isBordered = false
         item.visibilityPriority = .high
         return item
-    }
-
-    private func historyToolbarItem() -> NSToolbarItemGroup {
-        let item = NSToolbarItemGroup(
-            itemIdentifier: historyItemIdentifier,
-            images: [
-                NSImage(
-                    systemSymbolName: "chevron.left",
-                    accessibilityDescription: "Undo"
-                )!,
-                NSImage(
-                    systemSymbolName: "chevron.right",
-                    accessibilityDescription: "Redo"
-                )!,
-            ],
-            selectionMode: .momentary,
-            labels: ["Undo", "Redo"],
-            target: self,
-            action: #selector(performHistoryAction(_:))
-        )
-        item.label = "History"
-        item.paletteLabel = "History"
-        item.controlRepresentation = .expanded
-        item.visibilityPriority = .high
-        return item
-    }
-
-    @objc private func performHistoryAction(_ sender: Any) {
-        let selectedIndex: Int
-        if let item = sender as? NSToolbarItemGroup {
-            selectedIndex = item.selectedIndex
-        } else if let control = sender as? NSSegmentedControl {
-            selectedIndex = control.selectedSegment
-        } else {
-            return
-        }
-
-        switch selectedIndex {
-        case 0:
-            session?.shellState.onUndo?()
-        case 1:
-            session?.shellState.onRedo?()
-        default:
-            break
-        }
     }
 
     private func hostingView(

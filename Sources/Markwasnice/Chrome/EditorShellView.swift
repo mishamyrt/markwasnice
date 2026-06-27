@@ -14,10 +14,12 @@ final class EditorShellState: ObservableObject {
     @Published var isToolbarVisible = true
     @Published var isStatusBarVisible = true
     @Published var isFullScreen = false
+    @Published var isFocusModeEnabled = false
+    @Published var focusMode: EditorFocusMode = .focus
 
     var onTopHoverChanged: ((Bool) -> Void)?
-    var onUndo: (() -> Void)?
-    var onRedo: (() -> Void)?
+    var onFocusModeEnabledChanged: ((Bool) -> Void)?
+    var onFocusModeSelected: ((EditorFocusMode) -> Void)?
 
     var wordCountText: String {
         wordCount == 1 ? "1 word" : "\(wordCount) words"
@@ -26,6 +28,28 @@ final class EditorShellState: ObservableObject {
     func updateTitle(_ title: String, isEdited: Bool) {
         self.title = title
         self.isEdited = isEdited
+    }
+
+    func toggleFocusMode() {
+        setFocusModeEnabled(!isFocusModeEnabled)
+    }
+
+    func setFocusModeEnabled(_ isEnabled: Bool) {
+        guard isFocusModeEnabled != isEnabled else {
+            return
+        }
+
+        isFocusModeEnabled = isEnabled
+        onFocusModeEnabledChanged?(isEnabled)
+    }
+
+    func selectFocusMode(_ mode: EditorFocusMode) {
+        guard focusMode != mode else {
+            return
+        }
+
+        focusMode = mode
+        onFocusModeSelected?(mode)
     }
 }
 
@@ -111,10 +135,7 @@ struct EditorTopBarContent: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             HStack(spacing: 14) {
                 Spacer(minLength: 16)
-
-                Spacer(minLength: 16)
-
-                EditorTopBarPreviewButton()
+                EditorTopBarControls(state: state)
             }
             .padding(.leading, 18)
             .padding(.trailing, 9)
@@ -124,63 +145,156 @@ struct EditorTopBarContent: View {
     }
 }
 
-private enum EditorTopBarHistoryItem {
-    case undo
-    case redo
+struct EditorTopBarControls: View {
+    @ObservedObject private var state: EditorShellState
 
-    var systemName: String {
-        switch self {
-        case .undo:
-            "chevron.left"
-        case .redo:
-            "chevron.right"
-        }
+    init(state: EditorShellState) {
+        self.state = state
     }
 
-    var help: String {
-        switch self {
-        case .undo:
-            "Undo"
-        case .redo:
-            "Redo"
+    var body: some View {
+        HStack(spacing: 14) {
+            EditorTopBarFocusModeButton(state: state)
+            EditorTopBarPreviewButton()
         }
     }
 }
 
-private struct EditorTopBarHistoryButton: View {
-    let item: EditorTopBarHistoryItem
-    @Binding var hoveredItem: EditorTopBarHistoryItem?
-    let action: () -> Void
+private struct EditorTopBarFocusModeButton: View {
+    @ObservedObject private var state: EditorShellState
+    @State private var isIconHovered = false
+    @State private var isChevronHovered = false
 
-    private var isHovered: Bool {
-        hoveredItem == item
+    init(state: EditorShellState) {
+        self.state = state
     }
 
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                Capsule()
-                    .fill(Color.secondary)
-                    .frame(width: 31, height: 28)
-                    .opacity(isHovered ? 1 : 0)
+        HStack(spacing: 0) {
+            Spacer()
+                .frame(width: 3)
+            Button {
+                state.toggleFocusMode()
+            } label: {
+                EditorFocusModeIconView(width: 25, height: 22)
+                    .foregroundStyle(iconColor)
+                    .frame(width: 33, height: 36)
+                    .background(iconBackground)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(NoPressedAnimationStyle())
+            .help(state.isFocusModeEnabled ? "Disable Focus Mode" : "Enable Focus Mode")
+            .onHover { isIconHovered = $0 }
 
-                Image(systemName: item.systemName)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(Color.primary.opacity(0.72))
+            Rectangle()
+                .fill(Color.primary.opacity(0.12))
+                .frame(width: 1, height: 18)
+                .opacity(isSeparatorVisible ? 1 : 0)
+
+            Menu {
+                ForEach(EditorFocusMode.allCases, id: \.self) { mode in
+                    Button {
+                        state.selectFocusMode(mode)
+                    } label: {
+                        Label {
+                            Text(mode.title)
+                        } icon: {
+                            if state.focusMode == mode {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.primary.opacity(0.62))
+                    .frame(width: 33, height: 36)
+                    .background(chevronBackground)
+                    .contentShape(Rectangle())
             }
-            .frame(width: 36, height: 36)
-            .contentShape(Rectangle())
+            .menuStyle(.button)
+            .buttonStyle(NoPressedAnimationStyle())
+            .help("Focus Mode Options")
+            .onHover { isChevronHovered = $0 }
+            Spacer()
+                .frame(width: 3)
         }
-        .buttonStyle(.plain)
-        .help(item.help)
-        .onHover { isHovering in
-            if isHovering {
-                hoveredItem = item
-            } else if hoveredItem == item {
-                hoveredItem = nil
-            }
+        .frame(height: 36)
+        .glassEffect(.regular.interactive(), in: .capsule)
+    }
+
+    private var iconColor: Color {
+        .primary
+    }
+
+    private var isSeparatorVisible: Bool {
+        !isIconHovered && !isChevronHovered && !state.isFocusModeEnabled
+    }
+
+    @ViewBuilder private var iconBackground: some View {
+        if state.isFocusModeEnabled || isIconHovered {
+            Capsule()
+                .fill(Color.primary.opacity(iconBackgroundOpacity))
+                .padding(.horizontal, 1)
+                .padding(.vertical, 4)
         }
     }
+
+    private var iconBackgroundOpacity: Double {
+        if state.isFocusModeEnabled {
+            isIconHovered ? 0.14 : 0.08
+        } else {
+            0.08
+        }
+    }
+
+    @ViewBuilder private var chevronBackground: some View {
+        if isChevronHovered {
+            Capsule()
+                .fill(Color.primary.opacity(0.08))
+                .padding(.horizontal, 1)
+                .padding(.vertical, 4)
+        }
+    }
+}
+
+private struct NoPressedAnimationStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
+}
+
+private struct EditorFocusModeIconView: View {
+    var width: CGFloat
+    var height: CGFloat
+
+    var body: some View {
+        if let image = Self.image {
+            Image(nsImage: image)
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: width, height: height)
+        } else {
+            Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                .font(.system(size: 10, weight: .semibold))
+        }
+    }
+
+    private static let image: NSImage? = {
+        guard let url = Bundle.module.url(
+            forResource: "text.line.middle.and.arrowtriangle",
+            withExtension: "svg"
+        ),
+            let image = NSImage(contentsOf: url)
+        else {
+            return nil
+        }
+
+        image.isTemplate = true
+        return image
+    }()
 }
 
 struct EditorTopBarTitle: View {
@@ -261,7 +375,7 @@ private struct EditorToolbarButton: View {
                         : Color.primary
                         .opacity(0.72)
                 )
-                .frame(width: 34, height: 34)
+                .frame(width: 36, height: 36)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -348,7 +462,10 @@ private final class ToolbarVisibilityView: NSView {
 
             window.titlebarAppearsTransparent = true
             if !isSystemManaged, window.toolbar == nil {
-                window.toolbar = NSToolbar()
+                let toolbar = NSToolbar()
+                toolbar.allowsUserCustomization = false
+                toolbar.displayMode = .iconOnly
+                window.toolbar = toolbar
             }
 
             let alpha = isSystemManaged || isToolbarVisible ? 1.0 : 0.0

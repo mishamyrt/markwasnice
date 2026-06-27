@@ -20,6 +20,8 @@ final class MarkdownTextView: NSTextView {
     weak var commandDelegate: MarkdownTextViewCommandDelegate?
     var isWindowPointInTopChrome: ((NSPoint, NSWindow) -> Bool)?
     var topChromeRectProvider: (() -> NSRect?)?
+    var onMouseDown: (() -> Void)?
+    var onScrollWheel: (() -> Void)?
 
     var textContentInsets = NSEdgeInsetsZero {
         didSet {
@@ -107,6 +109,16 @@ final class MarkdownTextView: NSTextView {
         default:
             super.keyDown(with: event)
         }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        onMouseDown?()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        onScrollWheel?()
+        super.scrollWheel(with: event)
     }
 
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
