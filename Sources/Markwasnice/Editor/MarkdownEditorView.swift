@@ -424,6 +424,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         delegate?.markdownEditorViewShowSearch(self)
     }
 
+    func markdownTextView(
+        _: NSTextView, applyMarkup command: MarkdownMarkupCommand
+    ) {
+        applyMarkup(command)
+    }
+
     func markdownTextViewInsertTab(_: NSTextView) {
         applyIndent(.indent)
     }

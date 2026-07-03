@@ -6,6 +6,9 @@ protocol MarkdownTextViewCommandDelegate: AnyObject {
     func markdownTextViewInsertBacktab(_ textView: NSTextView)
     func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool
     func markdownTextView(
+        _ textView: NSTextView, applyMarkup command: MarkdownMarkupCommand
+    )
+    func markdownTextView(
         _ textView: NSTextView, wrapSelectionWith opening: String, closing: String
     ) -> Bool
     func markdownTextViewDraggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation
@@ -306,6 +309,94 @@ final class MarkdownTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         super.mouseDown(with: event)
         onMouseDown?()
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event)
+        guard let menu, selectedRange().length > 0 else {
+            return menu
+        }
+
+        menu.insertItem(submenuItem(title: "Style", menu: styleMenu()), at: 0)
+        menu.insertItem(submenuItem(title: "Copy as", menu: copyAsMenu()), at: 1)
+        menu.insertItem(NSMenuItem.separator(), at: 2)
+        return menu
+    }
+
+    private func styleMenu() -> NSMenu {
+        let menu = NSMenu(title: "Style")
+        let commands: [(String, MarkdownMarkupCommand)] = [
+            ("Bold", .bold),
+            ("Italic", .italic),
+            ("Code", .code),
+        ]
+        for (title, command) in commands {
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(applyStyleMenuItem(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.tag = command.rawValue
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    private func copyAsMenu() -> NSMenu {
+        let menu = NSMenu(title: "Copy as")
+
+        let plainText = NSMenuItem(
+            title: "Plain Text",
+            action: #selector(copySelectionAsPlainText),
+            keyEquivalent: ""
+        )
+        plainText.target = self
+        menu.addItem(plainText)
+
+        let telegram = NSMenuItem(
+            title: "Telegram",
+            action: #selector(copySelectionAsTelegram),
+            keyEquivalent: ""
+        )
+        telegram.target = self
+        menu.addItem(telegram)
+
+        return menu
+    }
+
+    private func submenuItem(title: String, menu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = menu
+        return item
+    }
+
+    @objc private func applyStyleMenuItem(_ sender: NSMenuItem) {
+        guard let command = MarkdownMarkupCommand(rawValue: sender.tag) else {
+            return
+        }
+
+        commandDelegate?.markdownTextView(self, applyMarkup: command)
+    }
+
+    @objc private func copySelectionAsPlainText() {
+        copySelection(as: .plainText)
+    }
+
+    @objc private func copySelectionAsTelegram() {
+        copySelection(as: .telegram)
+    }
+
+    private func copySelection(as format: MarkdownCopyFormat) {
+        let range = selectedRange()
+        guard range.length > 0 else {
+            return
+        }
+
+        let markdown = (string as NSString).substring(with: range)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(format.convert(markdown), forType: .string)
     }
 
     /// AppKit disables responsive (asynchronous, pre-rendered) scrolling for
