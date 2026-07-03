@@ -17,12 +17,12 @@ final class BackdropBlurView: NSView {
         }
     }
 
-    var isSearchActive = false {
+    var isProminent = false {
         didSet {
-            guard isSearchActive != oldValue else { return }
+            guard isProminent != oldValue else { return }
 
             withoutImplicitAnimations {
-                blurRadius = isSearchActive ? 4 : 2
+                blurRadius = isProminent ? 4 : 2
                 updateBackdropFilter()
                 updateBackgroundGradient()
             }
@@ -112,7 +112,7 @@ final class BackdropBlurView: NSView {
     }
 
     private func updateBackdropFilter() {
-        let filterName = isSearchActive ? "gaussianBlur" : "variableBlur"
+        let filterName = isProminent ? "gaussianBlur" : "variableBlur"
         guard let blur = Self.makeCAFilter(named: filterName) else {
             backdropLayer.filters = nil
             blurFilter = nil
@@ -120,7 +120,7 @@ final class BackdropBlurView: NSView {
         }
 
         blur.setValue(blurRadius, forKey: "inputRadius")
-        if !isSearchActive {
+        if !isProminent {
             let gradientImage = makeGradientImage(startOffset: 0)
             blur.setValue(gradientImage, forKey: "inputMaskImage")
             blur.setValue(true, forKey: "inputNormalizeEdges")
@@ -134,7 +134,7 @@ final class BackdropBlurView: NSView {
         let background = EditorThemeColors.default
             .variant(for: effectiveAppearance)
             .background
-        if isSearchActive {
+        if isProminent {
             backgroundGradientLayer.colors = [
                 background.withAlphaComponent(0.94).cgColor,
                 background.withAlphaComponent(0.94).cgColor,

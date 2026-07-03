@@ -38,6 +38,9 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
+        // SwiftUI disables automatic window tabbing for its scenes, which
+        // also disables dragging a tab into another window's tab bar.
+        NSWindow.allowsAutomaticWindowTabbing = true
     }
 
     func applicationDidFinishLaunching(_: Notification) {

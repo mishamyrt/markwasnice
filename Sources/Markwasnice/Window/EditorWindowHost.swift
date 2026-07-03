@@ -1,5 +1,53 @@
 @preconcurrency import AppKit
+import Combine
+import ObjectiveC
 import SwiftUI
+
+enum EditorWindowTabbing {
+    static let identifier = "Markwasnice.EditorWindow"
+}
+
+// SwiftUI's own window controller sits ahead of the window delegate in the
+// responder chain and handles newWindowForTab: itself by opening a WindowGroup
+// window with a nil scene value. That window finds no session, dismisses
+// itself mid tab-insertion and corrupts the tab group state, crashing the app
+// on the next "+" click. Rerouting the controller's implementation into
+// requestNewTab keeps the native "+" button and system New Tab functional.
+@MainActor
+private enum NewTabActionInterceptor {
+    private(set) static weak var appState: MarkwasniceAppState?
+    private static var isInstalled = false
+
+    static func installIfNeeded(
+        on windowController: NSWindowController,
+        appState: MarkwasniceAppState
+    ) {
+        Self.appState = appState
+        guard !isInstalled else {
+            return
+        }
+
+        let selector = NSSelectorFromString("newWindowForTab:")
+        guard
+            windowController.responds(to: selector),
+            let method = class_getInstanceMethod(
+                type(of: windowController),
+                selector
+            )
+        else {
+            return
+        }
+
+        isInstalled = true
+        let block: @convention(block) (NSWindowController, Any?) -> Void = {
+            controller, _ in
+            MainActor.assumeIsolated {
+                Self.appState?.requestNewTab(attachedTo: controller.window)
+            }
+        }
+        method_setImplementation(method, imp_implementationWithBlock(block))
+    }
+}
 
 struct EditorWindowHost: View {
     @Binding var sessionID: EditorDocumentSession.ID?
@@ -114,11 +162,19 @@ private final class WindowLifecycleView: NSView {
     var appState: MarkwasniceAppState?
 
     private let delegateProxy = WindowDelegateProxy()
-    private let fullScreenToolbarController = FullScreenToolbarController()
+    private let chromeToolbarController = ChromeToolbarController()
     private var didConfigureWindow = false
+    private var tabGroupObservation: NSKeyValueObservation?
+    private var contentLayoutObservation: NSKeyValueObservation?
+    private var titleCancellable: AnyCancellable?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil {
+            tabGroupObservation = nil
+            contentLayoutObservation = nil
+            titleCancellable = nil
+        }
         configureWindowIfNeeded()
     }
 
@@ -133,10 +189,12 @@ private final class WindowLifecycleView: NSView {
 
         delegateProxy.session = session
         delegateProxy.appState = appState
-        delegateProxy.fullScreenToolbarController = fullScreenToolbarController
-        fullScreenToolbarController.session = session
+        delegateProxy.chromeToolbarController = chromeToolbarController
+        chromeToolbarController.session = session
         window.delegate = delegateProxy
         window.title = session.title
+        window.tabbingIdentifier = EditorWindowTabbing.identifier
+        window.tabbingMode = .automatic
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.styleMask.insert(.fullSizeContentView)
@@ -156,26 +214,113 @@ private final class WindowLifecycleView: NSView {
                 .background
         window.contentMinSize = NSSize(width: 640, height: 420)
 
+        if let windowController = window.windowController {
+            NewTabActionInterceptor.installIfNeeded(
+                on: windowController,
+                appState: appState
+            )
+        }
+
+        observeTabChrome(of: window, session: session)
+        observeTitle(of: window, shellState: session.shellState)
+
         if !didConfigureWindow {
             didConfigureWindow = true
-            window.setContentSize(NSSize(width: 960, height: 640))
-            window.center()
+            if let target = appState.takeTabAttachTarget(for: session.id),
+               target !== window, target.isVisible
+            {
+                target.addTabbedWindow(window, ordered: .above)
+                window.makeKeyAndOrderFront(nil)
+            } else {
+                window.setContentSize(NSSize(width: 960, height: 640))
+                window.center()
+            }
         }
+    }
+
+    private func observeTabChrome(
+        of window: NSWindow,
+        session _: EditorDocumentSession
+    ) {
+        tabGroupObservation = window.observe(
+            \.tabGroup?.isTabBarVisible,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.refreshTabChrome()
+            }
+        }
+        contentLayoutObservation = window.observe(
+            \.contentLayoutRect,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.refreshTabChrome()
+            }
+        }
+    }
+
+    private func observeTitle(
+        of window: NSWindow,
+        shellState: EditorShellState
+    ) {
+        titleCancellable = shellState.$title
+            .combineLatest(shellState.$isEdited)
+            .sink { [weak self, weak window] title, isEdited in
+                guard let window, self?.window === window else {
+                    return
+                }
+
+                window.title = title
+                window.isDocumentEdited = isEdited
+            }
+    }
+
+    private func refreshTabChrome() {
+        guard let window, let session else {
+            return
+        }
+
+        // SwiftUI may attach the window controller after the initial
+        // window configuration pass.
+        if let windowController = window.windowController, let appState {
+            NewTabActionInterceptor.installIfNeeded(
+                on: windowController,
+                appState: appState
+            )
+        }
+
+        let isTabBarVisible = window.tabGroup?.isTabBarVisible ?? false
+        let isFullScreen = session.shellState.isFullScreen
+
+        // The native tab bar sits directly below the toolbar row, so while
+        // it is visible the topbar content lives in the real NSToolbar:
+        // toolbar first, tabs below it, search underneath.
+        if isTabBarVisible || isFullScreen {
+            chromeToolbarController.install(in: window)
+        } else {
+            chromeToolbarController.uninstall(from: window)
+        }
+
+        let topInset = isTabBarVisible && !isFullScreen
+            ? (window.contentView?.safeAreaInsets.top ?? 0)
+            : 0
+        session.setTabBarChrome(isVisible: isTabBarVisible, topInset: topInset)
     }
 }
 
 @MainActor
-private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
+private final class ChromeToolbarController: NSObject, NSToolbarDelegate {
     weak var session: EditorDocumentSession?
 
     private let toolbarIdentifier = NSToolbar.Identifier(
-        "Markwasnice.FullScreenToolbar"
+        "Markwasnice.ChromeToolbar"
     )
     private let titleItemIdentifier = NSToolbarItem.Identifier(
-        "Markwasnice.FullScreenTitle"
+        "Markwasnice.ChromeTitle"
     )
     private let controlsItemIdentifier = NSToolbarItem.Identifier(
-        "Markwasnice.FullScreenControls"
+        "Markwasnice.ChromeControls"
     )
 
     private weak var window: NSWindow?
@@ -305,7 +450,7 @@ private final class FullScreenToolbarController: NSObject, NSToolbarDelegate {
 private final class WindowDelegateProxy: NSObject, NSWindowDelegate {
     weak var session: EditorDocumentSession?
     weak var appState: MarkwasniceAppState?
-    weak var fullScreenToolbarController: FullScreenToolbarController?
+    weak var chromeToolbarController: ChromeToolbarController?
 
     func windowDidBecomeKey(_: Notification) {
         guard let session else {
@@ -339,7 +484,7 @@ private final class WindowDelegateProxy: NSObject, NSWindowDelegate {
         }
 
         session?.setFullScreen(true)
-        fullScreenToolbarController?.install(in: window)
+        chromeToolbarController?.install(in: window)
     }
 
     func windowDidExitFullScreen(_ notification: Notification) {
@@ -347,7 +492,9 @@ private final class WindowDelegateProxy: NSObject, NSWindowDelegate {
             return
         }
 
-        fullScreenToolbarController?.uninstall(from: window)
+        if window.tabGroup?.isTabBarVisible != true {
+            chromeToolbarController?.uninstall(from: window)
+        }
         session?.setFullScreen(false)
     }
 

@@ -119,6 +119,21 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         applyChromeInsets(isFullScreen: isFullScreen)
     }
 
+    func setTabBarChrome(isVisible: Bool, topInset: CGFloat) {
+        guard shellState.isTabBarVisible != isVisible
+            || shellState.tabBarTopInset != topInset
+        else {
+            return
+        }
+
+        shellState.isTabBarVisible = isVisible
+        shellState.tabBarTopInset = topInset
+        applyChromeInsets(isFullScreen: shellState.isFullScreen)
+        if isVisible {
+            showChrome()
+        }
+    }
+
     func applySettings(_ settings: EditorSettings) {
         stylingController.applySettings(settings)
     }
@@ -362,7 +377,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func hideChrome() {
-        guard !shellState.isSearchPresented else {
+        guard !shellState.isSearchPresented, !shellState.isTabBarVisible else {
             return
         }
 
@@ -376,7 +391,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func hideChromeNow() {
-        guard !shellState.isSearchPresented else {
+        guard !shellState.isSearchPresented, !shellState.isTabBarVisible else {
             return
         }
 

@@ -16,6 +16,7 @@ final class MarkwasniceAppState: ObservableObject {
     private var preferencesWindowController: PreferencesWindowController?
     private var didCreateInitialSessions = false
     private var activeSessionID: EditorDocumentSession.ID?
+    private var tabAttachTargets: [EditorDocumentSession.ID: WeakWindowBox] = [:]
 
     init(autosaveStore: AutosaveStore = AutosaveStore()) {
         self.autosaveStore = autosaveStore
@@ -66,6 +67,22 @@ final class MarkwasniceAppState: ObservableObject {
         activate(session)
         scheduleAutosave()
         return session
+    }
+
+    func requestNewTab(attachedTo window: NSWindow?) {
+        let session = newSession()
+        if let window,
+           window.tabbingIdentifier == EditorWindowTabbing.identifier
+        {
+            tabAttachTargets[session.id] = WeakWindowBox(window: window)
+        }
+        pendingWindowIDs.append(session.id)
+    }
+
+    func takeTabAttachTarget(
+        for id: EditorDocumentSession.ID
+    ) -> NSWindow? {
+        tabAttachTargets.removeValue(forKey: id)?.window
     }
 
     @discardableResult
@@ -264,6 +281,10 @@ final class MarkwasniceAppState: ObservableObject {
     }
 }
 
+private struct WeakWindowBox {
+    weak var window: NSWindow?
+}
+
 struct MarkwasniceCommands: Commands {
     @ObservedObject private var appState: MarkwasniceAppState
     @Environment(\.openWindow) private var openWindow
@@ -279,6 +300,13 @@ struct MarkwasniceCommands: Commands {
             }
             .keyboardShortcut("n")
 
+            Button("New Tab") {
+                appState.requestNewTab(
+                    attachedTo: NSApp.keyWindow ?? NSApp.mainWindow
+                )
+            }
+            .keyboardShortcut("t")
+
             Button("Open...") {
                 for id in appState.openDocuments() {
                     openWindow(value: id)
@@ -288,6 +316,13 @@ struct MarkwasniceCommands: Commands {
         }
 
         CommandGroup(replacing: .saveItem) {
+            Button("Close") {
+                NSApp.keyWindow?.performClose(nil)
+            }
+            .keyboardShortcut("w")
+
+            Divider()
+
             Button("Save") {
                 appState.saveActiveSession()
             }
@@ -304,6 +339,13 @@ struct MarkwasniceCommands: Commands {
                 appState.showPreferences(nil)
             }
             .keyboardShortcut(",")
+        }
+
+        CommandGroup(after: .sidebar) {
+            Button("Show Tab Bar") {
+                NSApp.keyWindow?.toggleTabBar(nil)
+            }
+            .keyboardShortcut("t", modifiers: [.command, .option])
         }
 
         CommandGroup(after: .pasteboard) {

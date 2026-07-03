@@ -18,6 +18,8 @@ final class EditorShellState: ObservableObject {
     @Published var isFocusModeEnabled = false
     @Published var focusMode: EditorFocusMode = .focus
     @Published var isSearchPresented = false
+    @Published var isTabBarVisible = false
+    @Published var tabBarTopInset: CGFloat = 0
     @Published var searchQuery = ""
     @Published var searchOptions = EditorSearchOptions()
     @Published var searchMatchCount = 0
@@ -37,12 +39,26 @@ final class EditorShellState: ObservableObject {
         wordCount == 1 ? "1 word" : "\(wordCount) words"
     }
 
+    var usesProminentBackdrop: Bool {
+        isSearchPresented || isTabBarVisible
+    }
+
+    // While the tab bar is visible the topbar content lives in the native
+    // NSToolbar above the tabs, so the in-content chrome band collapses to
+    // the system chrome height (toolbar + tab bar) plus the search area.
     var topChromeInsetHeight: CGFloat {
-        Self.toolbarRevealHeight + (isSearchPresented ? Self.searchAreaHeight : 0)
+        let searchHeight = isSearchPresented ? Self.searchAreaHeight : 0
+        return isTabBarVisible
+            ? tabBarTopInset + searchHeight
+            : Self.toolbarRevealHeight + searchHeight
     }
 
     var topChromeCursorExclusionHeight: CGFloat {
-        isSearchPresented ? topChromeInsetHeight : Self.toolbarCursorExclusionHeight
+        if isTabBarVisible || isSearchPresented {
+            topChromeInsetHeight
+        } else {
+            Self.toolbarCursorExclusionHeight
+        }
     }
 
     func updateTitle(_ title: String, isEdited: Bool) {
@@ -152,7 +168,7 @@ struct EditorShellView: View {
             }
 
             VStack(spacing: 0) {
-                if !state.isFullScreen {
+                if !state.isFullScreen, !state.isTabBarVisible {
                     toolbarHoverLayer
                 }
 
@@ -197,7 +213,7 @@ struct EditorShellView: View {
         // was not animated anyway, so conditional mounting looks identical.
         ZStack(alignment: .top) {
             if state.isToolbarVisible {
-                BackdropBlurOverlay(isSearchActive: state.isSearchPresented)
+                BackdropBlurOverlay(isProminent: state.usesProminentBackdrop)
                     .frame(height: state.topChromeInsetHeight)
                     .allowsHitTesting(false)
             }
@@ -228,13 +244,17 @@ struct EditorShellView: View {
                 .padding(.horizontal, 6)
         }
         .frame(height: EditorShellState.searchAreaHeight)
-        .offset(y: EditorShellState.toolbarRevealHeight)
+        .offset(
+            y: state.isTabBarVisible
+                ? state.tabBarTopInset
+                : EditorShellState.toolbarRevealHeight
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var fullScreenSearchLayer: some View {
         ZStack(alignment: .top) {
-            BackdropBlurOverlay(isSearchActive: true)
+            BackdropBlurOverlay(isProminent: true)
                 .frame(height: EditorShellState.searchAreaHeight)
                 .allowsHitTesting(false)
 
@@ -642,16 +662,16 @@ extension EditorShellView {
 }
 
 private struct BackdropBlurOverlay: NSViewRepresentable {
-    let isSearchActive: Bool
+    let isProminent: Bool
 
     func makeNSView(context _: Context) -> BackdropBlurView {
         let view = BackdropBlurView(frame: .zero)
-        view.isSearchActive = isSearchActive
+        view.isProminent = isProminent
         return view
     }
 
     func updateNSView(_ view: BackdropBlurView, context _: Context) {
-        view.isSearchActive = isSearchActive
+        view.isProminent = isProminent
     }
 }
 
