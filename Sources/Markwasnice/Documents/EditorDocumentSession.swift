@@ -139,6 +139,23 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         stylingController.applySettings(settings)
     }
 
+    var isEmptyDocument: Bool {
+        fileURL == nil && editorView.string.isEmpty
+    }
+
+    func adoptFile(url: URL, text: String) {
+        self.text = text
+        fileURL = url
+        hasUnsavedFileChanges = false
+        editorView.documentURL = url
+        editorView.setString(text, clearsUndo: true)
+        stylingController.scheduleParse(text: text)
+        updateTitle()
+        scheduleWordCount()
+        refreshSearchMatches(selectsFirstMatch: false)
+        onAutosaveNeeded()
+    }
+
     func pasteAsLink() {
         editorView.pasteAsLink()
     }

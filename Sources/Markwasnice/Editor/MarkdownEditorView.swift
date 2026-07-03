@@ -707,7 +707,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             minimumHorizontalInset,
             floor((availableWidth - targetWidth) / 2)
         )
-        let markerGutter = characterWidth() * 7
+        // Sized for the widest heading marker, "###### " — 7 glyphs each
+        // advanced by the letter-spacing kern, matching how markerWidth is
+        // measured in applyHeadingStyle. Without the kern term the H6 marker
+        // overflows the gutter and its text is pushed right.
+        let markerGutter = (characterWidth() + baseLetterSpacing) * 7
         let containerInset = max(6, horizontalInset - markerGutter)
         let newParagraphGutter = max(0, horizontalInset - containerInset)
         let didChangeParagraphGutter = newParagraphGutter != paragraphGutter

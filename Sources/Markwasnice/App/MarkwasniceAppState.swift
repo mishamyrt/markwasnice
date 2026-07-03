@@ -86,14 +86,18 @@ final class MarkwasniceAppState: ObservableObject {
     }
 
     @discardableResult
-    func queueOpen(_ url: URL) -> Bool {
+    func queueOpen(_ url: URL, inTabOf window: NSWindow? = nil) -> Bool {
         Task {
-            await open(url, queuesWindow: true)
+            await open(url, queuesWindow: true, tabTarget: window)
         }
         return true
     }
 
-    func openDocuments() -> [EditorDocumentSession.ID] {
+    func openDocuments() {
+        // Captured before the panel runs: while the modal panel is up the
+        // editor window is no longer key.
+        let targetWindow = NSApp.keyWindow ?? NSApp.mainWindow
+
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
@@ -103,13 +107,12 @@ final class MarkwasniceAppState: ObservableObject {
         ]
 
         guard panel.runModal() == .OK else {
-            return []
+            return
         }
 
         for url in panel.urls {
-            queueOpen(url)
+            queueOpen(url, inTabOf: targetWindow)
         }
-        return []
     }
 
     func takePendingWindowIDs() -> [EditorDocumentSession.ID] {
@@ -192,7 +195,11 @@ final class MarkwasniceAppState: ObservableObject {
         activeSessionID.flatMap { sessions[$0] }
     }
 
-    private func open(_ url: URL, queuesWindow: Bool) async {
+    private func open(
+        _ url: URL,
+        queuesWindow: Bool,
+        tabTarget: NSWindow? = nil
+    ) async {
         if let existing = sessions.values.first(where: { $0.fileURL == url }) {
             activate(existing)
             if queuesWindow {
@@ -203,6 +210,19 @@ final class MarkwasniceAppState: ObservableObject {
 
         do {
             let text = try await FileIO.readUTF8(from: url)
+
+            // Opening into a window whose current document is still empty
+            // reuses that document instead of spawning a tab next to it.
+            if tabTarget != nil,
+               let active = activeSession,
+               active.isEmptyDocument
+            {
+                active.adoptFile(url: url, text: text)
+                NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                scheduleAutosave()
+                return
+            }
+
             let session = EditorDocumentSession(
                 text: text,
                 fileURL: url,
@@ -213,6 +233,11 @@ final class MarkwasniceAppState: ObservableObject {
             }
             sessions[session.id] = session
             activate(session)
+            if let tabTarget,
+               tabTarget.tabbingIdentifier == EditorWindowTabbing.identifier
+            {
+                tabAttachTargets[session.id] = WeakWindowBox(window: tabTarget)
+            }
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             scheduleAutosave()
             if queuesWindow {
@@ -308,9 +333,7 @@ struct MarkwasniceCommands: Commands {
             .keyboardShortcut("t")
 
             Button("Open...") {
-                for id in appState.openDocuments() {
-                    openWindow(value: id)
-                }
+                appState.openDocuments()
             }
             .keyboardShortcut("o")
         }
