@@ -178,8 +178,24 @@ private final class WindowLifecycleView: NSView {
         configureWindowIfNeeded()
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyWindowBackground()
+    }
+
     override func hitTest(_: NSPoint) -> NSView? {
         nil
+    }
+
+    private func applyWindowBackground() {
+        guard let window else {
+            return
+        }
+
+        window.backgroundColor =
+            EditorThemeColors.default
+                .variant(for: window.effectiveAppearance)
+                .background
     }
 
     private func configureWindowIfNeeded() {
@@ -208,10 +224,7 @@ private final class WindowLifecycleView: NSView {
         window.acceptsMouseMovedEvents = true
         window.isMovableByWindowBackground = false
         window.isOpaque = false
-        window.backgroundColor =
-            EditorThemeColors.default
-                .variant(for: window.effectiveAppearance)
-                .background
+        applyWindowBackground()
         window.contentMinSize = NSSize(width: 640, height: 420)
 
         if let windowController = window.windowController {

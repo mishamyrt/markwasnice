@@ -156,6 +156,7 @@ struct EditorShellView: View {
     let editorView: MarkdownEditorView
 
     @ObservedObject private var state: EditorShellState
+    @Environment(\.colorScheme) private var colorScheme
 
     init(editorView: MarkdownEditorView, state: EditorShellState) {
         self.editorView = editorView
@@ -200,7 +201,7 @@ struct EditorShellView: View {
                 isSystemManaged: state.isFullScreen
             )
         )
-        .background(Color(nsColor: Self.editorBackgroundColor))
+        .background(Color(nsColor: editorBackgroundColor))
         .ignoresSafeArea(.container, edges: .top)
         .onAppear {
             editorView.setChromeVisible(state.isToolbarVisible)
@@ -660,8 +661,12 @@ extension EditorShellView {
         .allowsHitTesting(false)
     }
 
-    private static var editorBackgroundColor: NSColor {
-        EditorThemeColors.default.variant(for: NSApp.effectiveAppearance).background
+    // Derived from the SwiftUI color scheme rather than NSApp's appearance:
+    // reading NSApp.effectiveAppearance here leaves SwiftUI unaware of the
+    // dependency, so the background would not refresh on theme changes.
+    private var editorBackgroundColor: NSColor {
+        let colors = EditorThemeColors.default
+        return colorScheme == .dark ? colors.dark.background : colors.light.background
     }
 }
 
