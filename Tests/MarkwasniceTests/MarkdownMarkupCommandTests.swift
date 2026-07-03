@@ -278,3 +278,97 @@ struct MarkdownMarkupCommandTests {
         ))
     }
 }
+
+@Suite
+struct MarkdownHeadingCommandTests {
+    @Test
+    func addsHeadingMarkerAtCaret() {
+        let edit = MarkdownMarkupCommand.heading2.edit(
+            in: "title", selectedRange: NSRange(location: 2, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 0, length: 5),
+            replacementString: "## title",
+            selectedRange: NSRange(location: 5, length: 0)
+        ))
+    }
+
+    @Test
+    func replacesExistingHeadingLevel() {
+        let edit = MarkdownMarkupCommand.heading3.edit(
+            in: "# title", selectedRange: NSRange(location: 4, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 0, length: 7),
+            replacementString: "### title",
+            selectedRange: NSRange(location: 6, length: 0)
+        ))
+    }
+
+    @Test
+    func togglesOffSameHeadingLevel() {
+        let edit = MarkdownMarkupCommand.heading2.edit(
+            in: "## title", selectedRange: NSRange(location: 4, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 0, length: 8),
+            replacementString: "title",
+            selectedRange: NSRange(location: 1, length: 0)
+        ))
+    }
+
+    @Test
+    func caretInsideMarkerLandsAfterNewPrefix() {
+        let edit = MarkdownMarkupCommand.heading2.edit(
+            in: "## title", selectedRange: NSRange(location: 1, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 0, length: 8),
+            replacementString: "title",
+            selectedRange: NSRange(location: 0, length: 0)
+        ))
+    }
+
+    @Test
+    func appliesHeadingToEverySelectedLine() {
+        let edit = MarkdownMarkupCommand.heading1.edit(
+            in: "a\nb\n", selectedRange: NSRange(location: 0, length: 4)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 0, length: 4),
+            replacementString: "# a\n# b\n",
+            selectedRange: NSRange(location: 0, length: 8)
+        ))
+    }
+
+    @Test
+    func headingAffectsWholeLineFromAnyCaretColumn() {
+        let edit = MarkdownMarkupCommand.heading1.edit(
+            in: "first\nsecond", selectedRange: NSRange(location: 9, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 6, length: 6),
+            replacementString: "# second",
+            selectedRange: NSRange(location: 11, length: 0)
+        ))
+    }
+
+    @Test
+    func headingOnBlankCaretLineInsertsMarker() {
+        let edit = MarkdownMarkupCommand.heading4.edit(
+            in: "", selectedRange: NSRange(location: 0, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 0, length: 0),
+            replacementString: "#### ",
+            selectedRange: NSRange(location: 5, length: 0)
+        ))
+    }
+}

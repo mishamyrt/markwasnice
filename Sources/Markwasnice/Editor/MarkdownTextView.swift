@@ -3,6 +3,7 @@
 protocol MarkdownTextViewCommandDelegate: AnyObject {
     func markdownTextViewShowFind(_ textView: NSTextView)
     func markdownTextViewInsertTab(_ textView: NSTextView)
+    func markdownTextViewInsertBacktab(_ textView: NSTextView)
     func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool
     func markdownTextView(
         _ textView: NSTextView, wrapSelectionWith opening: String, closing: String
@@ -286,7 +287,13 @@ final class MarkdownTextView: NSTextView {
 
         switch event.charactersIgnoringModifiers {
         case "\t":
-            commandDelegate?.markdownTextViewInsertTab(self)
+            if event.modifierFlags.contains(.shift) {
+                commandDelegate?.markdownTextViewInsertBacktab(self)
+            } else {
+                commandDelegate?.markdownTextViewInsertTab(self)
+            }
+        case "\u{19}": // Shift+Tab arrives as a backtab character.
+            commandDelegate?.markdownTextViewInsertBacktab(self)
         case "\r", "\n":
             if commandDelegate?.markdownTextViewContinueMarkdownPrefix(self) != true {
                 super.keyDown(with: event)
@@ -301,11 +308,11 @@ final class MarkdownTextView: NSTextView {
         onMouseDown?()
     }
 
-    // AppKit disables responsive (asynchronous, pre-rendered) scrolling for
-    // any view that overrides scrollWheel(with:). Our override only observes
-    // the event and always calls super, so it is safe to opt back in — losing
-    // responsive scrolling makes every frame draw synchronously and visibly
-    // drops scroll FPS on large documents.
+    /// AppKit disables responsive (asynchronous, pre-rendered) scrolling for
+    /// any view that overrides scrollWheel(with:). Our override only observes
+    /// the event and always calls super, so it is safe to opt back in — losing
+    /// responsive scrolling makes every frame draw synchronously and visibly
+    /// drops scroll FPS on large documents.
     override static var isCompatibleWithResponsiveScrolling: Bool {
         true
     }

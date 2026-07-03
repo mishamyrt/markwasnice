@@ -405,6 +405,32 @@ struct MarkwasniceCommands: Commands {
                 "Code Block", .codeBlock,
                 keyEquivalent: "j", modifiers: [.command, .shift]
             )
+
+            Divider()
+            markdownCommand(
+                "Heading 1", .heading1,
+                keyEquivalent: "1", modifiers: [.command, .option]
+            )
+            markdownCommand(
+                "Heading 2", .heading2,
+                keyEquivalent: "2", modifiers: [.command, .option]
+            )
+            markdownCommand(
+                "Heading 3", .heading3,
+                keyEquivalent: "3", modifiers: [.command, .option]
+            )
+            markdownCommand(
+                "Heading 4", .heading4,
+                keyEquivalent: "4", modifiers: [.command, .option]
+            )
+            markdownCommand(
+                "Heading 5", .heading5,
+                keyEquivalent: "5", modifiers: [.command, .option]
+            )
+            markdownCommand(
+                "Heading 6", .heading6,
+                keyEquivalent: "6", modifiers: [.command, .option]
+            )
         }
     }
 

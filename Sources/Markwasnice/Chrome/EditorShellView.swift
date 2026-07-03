@@ -622,11 +622,10 @@ private struct EditorFocusModeIconView: View {
     }
 
     private static let image: NSImage? = {
-        guard
-            let url = Bundle.module.url(
-                forResource: "text.line.middle.and.arrowtriangle",
-                withExtension: "svg"
-            ),
+        guard let url = Bundle.module.url(
+            forResource: "text.line.middle.and.arrowtriangle",
+            withExtension: "svg"
+        ),
             let image = NSImage(contentsOf: url)
         else {
             return nil
@@ -692,9 +691,9 @@ extension EditorShellView {
         .allowsHitTesting(false)
     }
 
-    // Derived from the SwiftUI color scheme rather than NSApp's appearance:
-    // reading NSApp.effectiveAppearance here leaves SwiftUI unaware of the
-    // dependency, so the background would not refresh on theme changes.
+    /// Derived from the SwiftUI color scheme rather than NSApp's appearance:
+    /// reading NSApp.effectiveAppearance here leaves SwiftUI unaware of the
+    /// dependency, so the background would not refresh on theme changes.
     private var editorBackgroundColor: NSColor {
         let colors = EditorThemeColors.default
         return colorScheme == .dark ? colors.dark.background : colors.light.background
@@ -730,7 +729,7 @@ private struct EditorToolbarButton: View {
                     isDisabled
                         ? Color.secondary.opacity(0.45)
                         : Color.primary
-                            .opacity(0.72)
+                        .opacity(0.72)
                 )
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())

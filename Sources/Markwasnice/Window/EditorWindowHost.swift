@@ -7,15 +7,15 @@ enum EditorWindowTabbing {
     static let identifier = "Markwasnice.EditorWindow"
 }
 
-// SwiftUI's own window controller sits ahead of the window delegate in the
-// responder chain and handles newWindowForTab: itself by opening a WindowGroup
-// window with a nil scene value. That window finds no session, dismisses
-// itself mid tab-insertion and corrupts the tab group state, crashing the app
-// on the next "+" click. Rerouting the controller's implementation into
-// requestNewTab keeps the native "+" button and system New Tab functional.
+/// SwiftUI's own window controller sits ahead of the window delegate in the
+/// responder chain and handles newWindowForTab: itself by opening a WindowGroup
+/// window with a nil scene value. That window finds no session, dismisses
+/// itself mid tab-insertion and corrupts the tab group state, crashing the app
+/// on the next "+" click. Rerouting the controller's implementation into
+/// requestNewTab keeps the native "+" button and system New Tab functional.
 @MainActor
 private enum NewTabActionInterceptor {
-    private(set) static weak var appState: MarkwasniceAppState?
+    private(set) weak static var appState: MarkwasniceAppState?
     private static var isInstalled = false
 
     static func installIfNeeded(
@@ -28,12 +28,11 @@ private enum NewTabActionInterceptor {
         }
 
         let selector = NSSelectorFromString("newWindowForTab:")
-        guard
-            windowController.responds(to: selector),
-            let method = class_getInstanceMethod(
-                type(of: windowController),
-                selector
-            )
+        guard windowController.responds(to: selector),
+              let method = class_getInstanceMethod(
+                  type(of: windowController),
+                  selector
+              )
         else {
             return
         }

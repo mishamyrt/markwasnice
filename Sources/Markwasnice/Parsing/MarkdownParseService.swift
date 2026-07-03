@@ -52,8 +52,8 @@ final class MarkdownParseService {
         }
     }
 
-    // Internal so the regression test harness can run the exact parse
-    // pipeline synchronously.
+    /// Internal so the regression test harness can run the exact parse
+    /// pipeline synchronously.
     nonisolated static func parse(
         text: String,
         version: Int,

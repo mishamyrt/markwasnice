@@ -15,6 +15,12 @@ enum MarkdownMarkupCommand: Int {
     case imageLink
     case code
     case codeBlock
+    case heading1
+    case heading2
+    case heading3
+    case heading4
+    case heading5
+    case heading6
 
     func edit(in text: String, selectedRange: NSRange) -> MarkdownMarkupEdit? {
         let nsString = text as NSString
@@ -64,7 +70,117 @@ enum MarkdownMarkupCommand: Int {
                 in: nsString, selectedRange: selectedRange,
                 opening: "```\n", closing: "\n```"
             )
+        case .heading1:
+            return Self.headingEdit(in: nsString, level: 1, selectedRange: selectedRange)
+        case .heading2:
+            return Self.headingEdit(in: nsString, level: 2, selectedRange: selectedRange)
+        case .heading3:
+            return Self.headingEdit(in: nsString, level: 3, selectedRange: selectedRange)
+        case .heading4:
+            return Self.headingEdit(in: nsString, level: 4, selectedRange: selectedRange)
+        case .heading5:
+            return Self.headingEdit(in: nsString, level: 5, selectedRange: selectedRange)
+        case .heading6:
+            return Self.headingEdit(in: nsString, level: 6, selectedRange: selectedRange)
         }
+    }
+
+    private static func headingEdit(
+        in nsString: NSString,
+        level: Int,
+        selectedRange: NSRange
+    ) -> MarkdownMarkupEdit {
+        let lineRange = nsString.lineRange(for: selectedRange)
+        let lineParts = markupLineParts(
+            in: nsString.substring(with: lineRange) as NSString
+        )
+        let marker = String(repeating: "#", count: level) + " "
+        let headings = lineParts.map { headingParts(of: $0.content) }
+        let contentLines = zip(lineParts, headings).filter { !$0.0.content.isEmpty }
+        // Pressing the shortcut of the level every content line already has
+        // toggles the heading off; any other state (re)applies that level.
+        let removesMarker = !contentLines.isEmpty
+            && contentLines.allSatisfy { $0.1?.level == level }
+
+        var replacement = ""
+        var firstLineOldPrefixLength = 0
+        var firstLineNewPrefixLength = 0
+        for (index, (part, heading)) in zip(lineParts, headings).enumerated() {
+            let rest = heading?.rest ?? part.content
+            let keepsBlankLine = part.content.isEmpty && lineParts.count > 1
+            if keepsBlankLine {
+                replacement += part.original
+            } else if removesMarker {
+                replacement += part.leading + rest + part.trailing + part.newline
+            } else {
+                replacement += part.leading + marker + rest + part.trailing
+                    + part.newline
+            }
+
+            if index == 0 {
+                let oldMarkerLength = part.content.utf16.count - rest.utf16.count
+                let newMarkerLength = removesMarker || keepsBlankLine
+                    ? 0
+                    : marker.utf16.count
+                firstLineOldPrefixLength = part.leading.utf16.count + oldMarkerLength
+                firstLineNewPrefixLength = part.leading.utf16.count + newMarkerLength
+            }
+        }
+
+        guard selectedRange.length > 0 else {
+            let offsetInLine = selectedRange.location - lineRange.location
+            let newOffset = offsetInLine <= firstLineOldPrefixLength
+                ? firstLineNewPrefixLength
+                : offsetInLine - firstLineOldPrefixLength + firstLineNewPrefixLength
+            return MarkdownMarkupEdit(
+                replacementRange: lineRange,
+                replacementString: replacement,
+                selectedRange: NSRange(
+                    location: lineRange.location + newOffset,
+                    length: 0
+                )
+            )
+        }
+
+        return MarkdownMarkupEdit(
+            replacementRange: lineRange,
+            replacementString: replacement,
+            selectedRange: NSRange(
+                location: lineRange.location,
+                length: replacement.utf16.count
+            )
+        )
+    }
+
+    private static func headingParts(
+        of content: String
+    ) -> (level: Int, rest: String)? {
+        let nsContent = content as NSString
+        var hashCount = 0
+        while hashCount < nsContent.length,
+              nsContent.character(at: hashCount) == 0x23 // '#'
+        {
+            hashCount += 1
+        }
+        guard (1 ... 6).contains(hashCount) else {
+            return nil
+        }
+
+        if hashCount == nsContent.length {
+            return (hashCount, "")
+        }
+
+        var restStart = hashCount
+        while restStart < nsContent.length,
+              isHorizontalWhitespace(in: nsContent, at: restStart)
+        {
+            restStart += 1
+        }
+        guard restStart > hashCount else {
+            return nil
+        }
+
+        return (hashCount, nsContent.substring(from: restStart))
     }
 
     private static func pairEdit(

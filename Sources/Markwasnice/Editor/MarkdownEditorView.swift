@@ -69,8 +69,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private let textContainer = NSTextContainer(
         containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
     )
-    // Internal for the regression test harness, which simulates real typing
-    // through the text input path and inspects the resulting attributes.
+    /// Internal for the regression test harness, which simulates real typing
+    /// through the text input path and inspects the resulting attributes.
     let textView: MarkdownTextView
 
     private var settings: EditorSettings
@@ -326,9 +326,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         updateScrollerInsets()
     }
 
-    // Content insets are zero (padding lives inside the text view), so the
-    // scroller spans the full window height by default; when the top bar is
-    // visible it is inset by the bar's height.
+    /// Content insets are zero (padding lives inside the text view), so the
+    /// scroller spans the full window height by default; when the top bar is
+    /// visible it is inset by the bar's height.
     private func updateScrollerInsets() {
         setScrollerTopInset(isChromeVisible ? textTopPadding : 0)
     }
@@ -425,15 +425,36 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     func markdownTextViewInsertTab(_: NSTextView) {
-        let insertedText: String
+        applyIndent(.indent)
+    }
+
+    func markdownTextViewInsertBacktab(_: NSTextView) {
+        applyIndent(.outdent)
+    }
+
+    private func applyIndent(_ command: MarkdownIndentCommand) {
+        let indentUnit: String
         switch settings.tabInsertionMode {
         case .spaces:
-            insertedText = String(repeating: " ", count: settings.tabWidth)
+            indentUnit = String(repeating: " ", count: settings.tabWidth)
         case .tab:
-            insertedText = "\t"
+            indentUnit = "\t"
         }
 
-        replaceSelectedText(with: insertedText)
+        guard let edit = command.edit(
+            in: textView.string,
+            selectedRange: textView.selectedRange(),
+            indentUnit: indentUnit,
+            tabWidth: settings.tabWidth
+        ) else {
+            return
+        }
+
+        replaceText(
+            in: edit.replacementRange,
+            with: edit.replacementString,
+            selectedRange: edit.selectedRange
+        )
     }
 
     func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool {
@@ -787,11 +808,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
-    // Shift/grow the drawn code ranges across an edit, so a code background
-    // stays put — and expands with the text — while typing inside it, instead
-    // of vanishing until the next parse arrives. Pending full-style chunks are
-    // shifted the same way so an interrupted full pass resumes at the right
-    // offsets.
+    /// Shift/grow the drawn code ranges across an edit, so a code background
+    /// stays put — and expands with the text — while typing inside it, instead
+    /// of vanishing until the next parse arrives. Pending full-style chunks are
+    /// shifted the same way so an interrupted full pass resumes at the right
+    /// offsets.
     private func translateCodeBackgroundRangesForEdit(
         editedRange: NSRange,
         changeInLength: Int,
@@ -900,9 +921,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         startDeferredChunkStyling(spans: spans)
     }
 
-    // Continues an interrupted full styling pass. The chunked pass gets
-    // cancelled by edits; the remaining chunks (translated across those edits)
-    // are picked up again once the next parse result has been applied.
+    /// Continues an interrupted full styling pass. The chunked pass gets
+    /// cancelled by edits; the remaining chunks (translated across those edits)
+    /// are picked up again once the next parse result has been applied.
     private func resumeFullStylingIfNeeded(spans: [ResolvedMarkdownStyleSpan]) {
         guard !pendingFullStyleRanges.isEmpty, deferredStyleTask == nil else {
             return
@@ -1900,9 +1921,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
     }
 
-    // Keeps the caret line vertically centered in focus/typewriter mode.
-    // Animated so that line transitions (Enter, arrow keys) glide instead of
-    // jumping.
+    /// Keeps the caret line vertically centered in focus/typewriter mode.
+    /// Animated so that line transitions (Enter, arrow keys) glide instead of
+    /// jumping.
     private func centerCaretLineInVisibleArea(animated: Bool) {
         guard let lineRect = caretLineRectAtSelection() else {
             return
@@ -1938,14 +1959,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        NSAnimationContext.runAnimationGroup({ [self] context in
+        NSAnimationContext.runAnimationGroup { [self] context in
             context.duration = 0.16
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             clipView.animator().setBoundsOrigin(targetOrigin)
             scrollView.reflectScrolledClipView(clipView)
-        }, completionHandler: { [weak self] in
+        } completionHandler: { [weak self] in
             self?.focusScrollAdjustmentCount -= 1
-        })
+        }
     }
 
     private func caretLineRectAtSelection() -> NSRect? {
