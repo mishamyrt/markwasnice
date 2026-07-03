@@ -91,6 +91,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
         text = editorView.string
         hasUnsavedFileChanges = true
+        updateTitle()
         onAutosaveNeeded()
         stylingController.scheduleParse(text: editorView.string)
         scheduleWordCount()
@@ -168,7 +169,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             UTType(filenameExtension: "md") ?? .plainText,
             .plainText,
         ]
-        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? "Untitled.md"
+        panel.nameFieldStringValue = suggestedSaveFileName
 
         guard panel.runModal() == .OK, let url = panel.url else {
             return
@@ -196,7 +197,17 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     var title: String {
-        fileURL?.lastPathComponent ?? "Untitled"
+        if let fileURL {
+            return fileURL.lastPathComponent
+        }
+
+        return DocumentTitleSuggester.title(from: text) ?? "Untitled"
+    }
+
+    private var suggestedSaveFileName: String {
+        fileURL?.lastPathComponent
+            ?? DocumentTitleSuggester.fileName(from: text)
+            ?? "Untitled.md"
     }
 
     private func save(
@@ -286,7 +297,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             UTType(filenameExtension: "md") ?? .plainText,
             .plainText,
         ]
-        panel.nameFieldStringValue = "Untitled.md"
+        panel.nameFieldStringValue = suggestedSaveFileName
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self else {
                 return

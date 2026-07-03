@@ -43,9 +43,9 @@ final class EditorShellState: ObservableObject {
         isSearchPresented || isTabBarVisible
     }
 
-    // While the tab bar is visible the topbar content lives in the native
-    // NSToolbar above the tabs, so the in-content chrome band collapses to
-    // the system chrome height (toolbar + tab bar) plus the search area.
+    /// While the tab bar is visible the topbar content lives in the native
+    /// NSToolbar above the tabs, so the in-content chrome band collapses to
+    /// the system chrome height (toolbar + tab bar) plus the search area.
     var topChromeInsetHeight: CGFloat {
         let searchHeight = isSearchPresented ? Self.searchAreaHeight : 0
         return isTabBarVisible
@@ -62,8 +62,12 @@ final class EditorShellState: ObservableObject {
     }
 
     func updateTitle(_ title: String, isEdited: Bool) {
-        self.title = title
-        self.isEdited = isEdited
+        if self.title != title {
+            self.title = title
+        }
+        if self.isEdited != isEdited {
+            self.isEdited = isEdited
+        }
     }
 
     func toggleFocusMode() {
