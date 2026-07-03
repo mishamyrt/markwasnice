@@ -12,6 +12,7 @@ final class EditorShellState: ObservableObject {
     @Published var title = "Untitled"
     @Published var isEdited = false
     @Published var wordCount = 0
+    @Published var characterCount = 0
     @Published var isToolbarVisible = true
     @Published var isStatusBarVisible = true
     @Published var isFullScreen = false
@@ -35,8 +36,30 @@ final class EditorShellState: ObservableObject {
     var onNextSearchMatch: (() -> Void)?
     var onPreviousSearchMatch: (() -> Void)?
 
+    static let readingWordsPerMinute = 200.0
+
     var wordCountText: String {
         wordCount == 1 ? "1 word" : "\(wordCount) words"
+    }
+
+    var characterCountText: String {
+        characterCount == 1 ? "1 character" : "\(characterCount) characters"
+    }
+
+    var readingTimeText: String {
+        let seconds = Int(
+            (Double(wordCount) / Self.readingWordsPerMinute * 60).rounded()
+        )
+        if seconds < 60 {
+            return "\(seconds) sec"
+        }
+
+        let minutes = Int((Double(seconds) / 60).rounded())
+        if minutes < 60 {
+            return "\(minutes) min"
+        }
+
+        return "\(Int((Double(minutes) / 60).rounded())) h"
     }
 
     var usesProminentBackdrop: Bool {
@@ -599,10 +622,11 @@ private struct EditorFocusModeIconView: View {
     }
 
     private static let image: NSImage? = {
-        guard let url = Bundle.module.url(
-            forResource: "text.line.middle.and.arrowtriangle",
-            withExtension: "svg"
-        ),
+        guard
+            let url = Bundle.module.url(
+                forResource: "text.line.middle.and.arrowtriangle",
+                withExtension: "svg"
+            ),
             let image = NSImage(contentsOf: url)
         else {
             return nil
@@ -648,16 +672,23 @@ extension EditorShellView {
     }
 
     private var statusBar: some View {
-        HStack {
+        HStack(spacing: 14) {
             Spacer(minLength: 0)
+            Text(state.characterCountText)
             Text(state.wordCountText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.trailing, 18)
+            Text(state.readingTimeText)
         }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.trailing, 18)
         .frame(height: 28)
         .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
+        .background(Color(nsColor: editorBackgroundColor))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 1)
+        }
         .allowsHitTesting(false)
     }
 
@@ -699,7 +730,7 @@ private struct EditorToolbarButton: View {
                     isDisabled
                         ? Color.secondary.opacity(0.45)
                         : Color.primary
-                        .opacity(0.72)
+                            .opacity(0.72)
                 )
                 .frame(width: 36, height: 36)
                 .contentShape(Circle())

@@ -341,13 +341,15 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 return
             }
 
-            let count = Self.wordCount(in: text)
+            let words = Self.wordCount(in: text)
+            let characters = text.count
             await MainActor.run {
                 guard !Task.isCancelled else {
                     return
                 }
 
-                self?.shellState.wordCount = count
+                self?.shellState.wordCount = words
+                self?.shellState.characterCount = characters
             }
         }
     }
