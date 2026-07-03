@@ -172,7 +172,7 @@ struct EditorShellView: View {
             }
 
             VStack(spacing: 0) {
-                if !state.isFullScreen, !state.isTabBarVisible {
+                if !state.isFullScreen {
                     toolbarHoverLayer
                 }
 

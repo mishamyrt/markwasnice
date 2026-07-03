@@ -291,18 +291,7 @@ private final class WindowLifecycleView: NSView {
         }
 
         let isTabBarVisible = window.tabGroup?.isTabBarVisible ?? false
-        let isFullScreen = session.shellState.isFullScreen
-
-        // The native tab bar sits directly below the toolbar row, so while
-        // it is visible the topbar content lives in the real NSToolbar:
-        // toolbar first, tabs below it, search underneath.
-        if isTabBarVisible || isFullScreen {
-            chromeToolbarController.install(in: window)
-        } else {
-            chromeToolbarController.uninstall(from: window)
-        }
-
-        let topInset = isTabBarVisible && !isFullScreen
+        let topInset = isTabBarVisible && !session.shellState.isFullScreen
             ? (window.contentView?.safeAreaInsets.top ?? 0)
             : 0
         session.setTabBarChrome(isVisible: isTabBarVisible, topInset: topInset)
@@ -492,9 +481,7 @@ private final class WindowDelegateProxy: NSObject, NSWindowDelegate {
             return
         }
 
-        if window.tabGroup?.isTabBarVisible != true {
-            chromeToolbarController?.uninstall(from: window)
-        }
+        chromeToolbarController?.uninstall(from: window)
         session?.setFullScreen(false)
     }
 
