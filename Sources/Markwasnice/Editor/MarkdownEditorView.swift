@@ -639,6 +639,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             self?.temporarilySuppressFocusForUserScroll(event: event)
         }
         textView.registerForDraggedTypes([.fileURL])
+        // The editor renders one fixed font; without this, every
+        // setTypingAttributes walks the selection for font-panel bookkeeping.
+        textView.usesFontPanel = false
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude,
@@ -1173,7 +1176,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         textStorage.endEditing()
         textView.undoManager?.enableUndoRegistration()
-        textView.typingAttributes = baseAttributes()
+        // Not while normalizing a just-processed edit: setTypingAttributes
+        // triggers AppKit's font-panel update, which enumerates attributes
+        // over the not-yet-updated selection. When typing replaced a selection
+        // with shorter text, that stale range lies beyond the new length — the
+        // NSRangeException unwinds through processEditing and permanently
+        // wedges the text view (dead input, IMK mach port errors). The
+        // selection-change hook restores typing attributes right after.
+        if !isNormalizingEditedText {
+            textView.typingAttributes = baseAttributes()
+        }
         isApplyingStyles = false
         let duration = Self.milliseconds(since: startTime)
         let rangeDescription = "\(targetRange.location)..\(NSMaxRange(targetRange))"
