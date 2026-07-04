@@ -112,10 +112,11 @@ final class EditorShellState: ObservableObject {
     /// reveal; unscrolled text has to start below that band (and below the
     /// search bar when it is shown) so revealing never covers it.
     var fullScreenTopChromeInsetHeight: CGFloat {
-        let overlayHeight = fullScreenChromeOverlayHeight > 0
-            ? fullScreenChromeOverlayHeight
-            : Self.fullScreenToolbarOverlayEstimate
-            + (isTabBarVisible ? Self.fullScreenTabBarOverlayEstimate : 0)
+        let overlayHeight =
+            fullScreenChromeOverlayHeight > 0
+                ? fullScreenChromeOverlayHeight
+                : Self.fullScreenToolbarOverlayEstimate
+                + (isTabBarVisible ? Self.fullScreenTabBarOverlayEstimate : 0)
         return max(overlayHeight, isSearchPresented ? searchBarHeight : 0)
     }
 
@@ -812,7 +813,7 @@ struct EditorTopBarTitle: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(.secondary)
         .frame(maxWidth: 420)
     }
