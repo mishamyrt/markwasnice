@@ -85,6 +85,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         shellState.onReplaceAllMatches = { [weak self] in
             self?.replaceAllMatches()
         }
+        shellState.onPreviewActiveChanged = { [weak self] isActive in
+            self?.handlePreviewActiveChanged(isActive)
+        }
+        editorView.onPreviewExitRequested = { [weak self] in
+            self?.shellState.setPreviewActive(false)
+        }
 
         editorView.delegate = self
         editorView.documentURL = fileURL
@@ -184,14 +190,26 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     func pasteAsLink() {
+        guard !shellState.isPreviewActive else {
+            return
+        }
+
         editorView.pasteAsLink()
     }
 
     func applyMarkup(_ command: MarkdownMarkupCommand) {
+        guard !shellState.isPreviewActive else {
+            return
+        }
+
         editorView.applyMarkup(command)
     }
 
     func showSearch() {
+        guard !shellState.isPreviewActive else {
+            return
+        }
+
         showChrome()
         shellState.showSearch()
         applyChromeInsets(isFullScreen: shellState.isFullScreen)
@@ -587,6 +605,13 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     private func handleReplaceEnabledChanged() {
         applyChromeInsets(isFullScreen: shellState.isFullScreen)
+    }
+
+    private func handlePreviewActiveChanged(_ isActive: Bool) {
+        if isActive {
+            shellState.closeSearch()
+        }
+        editorView.setPreviewActive(isActive)
     }
 
     private func replaceCurrentMatch() {

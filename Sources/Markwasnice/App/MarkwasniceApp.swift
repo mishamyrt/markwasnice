@@ -9,6 +9,7 @@ struct MarkwasniceApp: App {
 
     init() {
         LilexFontProvider.registerFonts()
+        PlexSansFontProvider.registerFonts()
         _appState = StateObject(wrappedValue: MarkwasniceAppState())
     }
 

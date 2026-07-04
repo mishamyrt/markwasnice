@@ -17,9 +17,10 @@ final class MarkwasniceAppState: ObservableObject {
     private var didCreateInitialSessions = false
     private var activeSessionID: EditorDocumentSession.ID?
     private var tabAttachTargets: [EditorDocumentSession.ID: WeakWindowBox] = [:]
-    // Follower session → lead session of its restored tab group. Resolved to
-    // the lead's window lazily, because at restore time no windows exist yet.
-    private var restoreTabLeads: [EditorDocumentSession.ID: EditorDocumentSession.ID] = [:]
+    /// Follower session → lead session of its restored tab group. Resolved to
+    /// the lead's window lazily, because at restore time no windows exist yet.
+    private var restoreTabLeads: [EditorDocumentSession.ID: EditorDocumentSession.ID] =
+        [:]
 
     init(autosaveStore: AutosaveStore = AutosaveStore()) {
         self.autosaveStore = autosaveStore

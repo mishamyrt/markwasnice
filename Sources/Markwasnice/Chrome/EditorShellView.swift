@@ -29,6 +29,7 @@ final class EditorShellState: ObservableObject {
     @Published var searchFocusRequest = 0
     @Published var isReplaceEnabled = false
     @Published var replaceQuery = ""
+    @Published var isPreviewActive = false
 
     var onTopHoverChanged: ((Bool) -> Void)?
     var onFocusModeEnabledChanged: ((Bool) -> Void)?
@@ -41,6 +42,7 @@ final class EditorShellState: ObservableObject {
     var onReplaceEnabledChanged: ((Bool) -> Void)?
     var onReplaceMatch: (() -> Void)?
     var onReplaceAllMatches: (() -> Void)?
+    var onPreviewActiveChanged: ((Bool) -> Void)?
 
     static let readingWordsPerMinute = 200.0
 
@@ -154,6 +156,19 @@ final class EditorShellState: ObservableObject {
 
         focusMode = mode
         onFocusModeSelected?(mode)
+    }
+
+    func togglePreview() {
+        setPreviewActive(!isPreviewActive)
+    }
+
+    func setPreviewActive(_ isActive: Bool) {
+        guard isPreviewActive != isActive else {
+            return
+        }
+
+        isPreviewActive = isActive
+        onPreviewActiveChanged?(isActive)
     }
 
     func showSearch() {
@@ -386,7 +401,7 @@ struct EditorTopBarControls: View {
     var body: some View {
         HStack(spacing: 14) {
             EditorTopBarFocusModeButton(state: state)
-            EditorTopBarPreviewButton()
+            EditorTopBarPreviewButton(state: state)
         }
     }
 }
@@ -804,8 +819,20 @@ struct EditorTopBarTitle: View {
 }
 
 struct EditorTopBarPreviewButton: View {
+    @ObservedObject private var state: EditorShellState
+
+    init(state: EditorShellState) {
+        self.state = state
+    }
+
     var body: some View {
-        EditorToolbarButton(systemName: "play.fill", help: "Preview", isDisabled: true) {}
+        EditorToolbarButton(
+            systemName: "play.fill",
+            help: state.isPreviewActive ? "Edit" : "Preview",
+            isActive: state.isPreviewActive
+        ) {
+            state.togglePreview()
+        }
     }
 }
 
@@ -863,25 +890,38 @@ private struct EditorToolbarButton: View {
     let help: String
     var isDisabled = false
     var hasBackground = true
+    var isActive = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(
-                    isDisabled
-                        ? Color.secondary.opacity(0.45)
-                        : Color.primary
-                        .opacity(0.72)
-                )
+                .foregroundStyle(iconColor)
                 .frame(width: 36, height: 36)
+                .background {
+                    if isActive {
+                        Circle()
+                            .fill(Color.primary.opacity(0.08))
+                            .padding(4)
+                    }
+                }
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .help(help)
         .modifier(EditorToolbarButtonBackground(isVisible: hasBackground))
+    }
+
+    private var iconColor: Color {
+        if isDisabled {
+            Color.secondary.opacity(0.45)
+        } else if isActive {
+            Color.primary
+        } else {
+            Color.primary.opacity(0.72)
+        }
     }
 }
 

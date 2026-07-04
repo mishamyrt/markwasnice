@@ -57,6 +57,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 {
     weak var delegate: MarkdownEditorViewDelegate?
     var documentURL: URL?
+    /// Fired when the preview asks to leave (Escape); the owning session
+    /// flips the shell state, which calls back into setPreviewActive(false).
+    var onPreviewExitRequested: (() -> Void)?
 
     private let scrollView = NSScrollView()
     private let clipView = NSClipView()
@@ -97,6 +100,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var pendingFullStyleRanges: [NSRange] = []
     private var isFocusModeEnabled = false
     private var focusMode: EditorFocusMode = .focus
+    private var previewView: MarkdownPreviewView?
+    private var previewHorizontalInset: CGFloat = 6
+    private(set) var isPreviewActive = false
     private var isFocusTemporarilySuppressed = false
     private var activeFocusParagraphRange: NSRange?
     private var focusScrollAdjustmentCount = 0
@@ -104,6 +110,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var isAdjustingFocusScroll: Bool {
         focusScrollAdjustmentCount > 0
     }
+
+    private static let previewTransitionDuration: TimeInterval = 0.22
+    private static let previewTransitionScale: CGFloat = 1.02
 
     private static let largeEditThreshold = 8000
     private static let immediateStyleThreshold = 20000
@@ -161,6 +170,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         super.viewDidChangeEffectiveAppearance()
         applyEditorColors()
         restyleAllText()
+        refreshPreviewIfActive()
     }
 
     func setString(_ string: String, clearsUndo: Bool) {
@@ -176,6 +186,20 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let boundedLocation = min(selectedRange.location, (string as NSString).length)
         textView.setSelectedRange(NSRange(location: boundedLocation, length: 0))
         restyleAllText()
+        refreshPreviewIfActive()
+    }
+
+    func setPreviewActive(_ isActive: Bool) {
+        guard isPreviewActive != isActive else {
+            return
+        }
+
+        isPreviewActive = isActive
+        if isActive {
+            showPreview()
+        } else {
+            hidePreview()
+        }
     }
 
     func focus() {
@@ -291,6 +315,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         currentStyleSpans = spans
         _ = updateTextContainerInset()
         restyleAllText()
+        refreshPreviewIfActive()
     }
 
     func updateWindowWidthFontScale(
@@ -305,6 +330,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         if didChangeScale || didChangeGutter {
             currentStyleSpans = spans
             restyleAllText()
+        }
+        if didChangeScale {
+            refreshPreviewIfActive()
         }
     }
 
@@ -330,7 +358,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     /// scroller spans the full window height by default; when the top bar is
     /// visible it is inset by the bar's height.
     private func updateScrollerInsets() {
-        setScrollerTopInset(isChromeVisible ? textTopPadding : 0)
+        let topInset = isChromeVisible ? textTopPadding : 0
+        setScrollerTopInset(topInset)
+        previewView?.setScrollerTopInset(topInset)
     }
 
     func setFocusModeEnabled(_ isEnabled: Bool) {
@@ -359,6 +389,151 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         if isFocusModeEnabled {
             centerCaretLineInVisibleArea(animated: true)
         }
+    }
+
+    // MARK: Preview
+
+    private func showPreview() {
+        let preview = ensurePreviewView()
+        renderPreviewContent(into: preview)
+        preview.isHidden = false
+        preview.scrollToFraction(editorScrollFraction)
+        preview.focus()
+
+        preview.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.previewTransitionDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            preview.animator().alphaValue = 1
+            scrollView.animator().alphaValue = 0
+        }
+        animatePreviewScale(
+            on: preview,
+            from: Self.previewTransitionScale,
+            to: 1
+        )
+    }
+
+    private func hidePreview() {
+        focus()
+        guard let preview = previewView, !preview.isHidden else {
+            scrollView.alphaValue = 1
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.previewTransitionDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            preview.animator().alphaValue = 0
+            scrollView.animator().alphaValue = 1
+        } completionHandler: { [weak self] in
+            guard let self, !isPreviewActive, let previewView else {
+                return
+            }
+
+            previewView.isHidden = true
+            previewView.layer?.transform = CATransform3DIdentity
+        }
+        animatePreviewScale(
+            on: preview,
+            from: 1,
+            to: Self.previewTransitionScale
+        )
+    }
+
+    private func ensurePreviewView() -> MarkdownPreviewView {
+        if let previewView {
+            return previewView
+        }
+
+        let preview = MarkdownPreviewView()
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        preview.isHidden = true
+        preview.onScroll = { [weak self] in
+            guard let self else {
+                return
+            }
+
+            delegate?.markdownEditorViewDidScroll(self)
+        }
+        preview.onExitRequested = { [weak self] in
+            self?.onPreviewExitRequested?()
+        }
+        addSubview(preview)
+        NSLayoutConstraint.activate([
+            preview.leadingAnchor.constraint(equalTo: leadingAnchor),
+            preview.trailingAnchor.constraint(equalTo: trailingAnchor),
+            preview.topAnchor.constraint(equalTo: topAnchor),
+            preview.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        previewView = preview
+        pushPreviewInsets()
+        updateScrollerInsets()
+        return preview
+    }
+
+    private func renderPreviewContent(into preview: MarkdownPreviewView) {
+        let renderer = MarkdownPreviewRenderer(theme: .init(
+            baseFontSize: basePointSize,
+            colors: colors
+        ))
+        preview.setContent(renderer.render(textView.string), colors: colors)
+    }
+
+    private func refreshPreviewIfActive() {
+        guard isPreviewActive, let previewView, !previewView.isHidden else {
+            return
+        }
+
+        let fraction = previewView.scrollFraction
+        renderPreviewContent(into: previewView)
+        previewView.scrollToFraction(fraction)
+    }
+
+    private func pushPreviewInsets() {
+        previewView?.setInsets(
+            top: textTopPadding,
+            bottom: textBottomPadding,
+            horizontal: previewHorizontalInset
+        )
+    }
+
+    private var editorScrollFraction: CGFloat {
+        let maxOffset = textView.frame.height - clipView.bounds.height
+        guard maxOffset > 0 else {
+            return 0
+        }
+
+        return min(max(clipView.bounds.origin.y / maxOffset, 0), 1)
+    }
+
+    /// Scales around the view center regardless of the layer's anchor point,
+    /// so AppKit's own layer geometry management stays untouched at rest.
+    private func previewScaleTransform(
+        _ scale: CGFloat,
+        bounds: NSRect
+    ) -> CATransform3D {
+        var transform = CATransform3DMakeTranslation(bounds.midX, bounds.midY, 0)
+        transform = CATransform3DScale(transform, scale, scale, 1)
+        return CATransform3DTranslate(transform, -bounds.midX, -bounds.midY, 0)
+    }
+
+    private func animatePreviewScale(
+        on preview: MarkdownPreviewView,
+        from: CGFloat,
+        to: CGFloat
+    ) {
+        guard let layer = preview.layer else {
+            return
+        }
+
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = previewScaleTransform(from, bounds: preview.bounds)
+        animation.toValue = previewScaleTransform(to, bounds: preview.bounds)
+        animation.duration = Self.previewTransitionDuration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.transform = previewScaleTransform(to, bounds: preview.bounds)
+        layer.add(animation, forKey: "previewScale")
     }
 
     func setSearchMatches(_ ranges: [NSRange], selectedIndex: Int?) {
@@ -797,6 +972,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         if textView.textContainerInset != insetSize {
             textView.textContainerInset = insetSize
         }
+        // The preview has no marker gutter; its text starts where the
+        // editor's paragraph text starts.
+        previewHorizontalInset = containerInset + newParagraphGutter
+        pushPreviewInsets()
         return didChangeParagraphGutter
     }
 
