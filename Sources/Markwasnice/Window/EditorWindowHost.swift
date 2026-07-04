@@ -167,6 +167,7 @@ private final class WindowLifecycleView: NSView {
     private var contentLayoutObservation: NSKeyValueObservation?
     private var titleCancellable: AnyCancellable?
     private weak var observedFullScreenToolbarWindow: NSWindow?
+    private weak var fullScreenToolbarSeparator: NSView?
     private var strayToolbarCheckWorkItem: DispatchWorkItem?
 
     override func viewDidMoveToWindow() {
@@ -383,6 +384,7 @@ private final class WindowLifecycleView: NSView {
               })
         else {
             stopObservingFullScreenToolbarWindow()
+            session?.setFullScreenChromeOverlayHeight(0)
             return
         }
 
@@ -402,12 +404,64 @@ private final class WindowLifecycleView: NSView {
             }
         }
 
+        installFullScreenToolbarSeparator(in: toolbarWindow)
+        reportFullScreenChromeOverlayHeight()
         scheduleStrayToolbarWindowCheck()
+    }
+
+    /// The fullscreen toolbar slides down over the text without any band
+    /// of its own between the two; a hairline at the toolbar window's
+    /// bottom edge marks where the chrome ends, mirroring the status bar
+    /// separator. The native titlebarSeparatorStyle stays hidden inside
+    /// NSToolbarFullScreenWindow, so the line is drawn by hand.
+    private func installFullScreenToolbarSeparator(in toolbarWindow: NSWindow) {
+        guard fullScreenToolbarSeparator?.window !== toolbarWindow,
+              let contentView = toolbarWindow.contentView
+        else {
+            return
+        }
+
+        fullScreenToolbarSeparator?.removeFromSuperview()
+        let separator = FullScreenToolbarSeparatorView(
+            frame: NSRect(x: 0, y: 0, width: contentView.bounds.width, height: 1)
+        )
+        separator.autoresizingMask = [.width, .maxYMargin]
+        contentView.addSubview(separator)
+        fullScreenToolbarSeparator = separator
+    }
+
+    /// The editor keeps unscrolled text below the auto-hidden fullscreen
+    /// chrome; the overlay is the toolbar window (toolbar + tab bar) plus
+    /// whatever part of the menu bar slides over the content. On displays
+    /// that reserve a band for the menu bar (notch) the fullscreen window
+    /// stops below it and the menu bar never overlaps.
+    private func reportFullScreenChromeOverlayHeight() {
+        guard let session, let window,
+              let toolbarWindow = observedFullScreenToolbarWindow
+        else {
+            return
+        }
+
+        var menuBarOverlap: CGFloat = 0
+        if let screen = window.screen {
+            let reservedAboveWindow = max(
+                0, screen.frame.maxY - window.frame.maxY
+            )
+            menuBarOverlap = max(
+                0,
+                (NSApp.mainMenu?.menuBarHeight ?? 0) - reservedAboveWindow
+            )
+        }
+        session.setFullScreenChromeOverlayHeight(
+            toolbarWindow.frame.height + menuBarOverlap
+        )
     }
 
     private func stopObservingFullScreenToolbarWindow() {
         strayToolbarCheckWorkItem?.cancel()
         strayToolbarCheckWorkItem = nil
+        fullScreenToolbarSeparator?.removeFromSuperview()
+        fullScreenToolbarSeparator = nil
         guard let observedFullScreenToolbarWindow else {
             return
         }
@@ -421,7 +475,7 @@ private final class WindowLifecycleView: NSView {
     }
 
     @objc private func fullScreenToolbarWindowDidMove(_: Notification) {
-        if let window, let toolbarWindow = observedFullScreenToolbarWindow {}
+        reportFullScreenChromeOverlayHeight()
         scheduleStrayToolbarWindowCheck()
     }
 
@@ -516,6 +570,18 @@ private final class WindowLifecycleView: NSView {
             let rectInWindow = accessory.view.convert(accessory.view.bounds, to: nil)
             return toolbarWindow.convertToScreen(rectInWindow).intersects(strip)
         }
+    }
+}
+
+/// Matches the status bar separator: 1pt of the primary color at 8%.
+private final class FullScreenToolbarSeparatorView: NSView {
+    override func draw(_: NSRect) {
+        NSColor.labelColor.withAlphaComponent(0.08).setFill()
+        bounds.fill()
+    }
+
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
     }
 }
 

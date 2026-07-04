@@ -95,6 +95,28 @@ final class EditorShellState: ObservableObject {
             : max(0, tabBarTopInset - Self.tabBarBottomPadding)
     }
 
+    /// Measured height of the auto-hidden fullscreen chrome overlay (the
+    /// toolbar window with the tab bar, plus the menu bar where it overlaps
+    /// the content); 0 until the toolbar window has been measured.
+    var fullScreenChromeOverlayHeight: CGFloat = 0
+
+    /// Estimates used before the fullscreen toolbar window exists, so the
+    /// text does not start under the reveal zone during the transition:
+    /// the unified toolbar row and the tab bar accessory row.
+    static let fullScreenToolbarOverlayEstimate: CGFloat = 52
+    static let fullScreenTabBarOverlayEstimate: CGFloat = 36
+
+    /// In fullscreen the system chrome slides down over the content on
+    /// reveal; unscrolled text has to start below that band (and below the
+    /// search bar when it is shown) so revealing never covers it.
+    var fullScreenTopChromeInsetHeight: CGFloat {
+        let overlayHeight = fullScreenChromeOverlayHeight > 0
+            ? fullScreenChromeOverlayHeight
+            : Self.fullScreenToolbarOverlayEstimate
+            + (isTabBarVisible ? Self.fullScreenTabBarOverlayEstimate : 0)
+        return max(overlayHeight, isSearchPresented ? searchBarHeight : 0)
+    }
+
     var topChromeCursorExclusionHeight: CGFloat {
         if isTabBarVisible || isSearchPresented {
             topChromeInsetHeight

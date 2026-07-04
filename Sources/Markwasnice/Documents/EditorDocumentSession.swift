@@ -131,6 +131,17 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         applyChromeInsets(isFullScreen: isFullScreen)
     }
 
+    func setFullScreenChromeOverlayHeight(_ height: CGFloat) {
+        guard shellState.fullScreenChromeOverlayHeight != height else {
+            return
+        }
+
+        shellState.fullScreenChromeOverlayHeight = height
+        if shellState.isFullScreen {
+            applyChromeInsets(isFullScreen: true)
+        }
+    }
+
     func setTabBarChrome(isVisible: Bool, topInset: CGFloat) {
         if isVisible {
             isTabBarTemporarilyHidden = false
@@ -389,7 +400,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     private func applyChromeInsets(isFullScreen: Bool) {
         let toolbarHeight = isFullScreen
-            ? fullScreenSearchChromeHeight
+            ? shellState.fullScreenTopChromeInsetHeight
             : shellState.topChromeInsetHeight
         let cursorExclusionHeight = isFullScreen
             ? fullScreenSearchChromeHeight
