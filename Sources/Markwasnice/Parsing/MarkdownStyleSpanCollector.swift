@@ -18,6 +18,11 @@ struct MarkdownStyleSpanCollector: MarkupWalker {
         descendInto(emphasis)
     }
 
+    mutating func visitStrikethrough(_ strikethrough: Strikethrough) {
+        add(.strikethrough, for: strikethrough)
+        descendInto(strikethrough)
+    }
+
     mutating func visitInlineCode(_ inlineCode: InlineCode) {
         add(.inlineCode, for: inlineCode)
     }

@@ -65,7 +65,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     // scrolling never drifts. TextKit 2's viewport-estimated heights caused
     // scroll jumps and flicker while typing in large documents.
     private let editorTextStorage = NSTextStorage()
-    private let editorLayoutManager = NSLayoutManager()
+    private let editorLayoutManager = MarkdownLayoutManager()
     private let textContainer = NSTextContainer(
         containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
     )
@@ -1294,6 +1294,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             addFontTraits(.boldFontMask, range: range)
         case .emphasis:
             addFontTraits(.italicFontMask, range: range)
+        case .strikethrough:
+            // Drawn by MarkdownLayoutManager centered on the x-height.
+            textStorage.addAttribute(
+                .strikethroughStyle,
+                value: NSUnderlineStyle.single.rawValue,
+                range: range
+            )
         case .inlineCode, .codeBlock:
             // Code backgrounds are drawn as rounded decorations in
             // MarkdownTextView (see updateCodeBackgroundRanges); the plain

@@ -37,6 +37,7 @@ enum MarkdownStyleKind: Equatable, Hashable {
     case heading
     case strong
     case emphasis
+    case strikethrough
     case inlineCode
     case codeBlock
     case link(destination: String?)
@@ -54,8 +55,8 @@ extension MarkdownStyleKind {
         switch self {
         case .heading, .codeBlock, .blockQuote, .orderedList, .unorderedList:
             return true
-        case .strong, .emphasis, .inlineCode, .link, .image, .linkSyntaxPunctuation,
-             .linkDestination, .thematicBreak:
+        case .strong, .emphasis, .strikethrough, .inlineCode, .link, .image,
+             .linkSyntaxPunctuation, .linkDestination, .thematicBreak:
             return false
         }
     }
