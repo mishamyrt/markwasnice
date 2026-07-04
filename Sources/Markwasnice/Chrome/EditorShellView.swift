@@ -76,14 +76,23 @@ final class EditorShellState: ObservableObject {
         Self.searchAreaHeight + (isReplaceEnabled ? Self.replaceAreaHeight : 0)
     }
 
+    /// The native tab bar accessory row keeps 8pt of empty space below the
+    /// tab capsules; without the search area the chrome band ends tight
+    /// under the capsules instead of highlighting that padding.
+    static let tabBarBottomPadding: CGFloat = 8
+
     /// While the tab bar is visible the topbar content lives in the native
     /// NSToolbar above the tabs, so the in-content chrome band collapses to
     /// the system chrome height (toolbar + tab bar) plus the search area.
     var topChromeInsetHeight: CGFloat {
-        let searchHeight = isSearchPresented ? searchBarHeight : 0
-        return isTabBarVisible
-            ? tabBarTopInset + searchHeight
-            : Self.toolbarRevealHeight + searchHeight
+        guard isTabBarVisible else {
+            return Self.toolbarRevealHeight
+                + (isSearchPresented ? searchBarHeight : 0)
+        }
+
+        return isSearchPresented
+            ? tabBarTopInset + searchBarHeight
+            : max(0, tabBarTopInset - Self.tabBarBottomPadding)
     }
 
     var topChromeCursorExclusionHeight: CGFloat {

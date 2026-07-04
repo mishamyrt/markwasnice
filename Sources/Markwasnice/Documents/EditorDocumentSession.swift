@@ -225,8 +225,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         return false
     }
 
-    var autosavedDraft: AutosavedDraft {
-        AutosavedDraft(text: text, fileURL: fileURL)
+    func autosavedDraft(windowID: UUID?) -> AutosavedDraft {
+        AutosavedDraft(text: text, fileURL: fileURL, windowID: windowID)
     }
 
     var title: String {

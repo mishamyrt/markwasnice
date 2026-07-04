@@ -241,27 +241,63 @@ private final class WindowLifecycleView: NSView {
 
         if !didConfigureWindow {
             didConfigureWindow = true
-            if let target = appState.takeTabAttachTarget(for: session.id),
-               target !== window, target.isVisible
-            {
-                target.addTabbedWindow(window, ordered: .above)
-                window.makeKeyAndOrderFront(nil)
+            placeWindow(window, session: session, appState: appState, attempt: 0)
+        }
+    }
 
-                // A window attached to a fullscreen group becomes fullscreen
-                // instantly, without the windowWillEnterFullScreen transition,
-                // so the session state and the fullscreen toolbar have to be
-                // set up here by hand.
-                if window.styleMask.contains(.fullScreen),
-                   !session.shellState.isFullScreen
-                {
-                    session.setFullScreen(true)
-                    chromeToolbarController.install(in: window)
-                }
-            } else {
+    private func placeWindow(
+        _ window: NSWindow,
+        session: EditorDocumentSession,
+        appState: MarkwasniceAppState,
+        attempt: Int
+    ) {
+        if let target = appState.takeTabAttachTarget(for: session.id),
+           target !== window, target.isVisible
+        {
+            target.addTabbedWindow(window, ordered: .above)
+            window.makeKeyAndOrderFront(nil)
+
+            // A window attached to a fullscreen group becomes fullscreen
+            // instantly, without the windowWillEnterFullScreen transition,
+            // so the session state and the fullscreen toolbar have to be
+            // set up here by hand.
+            if window.styleMask.contains(.fullScreen),
+               !session.shellState.isFullScreen
+            {
+                session.setFullScreen(true)
+                chromeToolbarController.install(in: window)
+            }
+            return
+        }
+
+        // A restored tab group's lead window may not have materialized yet
+        // when its followers configure during launch; retry briefly.
+        if appState.hasPendingRestoreTabLead(for: session.id) {
+            guard attempt < 20 else {
+                appState.abandonRestoreTabLead(for: session.id)
                 window.setContentSize(NSSize(width: 960, height: 640))
                 window.center()
+                return
             }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                [weak self, weak window, weak session, weak appState] in
+                guard let self, let window, let session, let appState else {
+                    return
+                }
+
+                self.placeWindow(
+                    window,
+                    session: session,
+                    appState: appState,
+                    attempt: attempt + 1
+                )
+            }
+            return
         }
+
+        window.setContentSize(NSSize(width: 960, height: 640))
+        window.center()
     }
 
     private func observeTabChrome(

@@ -17,6 +17,9 @@ final class MarkwasniceAppState: ObservableObject {
     private var didCreateInitialSessions = false
     private var activeSessionID: EditorDocumentSession.ID?
     private var tabAttachTargets: [EditorDocumentSession.ID: WeakWindowBox] = [:]
+    // Follower session → lead session of its restored tab group. Resolved to
+    // the lead's window lazily, because at restore time no windows exist yet.
+    private var restoreTabLeads: [EditorDocumentSession.ID: EditorDocumentSession.ID] = [:]
 
     init(autosaveStore: AutosaveStore = AutosaveStore()) {
         self.autosaveStore = autosaveStore
@@ -42,9 +45,19 @@ final class MarkwasniceAppState: ObservableObject {
 
         didCreateInitialSessions = true
         if let session = await autosaveStore.loadSession(), !session.drafts.isEmpty {
-            let restoredSessions = await restoredSessions(from: session.drafts)
-            for session in restoredSessions {
+            let drafts = session.drafts
+            let restoredSessions = await restoredSessions(from: drafts)
+            var leadSessionIDs: [UUID: EditorDocumentSession.ID] = [:]
+            for (draft, session) in zip(drafts, restoredSessions) {
                 sessions[session.id] = session
+                guard let windowID = draft.windowID else {
+                    continue
+                }
+                if let leadID = leadSessionIDs[windowID] {
+                    restoreTabLeads[session.id] = leadID
+                } else {
+                    leadSessionIDs[windowID] = session.id
+                }
             }
             pendingWindowIDs.append(contentsOf: restoredSessions.dropFirst().map(\.id))
             return restoredSessions[0].id
@@ -82,7 +95,28 @@ final class MarkwasniceAppState: ObservableObject {
     func takeTabAttachTarget(
         for id: EditorDocumentSession.ID
     ) -> NSWindow? {
-        tabAttachTargets.removeValue(forKey: id)?.window
+        if let window = tabAttachTargets.removeValue(forKey: id)?.window {
+            return window
+        }
+
+        if let leadID = restoreTabLeads[id],
+           let leadWindow = sessions[leadID]?.editorView.window
+        {
+            restoreTabLeads[id] = nil
+            return leadWindow
+        }
+
+        return nil
+    }
+
+    /// True while a restored tab group still waits for its lead window to
+    /// materialize; the caller should retry the attach shortly.
+    func hasPendingRestoreTabLead(for id: EditorDocumentSession.ID) -> Bool {
+        restoreTabLeads[id] != nil
+    }
+
+    func abandonRestoreTabLead(for id: EditorDocumentSession.ID) {
+        restoreTabLeads[id] = nil
     }
 
     @discardableResult
@@ -176,7 +210,7 @@ final class MarkwasniceAppState: ObservableObject {
         autosaveWorkItem?.cancel()
         autosaveWorkItem = nil
         autosaveTask?.cancel()
-        let session = AutosavedSession(drafts: sessions.values.map(\.autosavedDraft))
+        let session = AutosavedSession(drafts: autosavedDrafts())
         autosaveTask = Task.detached(priority: .utility) { [autosaveStore, session] in
             guard !Task.isCancelled else {
                 return
@@ -184,6 +218,55 @@ final class MarkwasniceAppState: ObservableObject {
 
             await autosaveStore.saveSession(session)
         }
+    }
+
+    /// Drafts ordered window by window (tabs in their on-screen order), with
+    /// a shared window identifier per tab group so the window configuration
+    /// can be rebuilt on the next launch.
+    private func autosavedDrafts() -> [AutosavedDraft] {
+        var drafts: [AutosavedDraft] = []
+        var savedSessionIDs = Set<EditorDocumentSession.ID>()
+
+        func session(of window: NSWindow) -> EditorDocumentSession? {
+            sessions.values.first { $0.editorView.window === window }
+        }
+
+        var visitedGroups = Set<ObjectIdentifier>()
+        for window in NSApp.windows {
+            guard let windowSession = session(of: window),
+                  !savedSessionIDs.contains(windowSession.id)
+            else {
+                continue
+            }
+
+            let groupWindows: [NSWindow]
+            if let tabGroup = window.tabGroup, tabGroup.windows.count > 1 {
+                guard visitedGroups.insert(ObjectIdentifier(tabGroup)).inserted
+                else {
+                    continue
+                }
+                groupWindows = tabGroup.windows
+            } else {
+                groupWindows = [window]
+            }
+
+            let windowID = UUID()
+            for tabWindow in groupWindows {
+                guard let tabSession = session(of: tabWindow),
+                      savedSessionIDs.insert(tabSession.id).inserted
+                else {
+                    continue
+                }
+                drafts.append(tabSession.autosavedDraft(windowID: windowID))
+            }
+        }
+
+        // Sessions whose window has not materialized yet (e.g. an autosave
+        // fired mid-launch) are kept as standalone windows.
+        for session in sessions.values where !savedSessionIDs.contains(session.id) {
+            drafts.append(session.autosavedDraft(windowID: nil))
+        }
+        return drafts
     }
 
     func flushAutosaveAndWait(force: Bool = false) async {

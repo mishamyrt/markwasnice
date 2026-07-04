@@ -3,6 +3,9 @@ import Foundation
 struct AutosavedDraft: Codable {
     var text: String
     var fileURL: URL?
+    /// Drafts sharing a window identifier were tabs of one window; the value
+    /// itself is regenerated on every save and only the grouping matters.
+    var windowID: UUID?
 }
 
 struct AutosavedSession: Codable {
