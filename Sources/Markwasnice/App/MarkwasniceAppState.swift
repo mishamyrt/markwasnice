@@ -188,6 +188,10 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.showSearch()
     }
 
+    func toggleFocusMode() {
+        activeSession?.shellState.toggleFocusMode()
+    }
+
     func showPreferences(_ sender: Any?) {
         if preferencesWindowController == nil {
             preferencesWindowController = PreferencesWindowController(
@@ -453,6 +457,11 @@ struct MarkwasniceCommands: Commands {
                 NSApp.keyWindow?.toggleTabBar(nil)
             }
             .keyboardShortcut("t", modifiers: [.command, .option])
+
+            Button("Focus Mode") {
+                appState.toggleFocusMode()
+            }
+            .keyboardShortcut("d")
         }
 
         CommandGroup(after: .pasteboard) {
