@@ -9,12 +9,26 @@ struct EditorSearchMatcherTests {
         let ranges = EditorSearchMatcher.matches(
             for: "app",
             in: "app App pineapple",
-            options: EditorSearchOptions()
+            options: EditorSearchOptions(ignoresCase: false)
         )
 
         #expect(ranges == [
             NSRange(location: 0, length: 3),
             NSRange(location: 12, length: 3),
+        ])
+    }
+
+    @Test
+    func ignoresCaseByDefault() {
+        let ranges = EditorSearchMatcher.matches(
+            for: "app",
+            in: "app App",
+            options: EditorSearchOptions()
+        )
+
+        #expect(ranges == [
+            NSRange(location: 0, length: 3),
+            NSRange(location: 4, length: 3),
         ])
     }
 

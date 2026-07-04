@@ -18,7 +18,7 @@ enum EditorSearchMode: CaseIterable, Equatable {
 }
 
 struct EditorSearchOptions: Equatable {
-    var ignoresCase = false
+    var ignoresCase = true
     var mode: EditorSearchMode = .contains
 }
 
