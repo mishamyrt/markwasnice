@@ -18,6 +18,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private var isCloseApproved = false
     private var isPromptVisible = false
     private var isPointerInChromeRevealZone = false
+    private(set) var isTabBarTemporarilyHidden = false
+    private weak var hiddenTabBarAccessory: NSTitlebarAccessoryViewController?
     private var text: String
     private var saveTask: Task<Void, Never>?
     private var searchMatches: [NSRange] = []
@@ -74,6 +76,15 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         shellState.onPreviousSearchMatch = { [weak self] in
             self?.selectPreviousSearchMatch()
         }
+        shellState.onReplaceEnabledChanged = { [weak self] _ in
+            self?.handleReplaceEnabledChanged()
+        }
+        shellState.onReplaceMatch = { [weak self] in
+            self?.replaceCurrentMatch()
+        }
+        shellState.onReplaceAllMatches = { [weak self] in
+            self?.replaceAllMatches()
+        }
 
         editorView.delegate = self
         editorView.documentURL = fileURL
@@ -121,6 +132,11 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     func setTabBarChrome(isVisible: Bool, topInset: CGFloat) {
+        if isVisible {
+            isTabBarTemporarilyHidden = false
+            hiddenTabBarAccessory = nil
+        }
+
         guard shellState.isTabBarVisible != isVisible
             || shellState.tabBarTopInset != topInset
         else {
@@ -386,7 +402,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private var fullScreenSearchChromeHeight: CGFloat {
-        shellState.isSearchPresented ? EditorShellState.searchAreaHeight : 0
+        shellState.isSearchPresented ? shellState.searchBarHeight : 0
     }
 
     nonisolated private static func wordCount(in text: String) -> Int {
@@ -404,10 +420,11 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         if !shellState.isStatusBarVisible {
             shellState.isStatusBarVisible = true
         }
+        restoreTabBarIfNeeded()
     }
 
     private func hideChrome() {
-        guard !shellState.isSearchPresented, !shellState.isTabBarVisible else {
+        guard !shellState.isSearchPresented else {
             return
         }
 
@@ -421,7 +438,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func hideChromeNow() {
-        guard !shellState.isSearchPresented, !shellState.isTabBarVisible else {
+        guard !shellState.isSearchPresented else {
             return
         }
 
@@ -430,6 +447,49 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
         if shellState.isStatusBarVisible {
             shellState.isStatusBarVisible = false
+        }
+        hideTabBarTemporarilyIfNeeded()
+    }
+
+    /// The tab bar hides and reveals together with the rest of the chrome.
+    /// While it is temporarily hidden the logical tab chrome state (insets,
+    /// prominent backdrop) is kept frozen so the text does not shift; the
+    /// KVO refresh in WindowLifecycleView skips updates for this state.
+    // toggleTabBar(_:) silently no-ops for groups with several tabs (AppKit
+    // disables Hide Tab Bar there), so the bar is collapsed by hiding its
+    // titlebar accessory instead — the only accessory these windows have.
+    // NSWindowTabGroup.isTabBarVisible stays true while the accessory is
+    // hidden, which is why the KVO refresh keys on the temporary-hide flag.
+    private func hideTabBarTemporarilyIfNeeded() {
+        guard !isTabBarTemporarilyHidden,
+              shellState.isTabBarVisible,
+              !shellState.isFullScreen,
+              let window = editorView.window,
+              window.tabGroup?.isTabBarVisible == true,
+              let accessory = window.titlebarAccessoryViewControllers
+              .first(where: { !$0.isHidden })
+        else {
+            return
+        }
+
+        isTabBarTemporarilyHidden = true
+        hiddenTabBarAccessory = accessory
+        accessory.isHidden = true
+    }
+
+    private func restoreTabBarIfNeeded() {
+        guard isTabBarTemporarilyHidden else {
+            return
+        }
+
+        isTabBarTemporarilyHidden = false
+        if let accessory = hiddenTabBarAccessory {
+            hiddenTabBarAccessory = nil
+            accessory.isHidden = false
+        } else {
+            // The tab bar went away while it was hidden (e.g. the remaining
+            // tabs closed); drop the frozen tab chrome.
+            setTabBarChrome(isVisible: false, topInset: 0)
         }
     }
 
@@ -512,6 +572,40 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
         shellState.updateSearchResults(count: 0, selectedIndex: nil)
         editorView.setSearchMatches([], selectedIndex: nil)
+    }
+
+    private func handleReplaceEnabledChanged() {
+        applyChromeInsets(isFullScreen: shellState.isFullScreen)
+    }
+
+    private func replaceCurrentMatch() {
+        guard let index = selectedSearchMatchIndex,
+              searchMatches.indices.contains(index)
+        else {
+            return
+        }
+
+        guard editorView.replaceSearchMatch(
+            searchMatches[index],
+            with: shellState.replaceQuery
+        ) else {
+            return
+        }
+
+        // The text change has already refreshed the matches synchronously;
+        // scroll to the match that took over the replaced one's index.
+        applySearchMatches(selectsMatch: true)
+    }
+
+    private func replaceAllMatches() {
+        guard !searchMatches.isEmpty else {
+            return
+        }
+
+        editorView.replaceSearchMatches(
+            searchMatches,
+            with: shellState.replaceQuery
+        )
     }
 
     private func selectNextSearchMatch() {

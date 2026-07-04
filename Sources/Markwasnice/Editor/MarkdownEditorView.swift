@@ -387,6 +387,44 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.showFindIndicator(for: range)
     }
 
+    @discardableResult
+    func replaceSearchMatch(_ range: NSRange, with replacement: String) -> Bool {
+        guard boundedRange(range) != nil else {
+            return false
+        }
+
+        return replaceText(
+            in: range,
+            with: replacement,
+            selectedRange: NSRange(
+                location: range.location + (replacement as NSString).length,
+                length: 0
+            )
+        )
+    }
+
+    func replaceSearchMatches(_ ranges: [NSRange], with replacement: String) {
+        let validRanges = ranges
+            .filter { boundedRange($0) != nil }
+            .sorted { $0.location < $1.location }
+        guard !validRanges.isEmpty,
+              let textStorage = textView.textStorage,
+              textView.shouldChangeText(
+                  inRanges: validRanges.map { NSValue(range: $0) },
+                  replacementStrings: validRanges.map { _ in replacement }
+              )
+        else {
+            return
+        }
+
+        textStorage.beginEditing()
+        for range in validRanges.reversed() {
+            textStorage.replaceCharacters(in: range, with: replacement)
+        }
+        textStorage.endEditing()
+        textView.didChangeText()
+    }
+
     func pasteAsLink() {
         let selectedRange = textView.selectedRange()
         guard selectedRange.length > 0,

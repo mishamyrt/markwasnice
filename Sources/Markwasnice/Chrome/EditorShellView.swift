@@ -8,6 +8,7 @@ final class EditorShellState: ObservableObject {
     static let toolbarCursorExclusionHeight: CGFloat = 52
     static let toolbarContentHeight: CGFloat = 50
     static let searchAreaHeight: CGFloat = 40
+    static let replaceAreaHeight: CGFloat = 28
 
     @Published var title = "Untitled"
     @Published var isEdited = false
@@ -26,6 +27,8 @@ final class EditorShellState: ObservableObject {
     @Published var searchMatchCount = 0
     @Published var selectedSearchMatchIndex: Int?
     @Published var searchFocusRequest = 0
+    @Published var isReplaceEnabled = false
+    @Published var replaceQuery = ""
 
     var onTopHoverChanged: ((Bool) -> Void)?
     var onFocusModeEnabledChanged: ((Bool) -> Void)?
@@ -35,6 +38,9 @@ final class EditorShellState: ObservableObject {
     var onSearchOptionsChanged: ((EditorSearchOptions) -> Void)?
     var onNextSearchMatch: (() -> Void)?
     var onPreviousSearchMatch: (() -> Void)?
+    var onReplaceEnabledChanged: ((Bool) -> Void)?
+    var onReplaceMatch: (() -> Void)?
+    var onReplaceAllMatches: (() -> Void)?
 
     static let readingWordsPerMinute = 200.0
 
@@ -66,11 +72,15 @@ final class EditorShellState: ObservableObject {
         isSearchPresented || isTabBarVisible
     }
 
+    var searchBarHeight: CGFloat {
+        Self.searchAreaHeight + (isReplaceEnabled ? Self.replaceAreaHeight : 0)
+    }
+
     /// While the tab bar is visible the topbar content lives in the native
     /// NSToolbar above the tabs, so the in-content chrome band collapses to
     /// the system chrome height (toolbar + tab bar) plus the search area.
     var topChromeInsetHeight: CGFloat {
-        let searchHeight = isSearchPresented ? Self.searchAreaHeight : 0
+        let searchHeight = isSearchPresented ? searchBarHeight : 0
         return isTabBarVisible
             ? tabBarTopInset + searchHeight
             : Self.toolbarRevealHeight + searchHeight
@@ -159,6 +169,23 @@ final class EditorShellState: ObservableObject {
 
         searchOptions.mode = mode
         onSearchOptionsChanged?(searchOptions)
+    }
+
+    func setReplaceEnabled(_ isEnabled: Bool) {
+        guard isReplaceEnabled != isEnabled else {
+            return
+        }
+
+        isReplaceEnabled = isEnabled
+        onReplaceEnabledChanged?(isEnabled)
+    }
+
+    func replaceCurrentMatch() {
+        onReplaceMatch?()
+    }
+
+    func replaceAllMatches() {
+        onReplaceAllMatches?()
     }
 
     func updateSearchResults(count: Int, selectedIndex: Int?) {
@@ -271,7 +298,7 @@ struct EditorShellView: View {
                 .frame(maxWidth: 785)
                 .padding(.horizontal, 6)
         }
-        .frame(height: EditorShellState.searchAreaHeight)
+        .frame(height: state.searchBarHeight)
         .offset(
             y: state.isTabBarVisible
                 ? state.tabBarTopInset
@@ -283,14 +310,14 @@ struct EditorShellView: View {
     private var fullScreenSearchLayer: some View {
         ZStack(alignment: .top) {
             BackdropBlurOverlay(isProminent: true)
-                .frame(height: EditorShellState.searchAreaHeight)
+                .frame(height: state.searchBarHeight)
                 .allowsHitTesting(false)
 
             EditorSearchBar(state: state)
                 .padding(.leading, 132)
                 .padding(.trailing, 78)
         }
-        .frame(height: EditorShellState.searchAreaHeight)
+        .frame(height: state.searchBarHeight)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
@@ -337,15 +364,46 @@ private struct EditorSearchBar: View {
     @ObservedObject private var state: EditorShellState
 
     @FocusState private var isSearchFieldFocused: Bool
+    @FocusState private var isReplaceFieldFocused: Bool
 
     init(state: EditorShellState) {
         self.state = state
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            searchField
+        // A grid keeps the find and replace fields the same width even
+        // though each row trails a different set of controls.
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+            GridRow {
+                searchField
+                findControls
+            }
 
+            if state.isReplaceEnabled {
+                GridRow {
+                    replaceField
+                    replaceControls
+                }
+            }
+        }
+        .frame(height: state.searchBarHeight)
+        .onAppear {
+            isSearchFieldFocused = true
+        }
+        .onChange(of: state.searchFocusRequest) { _, _ in
+            isSearchFieldFocused = true
+        }
+        .onChange(of: state.isReplaceEnabled) { _, isEnabled in
+            if isEnabled {
+                isReplaceFieldFocused = true
+            } else {
+                isSearchFieldFocused = true
+            }
+        }
+    }
+
+    private var findControls: some View {
+        HStack(spacing: 8) {
             HStack(spacing: 2) {
                 Button {
                     state.selectPreviousSearchMatch()
@@ -353,8 +411,6 @@ private struct EditorSearchBar: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                // .buttonStyle(.plain)
-                // .controlSize(.small)
                 .disabled(state.searchMatchCount == 0)
 
                 Button {
@@ -363,38 +419,56 @@ private struct EditorSearchBar: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                // .buttonStyle(.plain)
-                // .controlSize(.small)
                 .disabled(state.searchMatchCount == 0)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .tint(Color.primary)
-            // .foregroundStyle(Color.primary.opacity(0.66))
-            // .background(
-            //     RoundedRectangle(cornerRadius: 6, style: .continuous)
-            //         .fill(Color.primary.opacity(0.06))
-            // )
 
-            Button("Done") {
-                state.closeSearch()
+            if !state.isReplaceEnabled {
+                doneButton
+            }
+
+            Toggle(
+                "Replace",
+                isOn: Binding(
+                    get: { state.isReplaceEnabled },
+                    set: { state.setReplaceEnabled($0) }
+                )
+            )
+            .toggleStyle(.checkbox)
+            .font(.system(size: 11, weight: .medium))
+        }
+    }
+
+    private var replaceControls: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                Button("Replace") {
+                    state.replaceCurrentMatch()
+                }
+                .disabled(state.searchMatchCount == 0)
+
+                Button("All") {
+                    state.replaceAllMatches()
+                }
+                .disabled(state.searchMatchCount == 0)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .tint(Color.primary)
 
-            Toggle("Replace", isOn: .constant(false))
-                .toggleStyle(.checkbox)
-                .font(.system(size: 11, weight: .medium))
-                .disabled(true)
+            doneButton
         }
-        .frame(height: EditorShellState.searchAreaHeight)
-        .onAppear {
-            isSearchFieldFocused = true
+    }
+
+    private var doneButton: some View {
+        Button("Done") {
+            state.closeSearch()
         }
-        .onChange(of: state.searchFocusRequest) { _, _ in
-            isSearchFieldFocused = true
-        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(Color.primary)
     }
 
     private var searchField: some View {
@@ -484,18 +558,57 @@ private struct EditorSearchBar: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(searchFieldBorderColor, lineWidth: searchFieldBorderWidth)
+                .stroke(
+                    fieldBorderColor(isFocused: isSearchFieldFocused),
+                    lineWidth: fieldBorderWidth(isFocused: isSearchFieldFocused)
+                )
         )
     }
 
-    private var searchFieldBorderColor: Color {
-        isSearchFieldFocused
+    private var replaceField: some View {
+        HStack(spacing: 5) {
+            TextField(
+                "Replace",
+                text: Binding(
+                    get: { state.replaceQuery },
+                    set: { state.replaceQuery = $0 }
+                )
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .focused($isReplaceFieldFocused)
+            .onKeyPress(.escape) {
+                state.closeSearch()
+                return .handled
+            }
+            .onSubmit {
+                state.replaceCurrentMatch()
+            }
+        }
+        .padding(.horizontal, 7)
+        .frame(height: 22)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.76))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(
+                    fieldBorderColor(isFocused: isReplaceFieldFocused),
+                    lineWidth: fieldBorderWidth(isFocused: isReplaceFieldFocused)
+                )
+        )
+    }
+
+    private func fieldBorderColor(isFocused: Bool) -> Color {
+        isFocused
             ? Color(nsColor: .keyboardFocusIndicatorColor)
             : Color.primary.opacity(0.08)
     }
 
-    private var searchFieldBorderWidth: CGFloat {
-        isSearchFieldFocused ? 3 : 1
+    private func fieldBorderWidth(isFocused: Bool) -> CGFloat {
+        isFocused ? 3 : 1
     }
 }
 

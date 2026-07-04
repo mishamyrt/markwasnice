@@ -166,6 +166,8 @@ private final class WindowLifecycleView: NSView {
     private var tabGroupObservation: NSKeyValueObservation?
     private var contentLayoutObservation: NSKeyValueObservation?
     private var titleCancellable: AnyCancellable?
+    private weak var observedFullScreenToolbarWindow: NSWindow?
+    private var strayToolbarCheckWorkItem: DispatchWorkItem?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -173,6 +175,7 @@ private final class WindowLifecycleView: NSView {
             tabGroupObservation = nil
             contentLayoutObservation = nil
             titleCancellable = nil
+            stopObservingFullScreenToolbarWindow()
         }
         configureWindowIfNeeded()
     }
@@ -243,6 +246,17 @@ private final class WindowLifecycleView: NSView {
             {
                 target.addTabbedWindow(window, ordered: .above)
                 window.makeKeyAndOrderFront(nil)
+
+                // A window attached to a fullscreen group becomes fullscreen
+                // instantly, without the windowWillEnterFullScreen transition,
+                // so the session state and the fullscreen toolbar have to be
+                // set up here by hand.
+                if window.styleMask.contains(.fullScreen),
+                   !session.shellState.isFullScreen
+                {
+                    session.setFullScreen(true)
+                    chromeToolbarController.install(in: window)
+                }
             } else {
                 window.setContentSize(NSSize(width: 960, height: 640))
                 window.center()
@@ -302,11 +316,170 @@ private final class WindowLifecycleView: NSView {
             )
         }
 
+        updateFullScreenToolbarMonitor()
+
+        // The chrome auto-hide temporarily collapses the tab bar (via its
+        // titlebar accessory, so isTabBarVisible stays true); keep the
+        // logical tab chrome (insets, backdrop) frozen so the text does not
+        // shift and the reveal restores everything in place.
+        if session.isTabBarTemporarilyHidden {
+            return
+        }
+
         let isTabBarVisible = window.tabGroup?.isTabBarVisible ?? false
         let topInset = isTabBarVisible && !session.shellState.isFullScreen
             ? (window.contentView?.safeAreaInsets.top ?? 0)
             : 0
         session.setTabBarChrome(isVisible: isTabBarVisible, topInset: topInset)
+    }
+
+    /// When the tab bar appears inside a fullscreen window (manually or by
+    /// adding a tab), AppKit's auto-hide can retract the NSToolbarFullScreenWindow
+    /// by its pre-tab-bar height, leaving a strip of it stuck on screen. A
+    /// settled toolbar window only has two valid resting positions — fully
+    /// hidden, or fully revealed (the latter only for the selected tab); once
+    /// it stops moving anywhere in between, clamp it fully off-screen.
+    private func updateFullScreenToolbarMonitor() {
+        guard let window,
+              window.styleMask.contains(.fullScreen),
+              let toolbarWindow = window.childWindows?.first(where: {
+                  String(describing: type(of: $0)) == "NSToolbarFullScreenWindow"
+              })
+        else {
+            stopObservingFullScreenToolbarWindow()
+            return
+        }
+
+        if toolbarWindow !== observedFullScreenToolbarWindow {
+            stopObservingFullScreenToolbarWindow()
+            observedFullScreenToolbarWindow = toolbarWindow
+            for name in [
+                NSWindow.didMoveNotification,
+                NSWindow.didResizeNotification,
+            ] {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(fullScreenToolbarWindowDidMove),
+                    name: name,
+                    object: toolbarWindow
+                )
+            }
+        }
+
+        scheduleStrayToolbarWindowCheck()
+    }
+
+    private func stopObservingFullScreenToolbarWindow() {
+        strayToolbarCheckWorkItem?.cancel()
+        strayToolbarCheckWorkItem = nil
+        guard let observedFullScreenToolbarWindow else {
+            return
+        }
+
+        NotificationCenter.default.removeObserver(
+            self,
+            name: nil,
+            object: observedFullScreenToolbarWindow
+        )
+        self.observedFullScreenToolbarWindow = nil
+    }
+
+    @objc private func fullScreenToolbarWindowDidMove(_: Notification) {
+        if let window, let toolbarWindow = observedFullScreenToolbarWindow {}
+        scheduleStrayToolbarWindowCheck()
+    }
+
+    /// Debounced so reveal/hide animations, which move the window through
+    /// intermediate positions every frame, are never interfered with.
+    private func scheduleStrayToolbarWindowCheck(after delay: TimeInterval = 0.4) {
+        strayToolbarCheckWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.clampStrayFullScreenToolbarWindow()
+        }
+        strayToolbarCheckWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func clampStrayFullScreenToolbarWindow() {
+        guard let window,
+              window.styleMask.contains(.fullScreen),
+              let toolbarWindow = observedFullScreenToolbarWindow
+        else {
+            return
+        }
+
+        let hiddenY = window.frame.maxY
+        let minY = toolbarWindow.frame.minY
+
+        // Fully hidden — nothing to do.
+        if minY >= hiddenY - 0.5 {
+            return
+        }
+
+        let isSelectedTab = window.tabGroup.map { $0.selectedWindow === window }
+            ?? true
+        if isSelectedTab {
+            // Fully revealed — legitimate only while the pointer is near the
+            // top of the screen keeping the reveal alive. A toolbar window
+            // born into an already-fullscreen group is not enrolled in
+            // AppKit's auto-hide, so once the pointer leaves it just stays;
+            // that is the stuck strip.
+            let revealedY = hiddenY - toolbarWindow.frame.height
+            if abs(minY - revealedY) < 0.5,
+               NSEvent.mouseLocation.y >= revealedY - 250
+            {
+                // No move events arrive when the pointer leaves; keep
+                // re-checking while the window remains on screen.
+                scheduleStrayToolbarWindowCheck(after: 1.5)
+                return
+            }
+
+            // Parked with just the tab bar row on screen — legitimate only
+            // while that strip actually renders the tab bar. Applies to the
+            // tab-bar-sized strip only, not to a fully revealed window.
+            if hiddenY - minY <= 44,
+               visibleStripShowsTabBar(
+                   of: window,
+                   toolbarWindow: toolbarWindow,
+                   hiddenY: hiddenY
+               )
+            {
+                scheduleStrayToolbarWindowCheck(after: 1.5)
+                return
+            }
+        }
+
+        var frame = toolbarWindow.frame
+        frame.origin.y = hiddenY
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            toolbarWindow.animator().setFrame(frame, display: false)
+        }
+    }
+
+    private func visibleStripShowsTabBar(
+        of window: NSWindow,
+        toolbarWindow: NSWindow,
+        hiddenY: CGFloat
+    ) -> Bool {
+        let strip = NSRect(
+            x: toolbarWindow.frame.minX,
+            y: toolbarWindow.frame.minY,
+            width: toolbarWindow.frame.width,
+            height: hiddenY - toolbarWindow.frame.minY
+        )
+        return window.titlebarAccessoryViewControllers.contains { accessory in
+            guard !accessory.isHidden,
+                  !accessory.view.isHiddenOrHasHiddenAncestor,
+                  accessory.view.window === toolbarWindow
+            else {
+                return false
+            }
+
+            let rectInWindow = accessory.view.convert(accessory.view.bounds, to: nil)
+            return toolbarWindow.convertToScreen(rectInWindow).intersects(strip)
+        }
     }
 }
 
