@@ -276,8 +276,7 @@ private final class WindowLifecycleView: NSView {
         if appState.hasPendingRestoreTabLead(for: session.id) {
             guard attempt < 20 else {
                 appState.abandonRestoreTabLead(for: session.id)
-                window.setContentSize(NSSize(width: 960, height: 640))
-                window.center()
+                placeStandaloneWindow(window, session: session)
                 return
             }
 
@@ -297,8 +296,31 @@ private final class WindowLifecycleView: NSView {
             return
         }
 
+        placeStandaloneWindow(window, session: session)
+    }
+
+    private func placeStandaloneWindow(
+        _ window: NSWindow,
+        session: EditorDocumentSession
+    ) {
+        if let frame = session.takeRestoredWindowFrame(),
+           frameIsOnScreen(frame)
+        {
+            window.setFrame(frame, display: false)
+            return
+        }
+
         window.setContentSize(NSSize(width: 960, height: 640))
         window.center()
+    }
+
+    /// A frame saved on a display arrangement that no longer exists would
+    /// reopen the window out of reach; such frames fall back to centering.
+    private func frameIsOnScreen(_ frame: NSRect) -> Bool {
+        NSScreen.screens.contains { screen in
+            let intersection = screen.visibleFrame.intersection(frame)
+            return intersection.width >= 200 && intersection.height >= 100
+        }
     }
 
     private func observeTabChrome(
@@ -752,6 +774,14 @@ private final class WindowDelegateProxy: NSObject, NSWindowDelegate {
         }
 
         appState?.remove(session)
+    }
+
+    func windowDidMove(_: Notification) {
+        appState?.noteWindowLayoutChanged()
+    }
+
+    func windowDidEndLiveResize(_: Notification) {
+        appState?.noteWindowLayoutChanged()
     }
 
     func windowWillEnterFullScreen(_ notification: Notification) {

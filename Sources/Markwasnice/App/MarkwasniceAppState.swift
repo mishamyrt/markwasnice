@@ -279,6 +279,12 @@ final class MarkwasniceAppState: ObservableObject {
         await autosaveTask?.value
     }
 
+    /// Window move/resize only changes the frames stored alongside the
+    /// drafts; reuse the debounced autosave so live drags coalesce.
+    func noteWindowLayoutChanged() {
+        scheduleAutosave()
+    }
+
     private var activeSession: EditorDocumentSession? {
         activeSessionID.flatMap { sessions[$0] }
     }
@@ -340,7 +346,7 @@ final class MarkwasniceAppState: ObservableObject {
         from draft: AutosavedDraft,
         isEdited: Bool
     ) -> EditorDocumentSession {
-        EditorDocumentSession(
+        let session = EditorDocumentSession(
             text: draft.text,
             fileURL: draft.fileURL,
             isEdited: isEdited,
@@ -348,6 +354,13 @@ final class MarkwasniceAppState: ObservableObject {
         ) { [weak self] in
             self?.scheduleAutosave()
         }
+        if let descriptor = draft.windowFrame {
+            let frame = NSRectFromString(descriptor)
+            if !frame.isEmpty {
+                session.restoredWindowFrame = frame
+            }
+        }
+        return session
     }
 
     private func restoredSessions(from drafts: [AutosavedDraft]) async
