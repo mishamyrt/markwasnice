@@ -225,9 +225,8 @@ enum MarkdownMarkupCommand: Int {
         let closingLength = (closing as NSString).length
 
         if target.range.length == 0 {
-            if hasPairAroundCursor(
-                in: nsString, location: target.range.location,
-                opening: opening, closing: closing
+            if hasWrappedRange(
+                target.range, in: nsString, opening: opening, closing: closing
             ) {
                 return MarkdownMarkupEdit(
                     replacementRange: NSRange(
@@ -649,36 +648,6 @@ enum MarkdownMarkupCommand: Int {
     ) -> Bool {
         let character = nsString.substring(with: NSRange(location: location, length: 1))
         return character == " " || character == "\t"
-    }
-
-    private static func hasPairAroundCursor(
-        in nsString: NSString,
-        location: Int,
-        opening: String,
-        closing: String
-    ) -> Bool {
-        let openingLength = (opening as NSString).length
-        let closingLength = (closing as NSString).length
-        guard location >= openingLength,
-              location + closingLength <= nsString.length
-        else {
-            return false
-        }
-
-        let openingRange = NSRange(
-            location: location - openingLength, length: openingLength
-        )
-        let closingRange = NSRange(location: location, length: closingLength)
-        guard nsString.substring(with: openingRange) == opening,
-              nsString.substring(with: closingRange) == closing
-        else {
-            return false
-        }
-
-        return isExactDelimiterRun(
-            in: nsString, openingRange: openingRange,
-            closingRange: closingRange, delimiter: opening
-        )
     }
 
     private static func hasWrappedRange(

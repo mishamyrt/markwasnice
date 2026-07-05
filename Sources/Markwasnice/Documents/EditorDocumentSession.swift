@@ -25,6 +25,9 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private var searchMatches: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
 
+    /// These observers are the single title-update mechanism: assign `text`
+    /// first when it changes, and don't call updateTitle() after assignments
+    /// — didSet fires even when the value is unchanged.
     private(set) var fileURL: URL? {
         didSet {
             updateTitle()
@@ -97,6 +100,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.setString(text, clearsUndo: true)
         applyChromeInsets(isFullScreen: false)
         stylingController.scheduleParse(text: text)
+        // didSet observers don't fire during init.
         updateTitle()
         scheduleWordCount()
     }
@@ -108,7 +112,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
         text = editorView.string
         hasUnsavedFileChanges = true
-        updateTitle()
         onAutosaveNeeded()
         stylingController.scheduleParse(text: editorView.string)
         scheduleWordCount()
@@ -183,7 +186,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.documentURL = url
         editorView.setString(text, clearsUndo: true)
         stylingController.scheduleParse(text: text)
-        updateTitle()
         scheduleWordCount()
         refreshSearchMatches(selectsFirstMatch: false)
         onAutosaveNeeded()

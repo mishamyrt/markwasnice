@@ -682,12 +682,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return false
         }
 
-        if exitEmptyMarkdownPrefixAtSelection() {
+        let context = caretLineContext()
+        if exitEmptyMarkdownPrefix(for: context) {
             return true
         }
 
-        guard let continuation = listContinuationAtSelection() ??
-            quoteContinuationAtSelection()
+        guard let continuation = listContinuation(for: context)
+            ?? quoteContinuation(for: context)
         else {
             return false
         }
@@ -1884,7 +1885,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
-    private func listContinuationAtSelection() -> String? {
+    /// The caret's line and the text from the line start up to the caret.
+    /// Anchored at `location - 1` so a caret sitting right after a newline
+    /// resolves to the line it just finished, not the empty next one.
+    private struct CaretLineContext {
+        let lineRange: NSRange
+        let caretLocation: Int
+        let prefix: String
+    }
+
+    private func caretLineContext() -> CaretLineContext {
         let nsString = textView.string as NSString
         let location = textView.selectedRange().location
         let lineLocation = location > 0 ? location - 1 : 0
@@ -1892,49 +1902,47 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             location: lineLocation,
             length: 0
         ))
-        let cursorRange = NSRange(
+        let prefixRange = NSRange(
             location: lineRange.location,
             length: max(0, location - lineRange.location)
         )
-        let linePrefix = nsString.substring(with: cursorRange)
+        return CaretLineContext(
+            lineRange: lineRange,
+            caretLocation: location,
+            prefix: nsString.substring(with: prefixRange)
+        )
+    }
+
+    private func listContinuation(for context: CaretLineContext) -> String? {
+        let prefix = context.prefix as NSString
         guard let match = Self.listContinuationRegex.firstMatch(
-            in: linePrefix,
-            range: NSRange(location: 0, length: (linePrefix as NSString).length)
+            in: context.prefix,
+            range: NSRange(location: 0, length: prefix.length)
         ),
             match.numberOfRanges == 4
         else {
             return nil
         }
 
-        let prefix = linePrefix as NSString
         let indentation = prefix.substring(with: match.range(at: 1))
         let marker = prefix.substring(with: match.range(at: 2))
         return "\n\(indentation)\(nextListMarker(after: marker)) "
     }
 
-    private func exitEmptyMarkdownPrefixAtSelection() -> Bool {
+    private func exitEmptyMarkdownPrefix(for context: CaretLineContext) -> Bool {
         let nsString = textView.string as NSString
-        let location = textView.selectedRange().location
-        let lineLocation = location > 0 ? location - 1 : 0
-        let lineRange = nsString.lineRange(for: NSRange(
-            location: lineLocation,
-            length: 0
-        ))
-        let cursorRange = NSRange(
-            location: lineRange.location,
-            length: max(0, location - lineRange.location)
-        )
-        let lineText = nsString.substring(with: lineRange)
+        let lineText = nsString.substring(with: context.lineRange)
             .trimmingCharacters(in: .newlines)
         guard lineMatchesEmptyMarkdownPrefix(lineText) else {
             return false
         }
 
+        let lineRange = context.lineRange
         let replacementRange = NSRange(
             location: lineRange.location,
-            length: lineRange.location + lineRange.length > location
+            length: NSMaxRange(lineRange) > context.caretLocation
                 ? lineRange.length
-                : cursorRange.length
+                : (context.prefix as NSString).length
         )
         return replaceText(
             in: replacementRange,
@@ -1951,29 +1959,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
     }
 
-    private func quoteContinuationAtSelection() -> String? {
-        let nsString = textView.string as NSString
-        let location = textView.selectedRange().location
-        let lineLocation = location > 0 ? location - 1 : 0
-        let lineRange = nsString.lineRange(for: NSRange(
-            location: lineLocation,
-            length: 0
-        ))
-        let cursorRange = NSRange(
-            location: lineRange.location,
-            length: max(0, location - lineRange.location)
-        )
-        let linePrefix = nsString.substring(with: cursorRange)
+    private func quoteContinuation(for context: CaretLineContext) -> String? {
+        let prefix = context.prefix as NSString
         guard let match = Self.quoteContinuationRegex.firstMatch(
-            in: linePrefix,
-            range: NSRange(location: 0, length: (linePrefix as NSString).length)
+            in: context.prefix,
+            range: NSRange(location: 0, length: prefix.length)
         ),
             match.numberOfRanges == 2
         else {
             return nil
         }
 
-        let prefix = linePrefix as NSString
         let indentation = prefix.substring(with: match.range(at: 1))
         return "\n\(indentation)> "
     }

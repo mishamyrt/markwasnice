@@ -61,7 +61,14 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     @objc private func tabModeChanged(_ sender: NSPopUpButton) {
-        settings.tabInsertionMode = sender.indexOfSelectedItem == 1 ? .tab : .spaces
+        // The popup is populated from allCases in configureControls; decode
+        // the selection through the same list.
+        let modes = EditorSettings.TabInsertionMode.allCases
+        guard modes.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+
+        settings.tabInsertionMode = modes[sender.indexOfSelectedItem]
         onChange(settings)
     }
 

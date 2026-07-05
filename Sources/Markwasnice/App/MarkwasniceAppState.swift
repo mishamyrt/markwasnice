@@ -50,7 +50,6 @@ final class MarkwasniceAppState: ObservableObject {
             let restoredSessions = await restoredSessions(from: drafts)
             var leadSessionIDs: [UUID: EditorDocumentSession.ID] = [:]
             for (draft, session) in zip(drafts, restoredSessions) {
-                sessions[session.id] = session
                 guard let windowID = draft.windowID else {
                     continue
                 }
@@ -69,15 +68,7 @@ final class MarkwasniceAppState: ObservableObject {
 
     @discardableResult
     func newSession() -> EditorDocumentSession {
-        let session = EditorDocumentSession(
-            text: "",
-            fileURL: nil,
-            isEdited: false,
-            settings: settings
-        ) { [weak self] in
-            self?.scheduleAutosave()
-        }
-        sessions[session.id] = session
+        let session = makeSession(text: "", fileURL: nil, isEdited: false)
         activate(session)
         scheduleAutosave()
         return session
@@ -341,15 +332,7 @@ final class MarkwasniceAppState: ObservableObject {
                 return
             }
 
-            let session = EditorDocumentSession(
-                text: text,
-                fileURL: url,
-                isEdited: false,
-                settings: settings
-            ) { [weak self] in
-                self?.scheduleAutosave()
-            }
-            sessions[session.id] = session
+            let session = makeSession(text: text, fileURL: url, isEdited: false)
             activate(session)
             if let tabTarget,
                tabTarget.tabbingIdentifier == EditorWindowTabbing.identifier
@@ -366,18 +349,36 @@ final class MarkwasniceAppState: ObservableObject {
         }
     }
 
+    /// Single construction point for sessions: wires the autosave callback
+    /// and registers the session in `sessions`. Activation, autosave
+    /// scheduling, and window bookkeeping stay with the callers, which
+    /// genuinely differ there.
     private func makeSession(
-        from draft: AutosavedDraft,
+        text: String,
+        fileURL: URL?,
         isEdited: Bool
     ) -> EditorDocumentSession {
         let session = EditorDocumentSession(
-            text: draft.text,
-            fileURL: draft.fileURL,
+            text: text,
+            fileURL: fileURL,
             isEdited: isEdited,
             settings: settings
         ) { [weak self] in
             self?.scheduleAutosave()
         }
+        sessions[session.id] = session
+        return session
+    }
+
+    private func makeSession(
+        from draft: AutosavedDraft,
+        isEdited: Bool
+    ) -> EditorDocumentSession {
+        let session = makeSession(
+            text: draft.text,
+            fileURL: draft.fileURL,
+            isEdited: isEdited
+        )
         if let descriptor = draft.windowFrame {
             let frame = NSRectFromString(descriptor)
             if !frame.isEmpty {
