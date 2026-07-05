@@ -167,7 +167,10 @@ private final class WindowLifecycleView: NSView {
     private var contentLayoutObservation: NSKeyValueObservation?
     private var titleCancellable: AnyCancellable?
     private weak var observedFullScreenToolbarWindow: NSWindow?
+    private var toolbarAppearanceObservation: NSKeyValueObservation?
+    private var toolbarEffectiveAppearanceObservation: NSKeyValueObservation?
     private weak var fullScreenToolbarSeparator: NSView?
+    private weak var fullScreenToolbarBackdrop: NSView?
     private var strayToolbarCheckWorkItem: DispatchWorkItem?
 
     override func viewDidMoveToWindow() {
@@ -184,6 +187,7 @@ private final class WindowLifecycleView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyWindowBackground()
+        syncFullScreenToolbarAppearance()
     }
 
     override func hitTest(_: NSPoint) -> NSView? {
@@ -399,12 +403,20 @@ private final class WindowLifecycleView: NSView {
     /// hidden, or fully revealed (the latter only for the selected tab); once
     /// it stops moving anywhere in between, clamp it fully off-screen.
     private func updateFullScreenToolbarMonitor() {
-        guard let window,
-              window.styleMask.contains(.fullScreen),
-              let toolbarWindow = window.childWindows?.first(where: {
-                  String(describing: type(of: $0)) == "NSToolbarFullScreenWindow"
-              })
+        guard let window, window.styleMask.contains(.fullScreen) else {
+            didKickToolbarForFullScreenSession = false
+            isToolbarKickPending = false
+            stopObservingFullScreenToolbarWindow()
+            session?.setFullScreenChromeOverlayHeight(0)
+            return
+        }
+
+        guard let toolbarWindow = window.childWindows?.first(where: {
+            String(describing: type(of: $0)) == "NSToolbarFullScreenWindow"
+        })
         else {
+            // The auto-hide detaches the toolbar window between reveals;
+            // the fullscreen session (and its one-shot kick) is still on.
             stopObservingFullScreenToolbarWindow()
             session?.setFullScreenChromeOverlayHeight(0)
             return
@@ -413,6 +425,15 @@ private final class WindowLifecycleView: NSView {
         if toolbarWindow !== observedFullScreenToolbarWindow {
             stopObservingFullScreenToolbarWindow()
             observedFullScreenToolbarWindow = toolbarWindow
+            observeToolbarWindowAppearance(toolbarWindow)
+            // Once per fullscreen session: the stale first render of the
+            // item hosting views only needs one corrective flip. The flip
+            // itself repaints the whole band in the opposite theme, so it
+            // must wait until the toolbar window is parked off-screen —
+            // kicking here, mid reveal animation, flashes on every entry.
+            if !didKickToolbarForFullScreenSession {
+                isToolbarKickPending = true
+            }
             for name in [
                 NSWindow.didMoveNotification,
                 NSWindow.didResizeNotification,
@@ -427,8 +448,79 @@ private final class WindowLifecycleView: NSView {
         }
 
         installFullScreenToolbarSeparator(in: toolbarWindow)
+        hideSystemToolbarBackdrop(in: toolbarWindow)
+        syncFullScreenToolbarAppearance()
         reportFullScreenChromeOverlayHeight()
         scheduleStrayToolbarWindowCheck()
+    }
+
+    /// NSToolbarFullScreenWindow does not track system appearance changes:
+    /// it keeps whatever appearance was in effect when the app launched, so
+    /// after a theme switch the fullscreen toolbar renders in the stale
+    /// theme. Pinning it to the editor window's effective appearance (and
+    /// re-pinning from viewDidChangeEffectiveAppearance) keeps it in sync.
+    private func syncFullScreenToolbarAppearance() {
+        guard !isKickingToolbarAppearance,
+              let window,
+              let toolbarWindow = observedFullScreenToolbarWindow
+        else {
+            return
+        }
+
+        let appearance = window.effectiveAppearance
+        if toolbarWindow.appearance?.name != appearance.name {
+            toolbarWindow.appearance = appearance
+        }
+    }
+
+    private var isKickingToolbarAppearance = false
+    private var didKickToolbarForFullScreenSession = false
+    private var isToolbarKickPending = false
+
+    private func performPendingToolbarKickIfHidden() {
+        guard isToolbarKickPending,
+              let window,
+              let toolbarWindow = observedFullScreenToolbarWindow,
+              toolbarWindow.frame.minY >= window.frame.maxY - 0.5
+        else {
+            return
+        }
+
+        isToolbarKickPending = false
+        didKickToolbarForFullScreenSession = true
+        performToolbarAppearanceKick()
+    }
+
+    /// The SwiftUI hosting views inside the toolbar items render their
+    /// first frame with a stale color scheme and only fix themselves on a
+    /// real appearance change, so the opposite appearance is held long
+    /// enough for a render pass and then released. The flip stays on the
+    /// content view: it cascades only down the chrome subtree, while any
+    /// window-level flip on NSToolbarFullScreenWindow leaks the stale
+    /// theme back into the whole fullscreen space.
+    private func performToolbarAppearanceKick() {
+        guard !isKickingToolbarAppearance,
+              let window,
+              let toolbarWindow = observedFullScreenToolbarWindow,
+              let chromeView = toolbarWindow.contentView
+        else {
+            return
+        }
+
+        let correct = window.effectiveAppearance
+        let oppositeName: NSAppearance.Name =
+            correct.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? .aqua
+                : .darkAqua
+        isKickingToolbarAppearance = true
+        chromeView.appearance = NSAppearance(named: oppositeName)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [
+            weak self,
+            weak chromeView
+        ] in
+            self?.isKickingToolbarAppearance = false
+            chromeView?.appearance = nil
+        }
     }
 
     /// The fullscreen toolbar slides down over the text without any band
@@ -450,6 +542,101 @@ private final class WindowLifecycleView: NSView {
         separator.autoresizingMask = [.width, .maxYMargin]
         contentView.addSubview(separator)
         fullScreenToolbarSeparator = separator
+    }
+
+    /// The Tahoe glass band inside NSToolbarFullScreenWindow renders with
+    /// filter parameters cached at process launch and repaints them only on
+    /// window-level appearance changes, which cannot be forced without
+    /// leaking the flip into the editor window. Instead the stale band is
+    /// hidden entirely and FullScreenToolbarBackdropView supplies the
+    /// theme-correct background underneath the toolbar items.
+    private func hideSystemToolbarBackdrop(in toolbarWindow: NSWindow) {
+        guard let contentView = toolbarWindow.contentView else {
+            return
+        }
+
+        hideBackdropLayerViews(in: contentView)
+        installFullScreenToolbarBackdrop(in: toolbarWindow)
+    }
+
+    /// AppKit re-shows its own band layers for the first frames of every
+    /// reveal animation, faster than any notification lets us re-hide
+    /// them. The opaque backdrop therefore sits inside NSTitlebarView,
+    /// above every system background layer and directly below the toolbar
+    /// items, so whatever flashes underneath is simply never visible.
+    private func installFullScreenToolbarBackdrop(in toolbarWindow: NSWindow) {
+        guard let contentView = toolbarWindow.contentView,
+              let titlebarView = findSubview(
+                  named: "NSTitlebarView",
+                  in: contentView
+              )
+        else {
+            return
+        }
+
+        if let backdrop = fullScreenToolbarBackdrop,
+           backdrop.superview === titlebarView
+        {
+            return
+        }
+
+        fullScreenToolbarBackdrop?.removeFromSuperview()
+        let backdrop = FullScreenToolbarBackdropView(frame: titlebarView.bounds)
+        backdrop.autoresizingMask = [.width, .height]
+        let toolbarView = titlebarView.subviews.first {
+            String(describing: type(of: $0)) == "NSToolbarView"
+        }
+        if let toolbarView {
+            titlebarView.addSubview(
+                backdrop,
+                positioned: .below,
+                relativeTo: toolbarView
+            )
+        } else {
+            titlebarView.addSubview(backdrop)
+        }
+        fullScreenToolbarBackdrop = backdrop
+    }
+
+    private func findSubview(named className: String, in view: NSView) -> NSView? {
+        for subview in view.subviews {
+            if String(describing: type(of: subview)) == className {
+                return subview
+            }
+            if let match = findSubview(named: className, in: subview) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    private func hideBackdropLayerViews(in view: NSView) {
+        for subview in view.subviews {
+            if !(subview is FullScreenToolbarBackdropView),
+               let layer = subview.layer
+            {
+                let layerClass = String(describing: type(of: layer))
+                // Backdrop layers carry the stale glass recipe; portal
+                // layers can replay hidden sources during the reveal
+                // animation frames.
+                if layerClass == "CABackdropLayer" || layerClass == "CAPortalLayer",
+                   !subview.isHidden
+                {
+                    subview.isHidden = true
+                }
+                // NSTitlebarBackgroundView keeps an opaque white backing
+                // color even in dark mode; it flashes through during the
+                // reveal animation when the glass band above it is gone.
+                if String(describing: type(of: subview))
+                    == "NSTitlebarBackgroundView",
+                    layer.backgroundColor != nil
+                {
+                    layer.backgroundColor = nil
+                    subview.isHidden = true
+                }
+            }
+            hideBackdropLayerViews(in: subview)
+        }
     }
 
     /// The editor keeps unscrolled text below the auto-hidden fullscreen
@@ -479,11 +666,52 @@ private final class WindowLifecycleView: NSView {
         )
     }
 
+    /// AppKit re-stamps its own cached appearance onto the toolbar window
+    /// at the start of every reveal; reacting to move notifications
+    /// repaints one frame too late, which reads as a theme flicker on each
+    /// hover. Correcting from inside the KVO callback happens in the same
+    /// runloop turn as the stamp, before the frame is committed.
+    private func observeToolbarWindowAppearance(_ toolbarWindow: NSWindow) {
+        toolbarAppearanceObservation = toolbarWindow.observe(
+            \.appearance,
+            options: [.new]
+        ) { [weak self] toolbarWindow, _ in
+            MainActor.assumeIsolated {
+                self?.counterToolbarAppearanceStamp(on: toolbarWindow)
+            }
+        }
+        toolbarEffectiveAppearanceObservation = toolbarWindow.observe(
+            \.effectiveAppearance,
+            options: [.new]
+        ) { [weak self] toolbarWindow, _ in
+            MainActor.assumeIsolated {
+                self?.counterToolbarAppearanceStamp(on: toolbarWindow)
+            }
+        }
+    }
+
+    private func counterToolbarAppearanceStamp(on toolbarWindow: NSWindow) {
+        guard !isKickingToolbarAppearance, let window else {
+            return
+        }
+
+        let correct = window.effectiveAppearance
+        guard toolbarWindow.appearance?.name != correct.name else {
+            return
+        }
+
+        toolbarWindow.appearance = correct
+    }
+
     private func stopObservingFullScreenToolbarWindow() {
         strayToolbarCheckWorkItem?.cancel()
         strayToolbarCheckWorkItem = nil
+        toolbarAppearanceObservation = nil
+        toolbarEffectiveAppearanceObservation = nil
         fullScreenToolbarSeparator?.removeFromSuperview()
         fullScreenToolbarSeparator = nil
+        fullScreenToolbarBackdrop?.removeFromSuperview()
+        fullScreenToolbarBackdrop = nil
         guard let observedFullScreenToolbarWindow else {
             return
         }
@@ -497,6 +725,12 @@ private final class WindowLifecycleView: NSView {
     }
 
     @objc private func fullScreenToolbarWindowDidMove(_: Notification) {
+        // AppKit can rebuild parts of the chrome when the reveal state
+        // changes; keep the stale glass band suppressed.
+        if let toolbarWindow = observedFullScreenToolbarWindow {
+            hideSystemToolbarBackdrop(in: toolbarWindow)
+        }
+        performPendingToolbarKickIfHidden()
         reportFullScreenChromeOverlayHeight()
         scheduleStrayToolbarWindowCheck()
     }
@@ -602,6 +836,34 @@ private final class FullScreenToolbarSeparatorView: NSView {
         bounds.fill()
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
+    }
+}
+
+/// Theme-correct background for the fullscreen toolbar band, replacing the
+/// system glass band that keeps its launch-time appearance on Tahoe. Fully
+/// opaque: it also has to mask the system band layers that AppKit re-shows
+/// beneath it during reveal animations.
+private final class FullScreenToolbarBackdropView: NSView {
+    override func draw(_: NSRect) {
+        EditorThemeColors.default
+            .variant(for: effectiveAppearance)
+            .background
+            .setFill()
+        bounds.fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
     override func hitTest(_: NSPoint) -> NSView? {
         nil
     }
@@ -700,9 +962,12 @@ private final class ChromeToolbarController: NSObject, NSToolbarDelegate {
             let item = toolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Controls"
             item.paletteLabel = "Controls"
+            // Sized to fit: a fixed width narrower than the content makes
+            // SwiftUI center the overflow, pushing the trailing button
+            // past the frame and visually against the screen edge.
             item.view = hostingView(
                 EditorTopBarControls(state: session.shellState),
-                width: 112
+                width: nil
             )
             return item
         default:
@@ -730,12 +995,14 @@ private final class ChromeToolbarController: NSObject, NSToolbarDelegate {
 
     private func hostingView(
         _ rootView: some View,
-        width: CGFloat
+        width: CGFloat?
     ) -> NSView {
         let hostingView = NSHostingView(rootView: rootView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            hostingView.widthAnchor.constraint(equalToConstant: width),
+            hostingView.widthAnchor.constraint(
+                equalToConstant: width ?? hostingView.fittingSize.width
+            ),
             hostingView.heightAnchor.constraint(
                 equalToConstant: 36
             ),
