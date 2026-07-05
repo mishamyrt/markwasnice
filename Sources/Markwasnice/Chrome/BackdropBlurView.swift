@@ -90,7 +90,12 @@ final class BackdropBlurView: NSView {
         rootLayer.addSublayer(containerLayer)
     }
 
-    private func makeGradientImage(
+    /// The mask never changes (constant size and stops), and rendering it
+    /// spins up a CIContext — one of the most expensive Core Image
+    /// operations. Render once and share across all instances.
+    private static let gradientMaskImage: CGImage = makeGradientImage(startOffset: 0)
+
+    private static func makeGradientImage(
         width: CGFloat = 100,
         height: CGFloat = 100,
         startOffset: CGFloat
@@ -121,8 +126,7 @@ final class BackdropBlurView: NSView {
 
         blur.setValue(blurRadius, forKey: "inputRadius")
         if !isProminent {
-            let gradientImage = makeGradientImage(startOffset: 0)
-            blur.setValue(gradientImage, forKey: "inputMaskImage")
+            blur.setValue(Self.gradientMaskImage, forKey: "inputMaskImage")
             blur.setValue(true, forKey: "inputNormalizeEdges")
         }
 
