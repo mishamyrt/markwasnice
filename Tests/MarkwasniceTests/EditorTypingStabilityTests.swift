@@ -226,6 +226,26 @@ struct EditorTypingStabilityTests {
         try harness.assertLocalStateMatchesParsedState()
     }
 
+    /// Pressing Enter right after the closing backtick of an inline code
+    /// list item must not stretch the drawn code balloon over the new line:
+    /// the geometric edit translation cannot know a boundary insertion falls
+    /// outside the span, so the local re-derivation has to win within the
+    /// same editing pass.
+    @Test func enterAfterInlineCodeListItemKeepsBalloonOnItsLine() throws {
+        let source = """
+        1. `routers`
+        2. `services`
+        3. `repositories`
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.pressEnter(
+            at: (source as NSString).range(of: "`services`").upperBound
+        )
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
     @Test func deletingInParagraphBeforeCodeBlockKeepsBlockRangesStable() throws {
         let source = """
         Paragraph before
@@ -267,6 +287,18 @@ private final class EditorHarness {
         for character in text {
             editor.textView.insertText(
                 String(character),
+                replacementRange: editor.textView.selectedRange()
+            )
+        }
+    }
+
+    /// Drives the real Enter path: list/quote continuation first (as
+    /// MarkdownTextView.keyDown does), plain newline insertion otherwise.
+    func pressEnter(at location: Int) {
+        editor.textView.setSelectedRange(NSRange(location: location, length: 0))
+        if !editor.markdownTextViewContinueMarkdownPrefix(editor.textView) {
+            editor.textView.insertText(
+                "\n",
                 replacementRange: editor.textView.selectedRange()
             )
         }

@@ -825,7 +825,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         isNormalizingEditedText = true
-        applyStyles(in: range, spans: localStyleSpans(in: range))
+        let localSpans = localStyleSpans(in: range)
+        reconcileInlineCodeDrawRanges(in: range, with: localSpans)
+        applyStyles(in: range, spans: localSpans)
         isNormalizingEditedText = false
     }
 
@@ -1099,6 +1101,36 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         upper = max(lower, min(upper, sourceLength))
         let length = upper - lower
         return length > 0 ? NSRange(location: lower, length: length) : nil
+    }
+
+    /// The edit translation above is geometric and, at a span boundary,
+    /// cannot tell whether inserted text belongs to the code — Enter right
+    /// after a closing backtick would stretch the drawn balloon over the new
+    /// line for a frame. The local scanner re-derives the truth for the
+    /// restyled lines within the same editing pass, so the drawn inline
+    /// ranges there must come from it. Block ranges stay translated: they
+    /// cannot be derived locally (see localStyleSpans) and growing across
+    /// lines is correct for them.
+    private func reconcileInlineCodeDrawRanges(
+        in targetRange: NSRange,
+        with localSpans: [ResolvedMarkdownStyleSpan]
+    ) {
+        guard let targetRange = boundedRange(targetRange) else {
+            return
+        }
+
+        let string = textView.string as NSString
+        let scannedLines = string.lineRange(for: targetRange)
+        let derivedRanges = localSpans
+            .filter { $0.kind == .inlineCode }
+            .map(\.range)
+        let keptRanges = codeInlineDrawRanges.filter {
+            NSIntersectionRange($0, scannedLines).length == 0
+        }
+        codeInlineDrawRanges = (keptRanges + derivedRanges).sorted {
+            ($0.location, $0.length) < ($1.location, $1.length)
+        }
+        pushCodeBackgroundRanges()
     }
 
     private func restyleAllText() {
