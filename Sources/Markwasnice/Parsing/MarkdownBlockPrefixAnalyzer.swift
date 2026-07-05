@@ -1,6 +1,21 @@
 import Foundation
 
 enum MarkdownBlockPrefixAnalyzer {
+    private static let headingPrefixRegex =
+        try! NSRegularExpression(pattern: #"^[ \t]*#{1,6}[ \t]+"#)
+    private static let unorderedListPrefixRegex =
+        try! NSRegularExpression(pattern: #"^[ \t]*[-+*][ \t]+"#)
+    private static let orderedListPrefixRegex =
+        try! NSRegularExpression(pattern: #"^[ \t]*\d+[.)][ \t]+"#)
+    private static let blockQuotePrefixRegex =
+        try! NSRegularExpression(pattern: #"^[ \t]*>"#)
+    private static let thematicBreakRegex =
+        try! NSRegularExpression(pattern: #"^[ \t]*([-+*][ \t]*){3,}$"#)
+    private static let anyFenceRegex =
+        try! NSRegularExpression(pattern: #"^[ \t]*(`{3,}|~{3,}).*$"#)
+    private static let closingFenceRegex =
+        try! NSRegularExpression(pattern: #"^[ \t]*(`{3,}|~{3,})[ \t]*$"#)
+
     static func blockSpan(
         for lineRange: NSRange,
         source: String
@@ -22,23 +37,23 @@ enum MarkdownBlockPrefixAnalyzer {
     ) -> ResolvedMarkdownStyleSpan? {
         let line = (source as NSString).substring(with: lineRange)
 
-        if lineMatches(pattern: #"^[ \t]*#{1,6}[ \t]+"#, line) {
+        if lineMatches(headingPrefixRegex, line) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .heading)
         }
 
-        if lineMatches(pattern: #"^[ \t]*[-+*][ \t]+"#, line) {
+        if lineMatches(unorderedListPrefixRegex, line) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .unorderedList)
         }
 
-        if lineMatches(pattern: #"^[ \t]*\d+[.)][ \t]+"#, line) {
+        if lineMatches(orderedListPrefixRegex, line) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .orderedList)
         }
 
-        if lineMatches(pattern: #"^[ \t]*>"#, line) {
+        if lineMatches(blockQuotePrefixRegex, line) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .blockQuote)
         }
 
-        if lineMatches(pattern: #"^[ \t]*([-+*][ \t]*){3,}$"#, line) {
+        if lineMatches(thematicBreakRegex, line) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .thematicBreak)
         }
 
@@ -67,9 +82,11 @@ enum MarkdownBlockPrefixAnalyzer {
                 length: 0
             ))
 
-            if let marker = closingFenceMarker(for: currentLineRange, in: source),
-               marker.character == openingFence.marker.character,
-               marker.length >= openingFence.marker.length
+            if let marker = fenceMarker(
+                for: currentLineRange, in: source, matching: closingFenceRegex
+            ),
+                marker.character == openingFence.marker.character,
+                marker.length >= openingFence.marker.length
             {
                 return NSRange(
                     location: openingFence.location,
@@ -102,7 +119,9 @@ enum MarkdownBlockPrefixAnalyzer {
                 break
             }
 
-            guard let marker = anyFenceMarker(for: lineRange, in: source) else {
+            guard let marker = fenceMarker(
+                for: lineRange, in: source, matching: anyFenceRegex
+            ) else {
                 continue
             }
 
@@ -120,40 +139,16 @@ enum MarkdownBlockPrefixAnalyzer {
         return activeFence
     }
 
-    private static func anyFenceMarker(
+    private static func fenceMarker(
         for lineRange: NSRange,
-        in source: String
+        in source: String,
+        matching regex: NSRegularExpression
     ) -> FenceMarker? {
         let line = (source as NSString).substring(with: lineRange)
-        guard let regex = try? NSRegularExpression(pattern: #"^[ \t]*(`{3,}|~{3,}).*$"#),
-              let match = regex.firstMatch(
-                  in: line,
-                  range: NSRange(location: 0, length: (line as NSString).length)
-              ),
-              match.numberOfRanges >= 2
-        else {
-            return nil
-        }
-
-        let markerRange = match.range(at: 1)
-        let marker = (line as NSString).substring(with: markerRange)
-        return FenceMarker(
-            character: marker.hasPrefix("`") ? .backtick : .tilde,
-            length: marker.utf16.count
-        )
-    }
-
-    private static func closingFenceMarker(
-        for lineRange: NSRange,
-        in source: String
-    ) -> FenceMarker? {
-        let line = (source as NSString).substring(with: lineRange)
-        guard let regex =
-            try? NSRegularExpression(pattern: #"^[ \t]*(`{3,}|~{3,})[ \t]*$"#),
-            let match = regex.firstMatch(
-                in: line,
-                range: NSRange(location: 0, length: (line as NSString).length)
-            ),
+        guard let match = regex.firstMatch(
+            in: line,
+            range: NSRange(location: 0, length: (line as NSString).length)
+        ),
             match.numberOfRanges >= 2
         else {
             return nil
@@ -167,11 +162,11 @@ enum MarkdownBlockPrefixAnalyzer {
         )
     }
 
-    private static func lineMatches(pattern: String, _ line: String) -> Bool {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return false
-        }
-        return regex.firstMatch(
+    private static func lineMatches(
+        _ regex: NSRegularExpression,
+        _ line: String
+    ) -> Bool {
+        regex.firstMatch(
             in: line,
             range: NSRange(location: 0, length: (line as NSString).length)
         ) != nil

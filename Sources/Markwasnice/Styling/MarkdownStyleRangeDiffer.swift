@@ -128,9 +128,23 @@ enum MarkdownStyleRangeDiffer {
         let string = source as NSString
         var result: [Int: Set<SpanSignature>] = [:]
 
-        for (lineIndex, lineRange) in lineRanges.enumerated() {
-            var signature: Set<SpanSignature> = []
-            for span in spans {
+        for span in spans {
+            guard span.range.length > 0 else {
+                continue
+            }
+
+            let spanUpperBound = NSMaxRange(span.range)
+            let firstLineIndex = lineIndex(
+                containing: span.range.location,
+                in: lineRanges
+            )
+
+            for lineIndex in firstLineIndex ..< lineRanges.count {
+                let lineRange = lineRanges[lineIndex]
+                if lineRange.location >= spanUpperBound {
+                    break
+                }
+
                 let intersection = NSIntersectionRange(span.range, lineRange)
                 guard intersection.length > 0 else {
                     continue
@@ -145,7 +159,7 @@ enum MarkdownStyleRangeDiffer {
                     continue
                 }
 
-                signature.insert(SpanSignature(
+                result[lineIndex, default: []].insert(SpanSignature(
                     kind: span.kind,
                     relativeRange: NSRange(
                         location: intersection.location - lineRange.location,
@@ -153,13 +167,29 @@ enum MarkdownStyleRangeDiffer {
                     )
                 ))
             }
-
-            if !signature.isEmpty {
-                result[lineIndex] = signature
-            }
         }
 
         return result
+    }
+
+    /// Index of the first line whose end lies beyond the given location —
+    /// the line containing it, since line ranges are sorted and contiguous.
+    private static func lineIndex(
+        containing location: Int,
+        in lineRanges: [NSRange]
+    ) -> Int {
+        var low = 0
+        var high = lineRanges.count
+        while low < high {
+            let mid = (low + high) / 2
+            if NSMaxRange(lineRanges[mid]) <= location {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+
+        return low
     }
 
     private static func lengthTrimmingTrailingNewline(

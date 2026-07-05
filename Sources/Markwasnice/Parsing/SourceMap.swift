@@ -28,7 +28,7 @@ struct SourceMap {
         }
 
         let line = lines[location.line - 1]
-        guard let offsetInLine = line.utf16OffsetByUTF8Column[location.column] else {
+        guard let offsetInLine = line.utf16Offset(forUTF8Column: location.column) else {
             return nil
         }
 
@@ -42,16 +42,16 @@ struct SourceMap {
 
         var index = text.startIndex
         while index < text.endIndex {
-            if text[index].isNewline {
-                let lineText = text[lineStartIndex ..< index]
-                result.append(Line(
-                    text: lineText,
+            let character = text[index]
+            if character.isNewline {
+                let line = Line(
+                    text: text[lineStartIndex ..< index],
                     utf16StartOffset: lineUTF16StartOffset
-                ))
+                )
+                result.append(line)
 
-                let nextIndex = text.index(after: index)
-                lineUTF16StartOffset += text[lineStartIndex ..< nextIndex].utf16.count
-                lineStartIndex = nextIndex
+                lineUTF16StartOffset += line.utf16Length + character.utf16.count
+                lineStartIndex = text.index(after: index)
             }
 
             index = text.index(after: index)
@@ -67,21 +67,50 @@ struct SourceMap {
 
 private struct Line {
     let utf16StartOffset: Int
-    let utf16OffsetByUTF8Column: [Int: Int]
+    let utf16Length: Int
+
+    private let mapping: Mapping
+
+    private enum Mapping {
+        // An all-ASCII line maps one UTF-8 byte to one UTF-16 unit, so
+        // offsets follow from the column with no per-character table.
+        case ascii
+        case table([Int: Int])
+    }
 
     init(text: Substring, utf16StartOffset: Int) {
         self.utf16StartOffset = utf16StartOffset
+
+        if text.allSatisfy(\.isASCII) {
+            utf16Length = text.utf8.count
+            mapping = .ascii
+            return
+        }
 
         var offsets = [1: 0]
         var utf8Column = 1
         var utf16Offset = 0
 
         for character in text {
-            utf8Column += String(character).utf8.count
-            utf16Offset += String(character).utf16.count
+            utf8Column += character.utf8.count
+            utf16Offset += character.utf16.count
             offsets[utf8Column] = utf16Offset
         }
 
-        utf16OffsetByUTF8Column = offsets
+        utf16Length = utf16Offset
+        mapping = .table(offsets)
+    }
+
+    func utf16Offset(forUTF8Column column: Int) -> Int? {
+        switch mapping {
+        case .ascii:
+            guard column >= 1, column <= utf16Length + 1 else {
+                return nil
+            }
+
+            return column - 1
+        case let .table(offsets):
+            return offsets[column]
+        }
     }
 }

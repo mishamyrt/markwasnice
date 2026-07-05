@@ -1514,9 +1514,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         case .link, .image:
             break
         case .blockQuote:
-            applyLineMarkerStyle(pattern: "^\\s*(>)", range: range, markerCaptureGroup: 1)
+            applyLineMarkerStyle(
+                Self.blockQuoteMarkerRegex,
+                range: range,
+                markerCaptureGroup: 1
+            )
         case .orderedList, .unorderedList:
-            applyLineMarkerStyle(pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+", range: range)
+            applyLineMarkerStyle(Self.listMarkerRegex, range: range)
         case .thematicBreak:
             textStorage.addAttribute(
                 .foregroundColor,
@@ -1526,19 +1530,37 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
     }
 
+    private static let headingMarkerRegex = try! NSRegularExpression(
+        pattern: #"^[ \t]*(#{1,6}[ \t]+)"#,
+        options: [.anchorsMatchLines]
+    )
+    private static let blockQuoteMarkerRegex = try! NSRegularExpression(
+        pattern: "^\\s*(>)",
+        options: [.anchorsMatchLines]
+    )
+    private static let listMarkerRegex = try! NSRegularExpression(
+        pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+",
+        options: [.anchorsMatchLines]
+    )
+    private static let listContinuationRegex =
+        try! NSRegularExpression(pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(.+)$")
+    private static let emptyListPrefixRegex =
+        try! NSRegularExpression(pattern: "^[ \\t]*(?:[-+*]|\\d+[.)])\\s*$")
+    private static let emptyQuotePrefixRegex =
+        try! NSRegularExpression(pattern: "^[ \\t]*>\\s*$")
+    private static let quoteContinuationRegex =
+        try! NSRegularExpression(pattern: "^([ \\t]*)>")
+    private static let orderedMarkerRegex =
+        try! NSRegularExpression(pattern: "^(\\d+)([.)])$")
+
     private func applyHeadingStyle(range: NSRange) {
-        guard let textStorage = textView.textStorage,
-              let expression = try? NSRegularExpression(
-                  pattern: #"^[ \t]*(#{1,6}[ \t]+)"#,
-                  options: [.anchorsMatchLines]
-              )
-        else {
+        guard let textStorage = textView.textStorage else {
             return
         }
 
         let source = textStorage.string
         let headingSearchRange = (source as NSString).lineRange(for: range)
-        expression
+        Self.headingMarkerRegex
             .enumerateMatches(
                 in: source,
                 range: headingSearchRange
@@ -1559,10 +1581,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
                 let markerRange = match.range(at: 1)
                 let marker = (source as NSString).substring(with: markerRange)
-                let markerWidth = (marker as NSString).size(withAttributes: [
-                    .font: boldFont,
-                    .kern: baseLetterSpacing,
-                ]).width
+                let markerWidth = headingMarkerWidth(marker)
                 let paragraphStyle = baseParagraphStyle()
                 if !MarkdownEditorDiagnostics.disableHeadingOutdent,
                    !MarkdownEditorDiagnostics.disableParagraphStyle
@@ -1581,6 +1600,27 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                     )
                 }
             }
+    }
+
+    private var headingMarkerWidthCache: [String: CGFloat] = [:]
+    private var headingMarkerWidthCachePointSize: CGFloat = 0
+
+    private func headingMarkerWidth(_ marker: String) -> CGFloat {
+        if headingMarkerWidthCachePointSize != basePointSize {
+            headingMarkerWidthCache.removeAll(keepingCapacity: true)
+            headingMarkerWidthCachePointSize = basePointSize
+        }
+
+        if let cached = headingMarkerWidthCache[marker] {
+            return cached
+        }
+
+        let width = (marker as NSString).size(withAttributes: [
+            .font: boldFont,
+            .kern: baseLetterSpacing,
+        ]).width
+        headingMarkerWidthCache[marker] = width
+        return width
     }
 
     private func addFontTraits(_ traits: NSFontTraitMask, range: NSRange) {
@@ -1610,16 +1650,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     private func applyLineMarkerStyle(
-        pattern: String,
+        _ expression: NSRegularExpression,
         range: NSRange,
         markerCaptureGroup: Int? = nil
     ) {
-        guard let textStorage = textView.textStorage,
-              let expression = try? NSRegularExpression(
-                  pattern: pattern,
-                  options: [.anchorsMatchLines]
-              )
-        else {
+        guard let textStorage = textView.textStorage else {
             return
         }
 
@@ -1804,13 +1839,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             length: max(0, location - lineRange.location)
         )
         let linePrefix = nsString.substring(with: cursorRange)
-        guard let expression = try? NSRegularExpression(
-            pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(.+)$"
+        guard let match = Self.listContinuationRegex.firstMatch(
+            in: linePrefix,
+            range: NSRange(location: 0, length: (linePrefix as NSString).length)
         ),
-            let match = expression.firstMatch(
-                in: linePrefix,
-                range: NSRange(location: 0, length: (linePrefix as NSString).length)
-            ),
             match.numberOfRanges == 4
         else {
             return nil
@@ -1855,17 +1887,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     private func lineMatchesEmptyMarkdownPrefix(_ line: String) -> Bool {
         let range = NSRange(location: 0, length: (line as NSString).length)
-        let patterns = [
-            "^[ \\t]*(?:[-+*]|\\d+[.)])\\s*$",
-            "^[ \\t]*>\\s*$",
-        ]
-
-        return patterns.contains { pattern in
-            guard let expression = try? NSRegularExpression(pattern: pattern) else {
-                return false
-            }
-
-            return expression.firstMatch(in: line, range: range) != nil
+        let expressions = [Self.emptyListPrefixRegex, Self.emptyQuotePrefixRegex]
+        return expressions.contains { expression in
+            expression.firstMatch(in: line, range: range) != nil
         }
     }
 
@@ -1882,12 +1906,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             length: max(0, location - lineRange.location)
         )
         let linePrefix = nsString.substring(with: cursorRange)
-        guard let expression = try? NSRegularExpression(pattern: "^([ \\t]*)>"),
-              let match = expression.firstMatch(
-                  in: linePrefix,
-                  range: NSRange(location: 0, length: (linePrefix as NSString).length)
-              ),
-              match.numberOfRanges == 2
+        guard let match = Self.quoteContinuationRegex.firstMatch(
+            in: linePrefix,
+            range: NSRange(location: 0, length: (linePrefix as NSString).length)
+        ),
+            match.numberOfRanges == 2
         else {
             return nil
         }
@@ -1898,13 +1921,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     private func nextListMarker(after marker: String) -> String {
-        guard let expression = try? NSRegularExpression(pattern: "^(\\d+)([.)])$"),
-              let match = expression.firstMatch(
-                  in: marker,
-                  range: NSRange(location: 0, length: (marker as NSString).length)
-              ),
-              match.numberOfRanges == 3,
-              let number = Int((marker as NSString).substring(with: match.range(at: 1)))
+        guard let match = Self.orderedMarkerRegex.firstMatch(
+            in: marker,
+            range: NSRange(location: 0, length: (marker as NSString).length)
+        ),
+            match.numberOfRanges == 3,
+            let number = Int((marker as NSString).substring(with: match.range(at: 1)))
         else {
             return marker
         }
