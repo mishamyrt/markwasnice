@@ -101,9 +101,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var pendingFullStyleRanges: [NSRange] = []
     private var isFocusModeEnabled = false
     private var focusMode: EditorFocusMode = .focus
-    private var previewView: MarkdownPreviewView?
+    private lazy var previewPresenter = makePreviewPresenter()
     private var previewHorizontalInset: CGFloat = 6
-    private(set) var isPreviewActive = false
     private var isFocusTemporarilySuppressed = false
     private var activeFocusParagraphRange: NSRange?
     private var focusScrollAdjustmentCount = 0
@@ -111,9 +110,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var isAdjustingFocusScroll: Bool {
         focusScrollAdjustmentCount > 0
     }
-
-    private static let previewTransitionDuration: TimeInterval = 0.22
-    private static let previewTransitionScale: CGFloat = 1.02
 
     private static let largeEditThreshold = 8000
     private static let immediateStyleThreshold = 20000
@@ -171,7 +167,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         super.viewDidChangeEffectiveAppearance()
         applyEditorColors()
         restyleAllText()
-        refreshPreviewIfActive()
+        previewPresenter.refreshIfActive()
     }
 
     func setString(_ string: String, clearsUndo: Bool) {
@@ -187,20 +183,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let boundedLocation = min(selectedRange.location, (string as NSString).length)
         textView.setSelectedRange(NSRange(location: boundedLocation, length: 0))
         restyleAllText()
-        refreshPreviewIfActive()
+        previewPresenter.refreshIfActive()
     }
 
     func setPreviewActive(_ isActive: Bool) {
-        guard isPreviewActive != isActive else {
-            return
-        }
-
-        isPreviewActive = isActive
-        if isActive {
-            showPreview()
-        } else {
-            hidePreview()
-        }
+        previewPresenter.setActive(isActive)
     }
 
     func focus() {
@@ -316,7 +303,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         currentStyleSpans = spans
         _ = updateTextContainerInset()
         restyleAllText()
-        refreshPreviewIfActive()
+        previewPresenter.refreshIfActive()
     }
 
     func updateWindowWidthFontScale(
@@ -333,7 +320,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             restyleAllText()
         }
         if didChangeScale {
-            refreshPreviewIfActive()
+            previewPresenter.refreshIfActive()
         }
     }
 
@@ -361,7 +348,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private func updateScrollerInsets() {
         let topInset = isChromeVisible ? textTopPadding : 0
         setScrollerTopInset(topInset)
-        previewView?.setScrollerTopInset(topInset)
+        previewPresenter.setScrollerTopInset(topInset)
     }
 
     func setFocusModeEnabled(_ isEnabled: Bool) {
@@ -394,83 +381,35 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     // MARK: Preview
 
-    private func showPreview() {
-        let preview = ensurePreviewView()
-        renderPreviewContent(into: preview)
-        preview.isHidden = false
-        preview.scrollToFraction(editorScrollFraction)
-        preview.focus()
-
-        preview.alphaValue = 0
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.previewTransitionDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            preview.animator().alphaValue = 1
-            scrollView.animator().alphaValue = 0
-        }
-        animatePreviewScale(
-            on: preview,
-            from: Self.previewTransitionScale,
-            to: 1
+    private func makePreviewPresenter() -> MarkdownPreviewPresenter {
+        let presenter = MarkdownPreviewPresenter(
+            container: self,
+            editorScrollView: scrollView
         )
-    }
-
-    private func hidePreview() {
-        focus()
-        guard let preview = previewView, !preview.isHidden else {
-            scrollView.alphaValue = 1
-            return
+        presenter.renderContent = { [weak self] preview in
+            self?.renderPreviewContent(into: preview)
         }
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.previewTransitionDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            preview.animator().alphaValue = 0
-            scrollView.animator().alphaValue = 1
-        } completionHandler: { [weak self] in
-            guard let self, !isPreviewActive, let previewView else {
-                return
-            }
-
-            previewView.isHidden = true
-            previewView.layer?.transform = CATransform3DIdentity
+        presenter.editorScrollFraction = { [weak self] in
+            self?.editorScrollFraction ?? 0
         }
-        animatePreviewScale(
-            on: preview,
-            from: 1,
-            to: Self.previewTransitionScale
-        )
-    }
-
-    private func ensurePreviewView() -> MarkdownPreviewView {
-        if let previewView {
-            return previewView
+        presenter.focusEditor = { [weak self] in
+            self?.focus()
         }
-
-        let preview = MarkdownPreviewView()
-        preview.translatesAutoresizingMaskIntoConstraints = false
-        preview.isHidden = true
-        preview.onScroll = { [weak self] in
+        presenter.onScroll = { [weak self] in
             guard let self else {
                 return
             }
 
             delegate?.markdownEditorViewDidScroll(self)
         }
-        preview.onExitRequested = { [weak self] in
+        presenter.onExitRequested = { [weak self] in
             self?.onPreviewExitRequested?()
         }
-        addSubview(preview)
-        NSLayoutConstraint.activate([
-            preview.leadingAnchor.constraint(equalTo: leadingAnchor),
-            preview.trailingAnchor.constraint(equalTo: trailingAnchor),
-            preview.topAnchor.constraint(equalTo: topAnchor),
-            preview.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        previewView = preview
-        pushPreviewInsets()
-        updateScrollerInsets()
-        return preview
+        presenter.onPreviewCreated = { [weak self] _ in
+            self?.pushPreviewInsets()
+            self?.updateScrollerInsets()
+        }
+        return presenter
     }
 
     private func renderPreviewContent(into preview: MarkdownPreviewView) {
@@ -481,18 +420,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         preview.setContent(renderer.render(textView.string), colors: colors)
     }
 
-    private func refreshPreviewIfActive() {
-        guard isPreviewActive, let previewView, !previewView.isHidden else {
-            return
-        }
-
-        let fraction = previewView.scrollFraction
-        renderPreviewContent(into: previewView)
-        previewView.scrollToFraction(fraction)
-    }
-
     private func pushPreviewInsets() {
-        previewView?.setInsets(
+        previewPresenter.setInsets(
             top: textTopPadding,
             bottom: textBottomPadding,
             horizontal: previewHorizontalInset
@@ -506,35 +435,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         return min(max(clipView.bounds.origin.y / maxOffset, 0), 1)
-    }
-
-    /// Scales around the view center regardless of the layer's anchor point,
-    /// so AppKit's own layer geometry management stays untouched at rest.
-    private func previewScaleTransform(
-        _ scale: CGFloat,
-        bounds: NSRect
-    ) -> CATransform3D {
-        var transform = CATransform3DMakeTranslation(bounds.midX, bounds.midY, 0)
-        transform = CATransform3DScale(transform, scale, scale, 1)
-        return CATransform3DTranslate(transform, -bounds.midX, -bounds.midY, 0)
-    }
-
-    private func animatePreviewScale(
-        on preview: MarkdownPreviewView,
-        from: CGFloat,
-        to: CGFloat
-    ) {
-        guard let layer = preview.layer else {
-            return
-        }
-
-        let animation = CABasicAnimation(keyPath: "transform")
-        animation.fromValue = previewScaleTransform(from, bounds: preview.bounds)
-        animation.toValue = previewScaleTransform(to, bounds: preview.bounds)
-        animation.duration = Self.previewTransitionDuration
-        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        layer.transform = previewScaleTransform(to, bounds: preview.bounds)
-        layer.add(animation, forKey: "previewScale")
     }
 
     func setSearchMatches(_ ranges: [NSRange], selectedIndex: Int?) {
@@ -678,23 +578,18 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool {
-        guard textView.selectedRange().length == 0 else {
+        guard let edit = MarkdownContinuationCommand.edit(
+            in: textView.string,
+            selectedRange: textView.selectedRange()
+        ) else {
             return false
         }
 
-        let context = caretLineContext()
-        if exitEmptyMarkdownPrefix(for: context) {
-            return true
-        }
-
-        guard let continuation = listContinuation(for: context)
-            ?? quoteContinuation(for: context)
-        else {
-            return false
-        }
-
-        replaceSelectedText(with: continuation)
-        return true
+        return replaceText(
+            in: edit.replacementRange,
+            with: edit.replacementString,
+            selectedRange: edit.selectedRange
+        )
     }
 
     func markdownTextView(
@@ -1601,17 +1496,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+",
         options: [.anchorsMatchLines]
     )
-    private static let listContinuationRegex =
-        try! NSRegularExpression(pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(.+)$")
-    private static let emptyListPrefixRegex =
-        try! NSRegularExpression(pattern: "^[ \\t]*(?:[-+*]|\\d+[.)])\\s*$")
-    private static let emptyQuotePrefixRegex =
-        try! NSRegularExpression(pattern: "^[ \\t]*>\\s*$")
-    private static let quoteContinuationRegex =
-        try! NSRegularExpression(pattern: "^([ \\t]*)>")
-    private static let orderedMarkerRegex =
-        try! NSRegularExpression(pattern: "^(\\d+)([.)])$")
-
     private func applyHeadingStyle(range: NSRange) {
         guard let textStorage = textView.textStorage else {
             return
@@ -1883,110 +1767,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 length: (selectedText as NSString).length
             )
         )
-    }
-
-    /// The caret's line and the text from the line start up to the caret.
-    /// Anchored at `location - 1` so a caret sitting right after a newline
-    /// resolves to the line it just finished, not the empty next one.
-    private struct CaretLineContext {
-        let lineRange: NSRange
-        let caretLocation: Int
-        let prefix: String
-    }
-
-    private func caretLineContext() -> CaretLineContext {
-        let nsString = textView.string as NSString
-        let location = textView.selectedRange().location
-        let lineLocation = location > 0 ? location - 1 : 0
-        let lineRange = nsString.lineRange(for: NSRange(
-            location: lineLocation,
-            length: 0
-        ))
-        let prefixRange = NSRange(
-            location: lineRange.location,
-            length: max(0, location - lineRange.location)
-        )
-        return CaretLineContext(
-            lineRange: lineRange,
-            caretLocation: location,
-            prefix: nsString.substring(with: prefixRange)
-        )
-    }
-
-    private func listContinuation(for context: CaretLineContext) -> String? {
-        let prefix = context.prefix as NSString
-        guard let match = Self.listContinuationRegex.firstMatch(
-            in: context.prefix,
-            range: NSRange(location: 0, length: prefix.length)
-        ),
-            match.numberOfRanges == 4
-        else {
-            return nil
-        }
-
-        let indentation = prefix.substring(with: match.range(at: 1))
-        let marker = prefix.substring(with: match.range(at: 2))
-        return "\n\(indentation)\(nextListMarker(after: marker)) "
-    }
-
-    private func exitEmptyMarkdownPrefix(for context: CaretLineContext) -> Bool {
-        let nsString = textView.string as NSString
-        let lineText = nsString.substring(with: context.lineRange)
-            .trimmingCharacters(in: .newlines)
-        guard lineMatchesEmptyMarkdownPrefix(lineText) else {
-            return false
-        }
-
-        let lineRange = context.lineRange
-        let replacementRange = NSRange(
-            location: lineRange.location,
-            length: NSMaxRange(lineRange) > context.caretLocation
-                ? lineRange.length
-                : (context.prefix as NSString).length
-        )
-        return replaceText(
-            in: replacementRange,
-            with: "\n",
-            selectedRange: NSRange(location: replacementRange.location + 1, length: 0)
-        )
-    }
-
-    private func lineMatchesEmptyMarkdownPrefix(_ line: String) -> Bool {
-        let range = NSRange(location: 0, length: (line as NSString).length)
-        let expressions = [Self.emptyListPrefixRegex, Self.emptyQuotePrefixRegex]
-        return expressions.contains { expression in
-            expression.firstMatch(in: line, range: range) != nil
-        }
-    }
-
-    private func quoteContinuation(for context: CaretLineContext) -> String? {
-        let prefix = context.prefix as NSString
-        guard let match = Self.quoteContinuationRegex.firstMatch(
-            in: context.prefix,
-            range: NSRange(location: 0, length: prefix.length)
-        ),
-            match.numberOfRanges == 2
-        else {
-            return nil
-        }
-
-        let indentation = prefix.substring(with: match.range(at: 1))
-        return "\n\(indentation)> "
-    }
-
-    private func nextListMarker(after marker: String) -> String {
-        guard let match = Self.orderedMarkerRegex.firstMatch(
-            in: marker,
-            range: NSRange(location: 0, length: (marker as NSString).length)
-        ),
-            match.numberOfRanges == 3,
-            let number = Int((marker as NSString).substring(with: match.range(at: 1)))
-        else {
-            return marker
-        }
-
-        let suffix = (marker as NSString).substring(with: match.range(at: 2))
-        return "\(number + 1)\(suffix)"
     }
 
     private func pasteboardURLString() -> String? {
