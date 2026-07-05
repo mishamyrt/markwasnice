@@ -791,6 +791,20 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             sourceLength: textStorage.length
         )
 
+        // Keep the active focus paragraph glued to the text the same way:
+        // the dimming applied below (and the paragraph-delta restyle on the
+        // next selection change) subtract this range, and a stale one would
+        // dim part of the paragraph being typed in.
+        if let activeRange = activeFocusParagraphRange {
+            activeFocusParagraphRange = editAdjustedRange(
+                activeRange,
+                editLocation: editedRange.location,
+                changeInLength: changeInLength,
+                editedLength: editedRange.length,
+                sourceLength: textStorage.length
+            )
+        }
+
         let location = min(editedRange.location, textStorage.length)
         let length = max(0, min(editedRange.length, textStorage.length - location))
         let string = textStorage.string as NSString
@@ -1009,8 +1023,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        if isFocusModeEnabled, isFocusTemporarilySuppressed {
-            restyleAllText()
+        // While focus dimming is suppressed for a user scroll, newly revealed
+        // content may still carry dimming on long documents — the undim pass
+        // at suppression start runs chunked in the background there. Restyle
+        // just the viewport; short documents were already fully restyled
+        // synchronously when the suppression began.
+        if isFocusModeEnabled, isFocusTemporarilySuppressed, focusMode == .focus,
+           let textStorage = textView.textStorage,
+           textStorage.length > Self.immediateStyleThreshold
+        {
+            applyVisibleStyles(spans: currentStyleSpans)
         }
 
         // A user scroll moves only the bounds origin; window resizes (zoom,
@@ -1058,7 +1080,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         sourceLength: Int
     ) {
         func adjusted(_ range: NSRange) -> NSRange? {
-            adjustedCodeRange(
+            editAdjustedRange(
                 range,
                 editLocation: editedRange.location,
                 changeInLength: changeInLength,
@@ -1073,7 +1095,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         pushCodeBackgroundRanges()
     }
 
-    private func adjustedCodeRange(
+    /// Shift/grow a range across an edit: content before the edit stays put,
+    /// content after shifts by the delta, and a range whose boundary touches
+    /// the edit absorbs it (typing at the edge of code or of the focused
+    /// paragraph extends them).
+    private func editAdjustedRange(
         _ range: NSRange,
         editLocation: Int,
         changeInLength: Int,
@@ -2219,12 +2245,42 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         let previousRange = activeFocusParagraphRange
         activeFocusParagraphRange = activeParagraphRangeAtSelection()
-        if previousRange?.location != activeFocusParagraphRange?.location {
-            restyleAllText()
+        // Dimming only differs in the paragraph that lost the caret and the
+        // one that gained it; everything else keeps its state. Restyling the
+        // whole document here would rewrite all attributes on every Enter
+        // press and cross-paragraph caret move.
+        if focusMode == .focus,
+           !isFocusTemporarilySuppressed,
+           previousRange?.location != activeFocusParagraphRange?.location
+        {
+            restyleFocusDelta(from: previousRange, to: activeFocusParagraphRange)
         }
 
         if !isFocusTemporarilySuppressed {
             centerCaretLineInVisibleArea(animated: true)
+        }
+    }
+
+    private func restyleFocusDelta(
+        from previousRange: NSRange?,
+        to activeRange: NSRange?
+    ) {
+        var deltaRanges: [NSRange] = []
+        if let previousRange {
+            deltaRanges.append(previousRange)
+        }
+        if let activeRange, activeRange != previousRange {
+            deltaRanges.append(activeRange)
+        }
+
+        for deltaRange in deltaRanges {
+            guard let range = boundedRange(lineNormalized(deltaRange)),
+                  range.length > 0
+            else {
+                continue
+            }
+
+            applyStyles(in: range, spans: spansForRange(range, from: currentStyleSpans))
         }
     }
 
@@ -2326,8 +2382,20 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
+        guard isFocusTemporarilySuppressed else {
+            updateFocusForSelection()
+            return
+        }
+
         isFocusTemporarilySuppressed = false
-        updateFocusForSelection()
+        activeFocusParagraphRange = activeParagraphRangeAtSelection()
+        // Lifting the scroll suppression must re-dim the whole document —
+        // the paragraph-delta restyle in updateFocusForSelection cannot know
+        // how much of it the suppression undimmed.
+        if focusMode == .focus {
+            restyleAllText()
+        }
+        centerCaretLineInVisibleArea(animated: true)
     }
 
     private func temporarilySuppressFocusForUserScroll(event: NSEvent) {
@@ -2342,7 +2410,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         isFocusTemporarilySuppressed = true
-        restyleAllText()
+        // Only focus mode dims text; typewriter mode has nothing to undim.
+        if focusMode == .focus {
+            restyleAllText()
+        }
     }
 
     private func subtract(_ excludedRange: NSRange, from range: NSRange) -> [NSRange] {

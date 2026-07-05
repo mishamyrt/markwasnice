@@ -226,6 +226,70 @@ struct EditorTypingStabilityTests {
         try harness.assertLocalStateMatchesParsedState()
     }
 
+    /// Focus dimming is updated with a paragraph-delta restyle instead of a
+    /// whole-document one; moving the caret must dim the paragraph that lost
+    /// it and undim the one that gained it, leaving the rest untouched.
+    @Test func focusModeCaretMovesKeepDimmingConsistent() throws {
+        let source = """
+        First paragraph line
+
+        Second paragraph line
+
+        Third paragraph line
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+        harness.editor.setFocusModeEnabled(true)
+
+        let string = source as NSString
+        let first = string.range(of: "First").location
+        let second = string.range(of: "Second").location
+        let third = string.range(of: "Third").location
+
+        harness.moveCaret(to: second)
+        #expect(harness.isDimmed(at: first))
+        #expect(!harness.isDimmed(at: second))
+        #expect(harness.isDimmed(at: third))
+
+        harness.moveCaret(to: third)
+        #expect(harness.isDimmed(at: first))
+        #expect(
+            harness.isDimmed(at: second),
+            "the paragraph that lost the caret must be re-dimmed"
+        )
+        #expect(!harness.isDimmed(at: third))
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    /// Enter at the end of the focused paragraph moves the focus to the new
+    /// line; the paragraph left behind must be dimmed even though the edit
+    /// shifted the stored active range.
+    @Test func focusModeEnterDimsParagraphLeftBehind() throws {
+        let source = """
+        First paragraph line
+
+        Second paragraph line
+        """
+        let harness = EditorHarness(source: source, settings: Self.settings)
+        harness.editor.setFocusModeEnabled(true)
+
+        let string = source as NSString
+        let first = string.range(of: "First").location
+        let secondRange = string.range(of: "Second paragraph line")
+        harness.moveCaret(to: NSMaxRange(secondRange))
+        #expect(!harness.isDimmed(at: secondRange.location))
+
+        harness.pressEnter(at: NSMaxRange(secondRange))
+
+        #expect(harness.isDimmed(at: first))
+        #expect(
+            harness.isDimmed(at: secondRange.location),
+            "the paragraph left behind by Enter must be dimmed"
+        )
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
     /// Pressing Enter right after the closing backtick of an inline code
     /// list item must not stretch the drawn code balloon over the new line:
     /// the geometric edit translation cannot know a boundary insertion falls
@@ -290,6 +354,25 @@ private final class EditorHarness {
                 replacementRange: editor.textView.selectedRange()
             )
         }
+    }
+
+    func moveCaret(to location: Int) {
+        editor.textView.setSelectedRange(NSRange(location: location, length: 0))
+    }
+
+    func isDimmed(at location: Int) -> Bool {
+        guard let storage = editor.textView.textStorage,
+              location < storage.length,
+              let color = storage.attribute(
+                  .foregroundColor,
+                  at: location,
+                  effectiveRange: nil
+              ) as? NSColor
+        else {
+            return false
+        }
+
+        return color.alphaComponent < 0.9
     }
 
     /// Drives the real Enter path: list/quote continuation first (as
