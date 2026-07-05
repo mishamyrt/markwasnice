@@ -61,9 +61,12 @@ struct TypingOverSelectionFuzzTests {
                     frame: NSRect(x: 0, y: 0, width: 800, height: 600)
                 )
                 editor.setString(document, clearsUndo: true)
-                let parse = MarkdownParseService.parse(
+                guard let parse = MarkdownParseService.parse(
                     text: editor.string, version: 1, previous: nil
-                )
+                ) else {
+                    Issue.record("parse returned nil outside a cancelled task")
+                    return
+                }
                 editor.applyParsedStyles(
                     parse.spans, dirtyRanges: parse.dirtyRanges
                 )

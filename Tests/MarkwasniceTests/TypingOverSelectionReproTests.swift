@@ -41,9 +41,12 @@ struct TypingOverSelectionReproTests {
             frame: NSRect(x: 0, y: 0, width: 800, height: 600)
         )
         editor.setString(source, clearsUndo: true)
-        let parse = MarkdownParseService.parse(
+        guard let parse = MarkdownParseService.parse(
             text: source, version: 1, previous: nil
-        )
+        ) else {
+            Issue.record("parse returned nil outside a cancelled task")
+            return
+        }
         editor.applyParsedStyles(parse.spans, dirtyRanges: parse.dirtyRanges)
 
         let selection = (source as NSString).range(of: "**world** and")
@@ -71,9 +74,12 @@ struct TypingOverSelectionReproTests {
         window.makeFirstResponder(editor.textView)
 
         editor.setString("Hello world selection test", clearsUndo: true)
-        let parse = MarkdownParseService.parse(
+        guard let parse = MarkdownParseService.parse(
             text: editor.string, version: 1, previous: nil
-        )
+        ) else {
+            Issue.record("parse returned nil outside a cancelled task")
+            return
+        }
         editor.applyParsedStyles(parse.spans, dirtyRanges: parse.dirtyRanges)
         editor.textView.setSelectedRange(NSRange(location: 0, length: 5))
 

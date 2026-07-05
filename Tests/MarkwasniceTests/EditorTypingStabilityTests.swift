@@ -430,11 +430,15 @@ private final class EditorHarness {
 
     private func applyFreshParse() {
         version += 1
-        let result = MarkdownParseService.parse(
+        guard let result = MarkdownParseService.parse(
             text: editor.string,
             version: version,
             previous: previousParse
-        )
+        ) else {
+            Issue.record("parse returned nil outside a cancelled task")
+            return
+        }
+
         previousParse = result
         editor.applyParsedStyles(result.spans, dirtyRanges: result.dirtyRanges)
     }

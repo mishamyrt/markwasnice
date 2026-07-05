@@ -22,7 +22,7 @@ final class MarkdownParseService {
         let previous = previousResult
         parseTask?.cancel()
         parseTask = Task.detached(priority: .utility) { [text, version, previous] in
-            let debounce = text.utf16.count > 200_000 ? 80 : 0
+            let debounce = Self.debounceMilliseconds(forTextLength: text.utf16.count)
             if debounce > 0 {
                 do {
                     try await Task.sleep(for: .milliseconds(debounce))
@@ -31,13 +31,13 @@ final class MarkdownParseService {
                 }
             }
 
-            guard !Task.isCancelled else {
-                return
-            }
-
-            let result = Self.parse(text: text, version: version, previous: previous)
-
-            guard !Task.isCancelled else {
+            guard !Task.isCancelled,
+                  let result = Self.parse(
+                      text: text,
+                      version: version,
+                      previous: previous
+                  )
+            else {
                 return
             }
 
@@ -52,17 +52,43 @@ final class MarkdownParseService {
         }
     }
 
+    /// How long a keystroke burst gets to supersede a parse before it starts.
+    /// Small documents parse fast enough that result latency matters more
+    /// than the wasted work; larger ones would otherwise run a full pipeline
+    /// per keystroke only to discard the result.
+    nonisolated private static func debounceMilliseconds(
+        forTextLength length: Int
+    ) -> Int {
+        switch length {
+        case ..<20000:
+            0
+        case ..<200_000:
+            20
+        default:
+            80
+        }
+    }
+
     /// Internal so the regression test harness can run the exact parse
-    /// pipeline synchronously.
+    /// pipeline synchronously. Returns nil only when the surrounding task
+    /// was cancelled between pipeline phases.
     nonisolated static func parse(
         text: String,
         version: Int,
         previous: MarkdownParseResult?
-    ) -> MarkdownParseResult {
+    ) -> MarkdownParseResult? {
         let document = Document(parsing: text, options: [.disableSmartOpts])
+        guard !Task.isCancelled else {
+            return nil
+        }
+
         var collector = MarkdownStyleSpanCollector()
         collector.visit(document)
         let sourceMap = SourceMap(text: text)
+        guard !Task.isCancelled else {
+            return nil
+        }
+
         let resolvedSpans: [ResolvedMarkdownStyleSpan] = collector.spans
             .compactMap { span in
                 guard let range = sourceMap.nsRange(for: span.range) else {
@@ -73,6 +99,10 @@ final class MarkdownParseService {
             }
 
         let spans = MarkdownLinkStyleResolver.resolve(spans: resolvedSpans, in: text)
+        guard !Task.isCancelled else {
+            return nil
+        }
+
         return MarkdownParseResult(
             textVersion: version,
             sourceLength: text.utf16.count,
