@@ -256,22 +256,46 @@ final class MarkwasniceAppState: ObservableObject {
             }
 
             let windowID = UUID()
+            let windowFrame = windowFrameDescriptor(for: window)
             for tabWindow in groupWindows {
                 guard let tabSession = session(of: tabWindow),
                       savedSessionIDs.insert(tabSession.id).inserted
                 else {
                     continue
                 }
-                drafts.append(tabSession.autosavedDraft(windowID: windowID))
+                drafts.append(tabSession.autosavedDraft(
+                    windowID: windowID,
+                    windowFrame: windowFrame
+                ))
             }
         }
 
         // Sessions whose window has not materialized yet (e.g. an autosave
-        // fired mid-launch) are kept as standalone windows.
+        // fired mid-launch) are kept as standalone windows; a frame restored
+        // from the previous session but not yet applied is carried over so
+        // an early autosave does not wipe it.
         for session in sessions.values where !savedSessionIDs.contains(session.id) {
-            drafts.append(session.autosavedDraft(windowID: nil))
+            drafts.append(session.autosavedDraft(
+                windowID: nil,
+                windowFrame: session.restoredWindowFrame.map(NSStringFromRect)
+            ))
         }
         return drafts
+    }
+
+    /// One frame is saved per tab group, read from its selected window:
+    /// AppKit syncs a tab window's frame only when that tab is selected, so
+    /// hidden tabs carry whatever frame they had when last shown and would
+    /// pin the restored group to a long-stale position. Fullscreen frames
+    /// are not saved: restoring one as a regular window frame would fill
+    /// the screen instead of returning to the last windowed size.
+    private func windowFrameDescriptor(for window: NSWindow) -> String? {
+        let source = window.tabGroup?.selectedWindow ?? window
+        guard !source.styleMask.contains(.fullScreen) else {
+            return nil
+        }
+
+        return NSStringFromRect(source.frame)
     }
 
     func flushAutosaveAndWait(force: Bool = false) async {

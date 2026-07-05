@@ -1133,7 +1133,30 @@ private final class TopHoverTrackingView: NSView {
             return
         }
 
+        if event.clickCount == 2 {
+            performTitlebarDoubleClickAction()
+            return
+        }
+
         window?.performDrag(with: event)
+    }
+
+    /// The drag band replaces the native titlebar, so the titlebar
+    /// double-click gesture has to be reproduced here, honoring the same
+    /// system preference the real titlebar reads.
+    private func performTitlebarDoubleClickAction() {
+        guard let window, !window.styleMask.contains(.fullScreen) else {
+            return
+        }
+
+        switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+        case "Minimize":
+            window.performMiniaturize(nil)
+        case "None":
+            break
+        default:
+            window.performZoom(nil)
+        }
     }
 
     private func updateCursor(with event: NSEvent) {

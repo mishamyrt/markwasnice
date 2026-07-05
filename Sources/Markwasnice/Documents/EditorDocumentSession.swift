@@ -254,12 +254,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         return false
     }
 
-    func autosavedDraft(windowID: UUID?) -> AutosavedDraft {
+    func autosavedDraft(windowID: UUID?, windowFrame: String?) -> AutosavedDraft {
         AutosavedDraft(
             text: text,
             fileURL: fileURL,
             windowID: windowID,
-            windowFrame: windowFrameDescriptor
+            windowFrame: windowFrame
         )
     }
 
@@ -270,19 +270,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     func takeRestoredWindowFrame() -> NSRect? {
         defer { restoredWindowFrame = nil }
         return restoredWindowFrame
-    }
-
-    /// Fullscreen frames are not saved: restoring one as a regular window
-    /// frame would fill the screen instead of returning to the last
-    /// windowed size.
-    private var windowFrameDescriptor: String? {
-        guard let window = editorView.window,
-              !window.styleMask.contains(.fullScreen)
-        else {
-            return nil
-        }
-
-        return NSStringFromRect(window.frame)
     }
 
     var title: String {

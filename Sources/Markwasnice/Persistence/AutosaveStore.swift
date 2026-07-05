@@ -7,8 +7,9 @@ struct AutosavedDraft: Codable {
     /// itself is regenerated on every save and only the grouping matters.
     var windowID: UUID?
     /// NSStringFromRect descriptor of the window frame at save time, so the
-    /// window reopens with the same size and position. Absent for fullscreen
-    /// windows and drafts saved before a window existed.
+    /// window reopens with the same size and position. Tabs of one window
+    /// share the frame of the group's selected window. Absent for
+    /// fullscreen windows.
     var windowFrame: String?
 }
 

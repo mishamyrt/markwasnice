@@ -20,6 +20,7 @@ final class MarkdownPreviewView: NSView {
     )
     private let textView: PreviewTextView
     private var lastScrollOffsetY: CGFloat?
+    private var lastScrollClipSize: NSSize?
     private var topInset: CGFloat = 0
     private var scrollerTopInset: CGFloat = 0
 
@@ -181,8 +182,16 @@ final class MarkdownPreviewView: NSView {
         }
 
         let offsetY = clipView.bounds.origin.y
-        defer { lastScrollOffsetY = offsetY }
+        let clipSize = clipView.bounds.size
+        defer {
+            lastScrollOffsetY = offsetY
+            lastScrollClipSize = clipSize
+        }
+        // Window resizes change the clip size and shift the origin as a
+        // side effect; only origin-only changes are user scrolling.
         guard let lastScrollOffsetY,
+              let lastScrollClipSize,
+              clipSize == lastScrollClipSize,
               abs(offsetY - lastScrollOffsetY) > 0.5
         else {
             return

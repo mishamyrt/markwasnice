@@ -85,6 +85,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var protectedTopPadding: CGFloat = 0
     private var isChromeVisible = true
     private var lastScrollOffsetY: CGFloat?
+    private var lastScrollClipSize: NSSize?
 
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var codeInlineDrawRanges: [NSRange] = []
@@ -989,7 +990,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // bounds tick costs scroll frames.
 
         let offsetY = clipView.bounds.origin.y
-        defer { lastScrollOffsetY = offsetY }
+        let clipSize = clipView.bounds.size
+        defer {
+            lastScrollOffsetY = offsetY
+            lastScrollClipSize = clipSize
+        }
         MarkdownEditorDiagnostics.log(
             "boundsChanged y=\(offsetY) last=\(lastScrollOffsetY.map(String.init(describing:)) ?? "nil") "
                 + "height=\(textView.frame.height) visible=\(textView.visibleRect) "
@@ -1006,7 +1011,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             restyleAllText()
         }
 
+        // A user scroll moves only the bounds origin; window resizes (zoom,
+        // live resize) change the clip size and shift the origin as a side
+        // effect. Those shifts must not read as scrolling — they would hide
+        // the chrome the user just revealed by resizing.
         guard let lastScrollOffsetY,
+              let lastScrollClipSize,
+              clipSize == lastScrollClipSize,
               abs(offsetY - lastScrollOffsetY) > 0.5
         else {
             return
