@@ -586,6 +586,8 @@ final class MarkdownTextView: NSTextView {
             return ("[", "]")
         case "{":
             return ("{", "}")
+        case "~":
+            return ("~", "~")
         case "«":
             return ("«", "»")
         case "“":
