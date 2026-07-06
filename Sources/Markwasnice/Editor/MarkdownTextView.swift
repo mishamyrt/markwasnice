@@ -25,9 +25,9 @@ final class MarkdownTextView: NSTextView {
     var onMouseDown: (() -> Void)?
     var onScrollWheel: ((NSEvent) -> Void)?
 
-    private static let blockCornerRadius: CGFloat = 6
-    private static let inlineCornerRadiusScale: CGFloat = 0.3
-    private static let inlineHorizontalPadding: CGFloat = 3
+    private static let codeCornerRadius: CGFloat = 3
+    private static let codeHorizontalPaddingRatio: CGFloat = 0.02
+    private static let codeVerticalPaddingRatio: CGFloat = 0.02
 
     /// Vertical padding around the text, kept inside the text view (instead
     /// of scroll-view content insets) so the padded areas stay clickable and
@@ -74,10 +74,11 @@ final class MarkdownTextView: NSTextView {
         gutter: CGFloat,
         fillColor: NSColor
     ) {
-        let didChange = inline != inlineCodeRanges
-            || block != codeBlockRanges
-            || gutter != codeBackgroundGutter
-            || fillColor != codeBackgroundFillColor
+        let didChange =
+            inline != inlineCodeRanges
+                || block != codeBlockRanges
+                || gutter != codeBackgroundGutter
+                || fillColor != codeBackgroundFillColor
         inlineCodeRanges = inline
         codeBlockRanges = block
         codeBackgroundGutter = gutter
@@ -174,8 +175,8 @@ final class MarkdownTextView: NSTextView {
         )
         NSBezierPath(
             roundedRect: blockRect,
-            xRadius: Self.blockCornerRadius,
-            yRadius: Self.blockCornerRadius
+            xRadius: Self.codeCornerRadius,
+            yRadius: Self.codeCornerRadius
         ).fill()
     }
 
@@ -184,16 +185,79 @@ final class MarkdownTextView: NSTextView {
         origin: NSPoint,
         dirtyRect: NSRect
     ) {
-        for segment in segmentRects(for: range, origin: origin)
+        for segment in inlineLineRects(for: range, origin: origin)
             where segment.intersects(dirtyRect)
         {
-            let padded = segment.insetBy(dx: -Self.inlineHorizontalPadding, dy: 0)
-            let radius = min(
-                padded.height * Self.inlineCornerRadiusScale,
-                padded.height / 2
+            let horizontalPadding = segment.height * Self.codeHorizontalPaddingRatio
+            let padded = segment.insetBy(dx: -horizontalPadding, dy: 0)
+            NSBezierPath(
+                roundedRect: padded, xRadius: Self.codeCornerRadius,
+                yRadius: Self.codeCornerRadius
             )
-            NSBezierPath(roundedRect: padded, xRadius: radius, yRadius: radius).fill()
+            .fill()
         }
+    }
+
+    /// One rect per visual line, hugging the glyphs vertically. The enclosing
+    /// rects from segmentRects(for:origin:) are unsuitable for inline code:
+    /// they span the full fragment height (the fixed 1.8x line height leaves
+    /// large gaps above and below the text) and merge the middle lines of a
+    /// wrapped range into a single full-width block.
+    private func inlineLineRects(for range: NSRange, origin: NSPoint) -> [NSRect] {
+        guard let layoutManager, let textContainer, let textStorage,
+              range.location >= 0,
+              NSMaxRange(range) <= textStorage.length
+        else {
+            return []
+        }
+
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: range,
+            actualCharacterRange: nil
+        )
+        guard glyphRange.location != NSNotFound, glyphRange.length > 0 else {
+            return []
+        }
+
+        var rects: [NSRect] = []
+        layoutManager.enumerateLineFragments(
+            forGlyphRange: glyphRange
+        ) { fragmentRect, _, _, lineGlyphRange, _ in
+            let lineRange = NSIntersectionRange(lineGlyphRange, glyphRange)
+            guard lineRange.length > 0 else {
+                return
+            }
+
+            let bounds = layoutManager.boundingRect(
+                forGlyphRange: lineRange,
+                in: textContainer
+            )
+            guard !bounds.isEmpty else {
+                return
+            }
+
+            let characterIndex = layoutManager.characterIndexForGlyph(
+                at: lineRange.location
+            )
+            let font =
+                textStorage.attribute(
+                    .font, at: characterIndex, effectiveRange: nil
+                ) as? NSFont ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            let baseline =
+                fragmentRect.minY
+                    + layoutManager.location(forGlyphAt: lineRange.location).y
+            let verticalPadding = font.ascender * Self.codeVerticalPaddingRatio
+            rects.append(
+                NSRect(
+                    x: bounds.minX,
+                    y: baseline - font.ascender - verticalPadding,
+                    width: bounds.width,
+                    height: font.ascender - font.descender
+                        + 2 * verticalPadding
+                ).offsetBy(dx: origin.x, dy: origin.y)
+            )
+        }
+        return rects
     }
 
     private func segmentRects(for range: NSRange, origin: NSPoint) -> [NSRect] {
@@ -464,36 +528,44 @@ final class MarkdownTextView: NSTextView {
 
         var rects: [NSRect] = []
         if blocked.minY > visible.minY {
-            rects.append(NSRect(
-                x: visible.minX,
-                y: visible.minY,
-                width: visible.width,
-                height: blocked.minY - visible.minY
-            ))
+            rects.append(
+                NSRect(
+                    x: visible.minX,
+                    y: visible.minY,
+                    width: visible.width,
+                    height: blocked.minY - visible.minY
+                )
+            )
         }
         if blocked.maxY < visible.maxY {
-            rects.append(NSRect(
-                x: visible.minX,
-                y: blocked.maxY,
-                width: visible.width,
-                height: visible.maxY - blocked.maxY
-            ))
+            rects.append(
+                NSRect(
+                    x: visible.minX,
+                    y: blocked.maxY,
+                    width: visible.width,
+                    height: visible.maxY - blocked.maxY
+                )
+            )
         }
         if blocked.minX > visible.minX {
-            rects.append(NSRect(
-                x: visible.minX,
-                y: blocked.minY,
-                width: blocked.minX - visible.minX,
-                height: blocked.height
-            ))
+            rects.append(
+                NSRect(
+                    x: visible.minX,
+                    y: blocked.minY,
+                    width: blocked.minX - visible.minX,
+                    height: blocked.height
+                )
+            )
         }
         if blocked.maxX < visible.maxX {
-            rects.append(NSRect(
-                x: blocked.maxX,
-                y: blocked.minY,
-                width: visible.maxX - blocked.maxX,
-                height: blocked.height
-            ))
+            rects.append(
+                NSRect(
+                    x: blocked.maxX,
+                    y: blocked.minY,
+                    width: visible.maxX - blocked.maxX,
+                    height: blocked.height
+                )
+            )
         }
         return rects
     }
