@@ -451,28 +451,21 @@ private struct EditorSearchBar: View {
 
     private var findControls: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 2) {
-                Button {
-                    state.selectPreviousSearchMatch()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .disabled(state.searchMatchCount == 0)
-
-                Button {
-                    state.selectNextSearchMatch()
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .disabled(state.searchMatchCount == 0)
+            SearchSplitButton(
+                isDisabled: state.searchMatchCount == 0,
+                onFirst: { state.selectPreviousSearchMatch() },
+                onSecond: { state.selectNextSearchMatch() }
+            ) {
+                Image(systemName: "chevron.left")
+                    .frame(width: 16)
+            } secondLabel: {
+                Image(systemName: "chevron.right")
+                    .frame(width: 16)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .tint(Color.primary)
 
-            if !state.isReplaceEnabled {
+            if state.isReplaceEnabled {
+                doneButton.hidden()
+            } else {
                 doneButton
             }
 
@@ -484,38 +477,33 @@ private struct EditorSearchBar: View {
                 )
             )
             .toggleStyle(.checkbox)
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: 11, weight: .regular))
+            .frame(height: 20)
         }
     }
 
     private var replaceControls: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 2) {
-                Button("Replace") {
-                    state.replaceCurrentMatch()
-                }
-                .disabled(state.searchMatchCount == 0)
-
-                Button("All") {
-                    state.replaceAllMatches()
-                }
-                .disabled(state.searchMatchCount == 0)
+            SearchSplitButton(
+                isDisabled: state.searchMatchCount == 0,
+                onFirst: { state.replaceCurrentMatch() },
+                onSecond: { state.replaceAllMatches() }
+            ) {
+                Text("Replace")
+                    .padding(.horizontal, 10)
+            } secondLabel: {
+                Text("All")
+                    .padding(.horizontal, 10)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .tint(Color.primary)
 
             doneButton
         }
     }
 
     private var doneButton: some View {
-        Button("Done") {
+        SearchDoneButton {
             state.closeSearch()
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(Color.primary)
     }
 
     private var searchField: some View {
@@ -659,6 +647,106 @@ private struct EditorSearchBar: View {
     }
 }
 
+/// Done styled to match SearchMatchStepper: the bordered system button
+/// cannot be sized to the 24pt control height the search bar uses.
+private struct SearchDoneButton: View {
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("Done")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(Color.primary)
+                .padding(.horizontal, 10)
+                .frame(height: 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.primary.opacity(isHovered ? 0.16 : 0.07))
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+/// Two actions fused into one control: a shared pill with a divider on the
+/// segment boundary that yields to a per-segment hover highlight.
+private struct SearchSplitButton<FirstLabel: View, SecondLabel: View>: View {
+    private let isDisabled: Bool
+    private let onFirst: () -> Void
+    private let onSecond: () -> Void
+    private let firstLabel: FirstLabel
+    private let secondLabel: SecondLabel
+
+    @State private var isFirstHovered = false
+    @State private var isSecondHovered = false
+
+    init(
+        isDisabled: Bool,
+        onFirst: @escaping () -> Void,
+        onSecond: @escaping () -> Void,
+        @ViewBuilder firstLabel: () -> FirstLabel,
+        @ViewBuilder secondLabel: () -> SecondLabel
+    ) {
+        self.isDisabled = isDisabled
+        self.onFirst = onFirst
+        self.onSecond = onSecond
+        self.firstLabel = firstLabel()
+        self.secondLabel = secondLabel()
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            segment(firstLabel, isHovered: $isFirstHovered, action: onFirst)
+            segment(secondLabel, isHovered: $isSecondHovered, action: onSecond)
+                // Drawn as an overlay straddling the segment boundary so
+                // the divider never adds to the control's width.
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.18))
+                        .frame(width: 1, height: 11)
+                        .offset(x: -0.5)
+                        .opacity(isDividerVisible ? 1 : 0)
+                        .allowsHitTesting(false)
+                }
+        }
+        .background(Color.primary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+    }
+
+    private var isDividerVisible: Bool {
+        isDisabled || (!isFirstHovered && !isSecondHovered)
+    }
+
+    private func segment(
+        _ label: some View,
+        isHovered: Binding<Bool>,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            label
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(
+                    isDisabled ? Color.secondary.opacity(0.5) : Color.primary
+                )
+                .frame(height: 20)
+                .background {
+                    if isHovered.wrappedValue, !isDisabled {
+                        RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                            .fill(Color.primary.opacity(0.1))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .onHover { isHovered.wrappedValue = $0 }
+    }
+}
+
 private struct EditorTopBarFocusModeButton: View {
     @ObservedObject private var state: EditorShellState
     @State private var isIconHovered = false
@@ -706,7 +794,7 @@ private struct EditorTopBarFocusModeButton: View {
                 }
             } label: {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(Color.primary.opacity(0.62))
                     .frame(width: 33, height: 36)
                     .background(chevronBackground)
