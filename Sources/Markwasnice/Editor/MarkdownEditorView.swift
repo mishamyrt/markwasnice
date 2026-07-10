@@ -359,6 +359,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         isFocusModeEnabled = isEnabled
         isFocusTemporarilySuppressed = false
         activeFocusParagraphRange = isEnabled ? activeParagraphRangeAtSelection() : nil
+        _ = updateTextContainerInset()
         restyleAllText()
         if isEnabled {
             centerCaretLineInVisibleArea(animated: true)
@@ -884,6 +885,18 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         return updateTextContainerInset()
     }
 
+    /// Extra vertical padding while focus/typewriter mode is on, so the caret
+    /// line can be scrolled to the viewport center even on the first and last
+    /// lines of the document — without it the centering scroll clamps to the
+    /// content edges and the caret stays off-center there.
+    private var focusOverscrollPadding: CGFloat {
+        guard isFocusModeEnabled else {
+            return 0
+        }
+
+        return max(0, (clipView.bounds.height - lineHeight) / 2)
+    }
+
     private func updateTextContainerInset() -> Bool {
         let availableWidth = scrollView.contentView.bounds.width > 0
             ? scrollView.contentView.bounds.width
@@ -906,16 +919,23 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // The average of the two paddings on both sides; MarkdownTextView
         // shifts the container origin to make the padding asymmetric while
         // remaining part of the (clickable) text view.
+        let topPadding = max(textTopPadding, focusOverscrollPadding)
+        let bottomPadding = max(textBottomPadding, focusOverscrollPadding)
         let insetSize = NSSize(
             width: containerInset,
-            height: (textTopPadding + textBottomPadding) / 2
+            height: (topPadding + bottomPadding) / 2
         )
 
         paragraphGutter = newParagraphGutter
-        textView.topContentPadding = textTopPadding
-        textView.bottomContentPadding = textBottomPadding
+        textView.topContentPadding = topPadding
+        textView.bottomContentPadding = bottomPadding
         if textView.textContainerInset != insetSize {
             textView.textContainerInset = insetSize
+            // NSTextView grows its frame for a larger inset but never shrinks
+            // it back on its own; without this the frame keeps the focus-mode
+            // overscroll after the mode is switched off, leaving a dead band
+            // of empty scroll range at the top of the document.
+            textView.sizeToFit()
         }
         // The preview has no marker gutter; its text starts where the
         // editor's paragraph text starts.
