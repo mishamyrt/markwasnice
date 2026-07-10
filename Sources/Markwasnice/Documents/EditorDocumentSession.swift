@@ -207,6 +207,14 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.applyMarkup(command)
     }
 
+    func fixTypography() {
+        guard !shellState.isPreviewActive else {
+            return
+        }
+
+        editorView.fixTypography()
+    }
+
     func showSearch() {
         guard !shellState.isPreviewActive else {
             return

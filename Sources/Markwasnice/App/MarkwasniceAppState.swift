@@ -175,6 +175,10 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.applyMarkup(command)
     }
 
+    func fixTypography() {
+        activeSession?.fixTypography()
+    }
+
     func showSearch() {
         activeSession?.showSearch()
     }
@@ -507,6 +511,11 @@ struct MarkwasniceCommands: Commands {
                 appState.pasteAsLink()
             }
             .keyboardShortcut("v", modifiers: [.command, .shift])
+
+            Button("Fix Typography") {
+                appState.fixTypography()
+            }
+            .keyboardShortcut("f", modifiers: [.command, .option])
         }
 
         CommandGroup(after: .textEditing) {

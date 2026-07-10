@@ -12,12 +12,13 @@ final class PreferencesWindowController: NSWindowController {
     private let widthPopup = NSPopUpButton()
     private let tabModePopup = NSPopUpButton()
     private let tabWidthPopup = NSPopUpButton()
+    private let typographyPopup = NSPopUpButton()
 
     init(settings: EditorSettings, onChange: @escaping (EditorSettings) -> Void) {
         self.settings = settings
         self.onChange = onChange
 
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 220))
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
         let window = NSWindow(
             contentRect: contentView.frame,
             styleMask: [.titled, .closable],
@@ -39,6 +40,7 @@ final class PreferencesWindowController: NSWindowController {
         widthPopup.selectItem(withTitle: String(settings.maxTextColumns))
         tabModePopup.selectItem(withTitle: title(for: settings.tabInsertionMode))
         tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
+        typographyPopup.selectItem(withTitle: title(for: settings.typographyLocale))
     }
 
     @available(*, unavailable)
@@ -81,6 +83,18 @@ final class PreferencesWindowController: NSWindowController {
         onChange(settings)
     }
 
+    @objc private func typographyChanged(_ sender: NSPopUpButton) {
+        // The popup is populated from allCases in configureControls; decode
+        // the selection through the same list.
+        let locales = EditorSettings.TypographyLocale.allCases
+        guard locales.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+
+        settings.typographyLocale = locales[sender.indexOfSelectedItem]
+        onChange(settings)
+    }
+
     private func configureControls(in contentView: NSView) {
         let textSizeLabel = NSTextField(labelWithString: "Text Size")
         let widthLabel = NSTextField(labelWithString: "Text Width")
@@ -88,6 +102,7 @@ final class PreferencesWindowController: NSWindowController {
         let tabModeLabel = NSTextField(labelWithString: "Tab Inserts")
         let tabWidthLabel = NSTextField(labelWithString: "Tab Size")
         let tabWidthCaption = NSTextField(labelWithString: "characters")
+        let typographyLabel = NSTextField(labelWithString: "Typography")
 
         textSizeSlider.target = self
         textSizeSlider.action = #selector(textSizeChanged(_:))
@@ -119,12 +134,19 @@ final class PreferencesWindowController: NSWindowController {
         tabWidthPopup.action = #selector(tabWidthChanged(_:))
         tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
 
+        for locale in EditorSettings.TypographyLocale.allCases {
+            typographyPopup.addItem(withTitle: title(for: locale))
+        }
+        typographyPopup.target = self
+        typographyPopup.action = #selector(typographyChanged(_:))
+        typographyPopup.selectItem(withTitle: title(for: settings.typographyLocale))
+
         for view in [
             textSizeLabel, smallTextSizeLabel, textSizeSlider, largeTextSizeLabel,
             widthLabel,
             widthPopup, widthCaption, tabModeLabel, tabModePopup, tabWidthLabel,
             tabWidthPopup,
-            tabWidthCaption,
+            tabWidthCaption, typographyLabel, typographyPopup,
         ] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
@@ -211,6 +233,21 @@ final class PreferencesWindowController: NSWindowController {
             ),
             tabWidthCaption.centerYAnchor
                 .constraint(equalTo: tabWidthPopup.centerYAnchor),
+
+            typographyLabel.leadingAnchor
+                .constraint(equalTo: textSizeLabel.leadingAnchor),
+            typographyLabel.topAnchor.constraint(
+                equalTo: tabWidthLabel.bottomAnchor,
+                constant: 28
+            ),
+            typographyLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
+
+            typographyPopup.leadingAnchor.constraint(
+                equalTo: typographyLabel.trailingAnchor, constant: 12
+            ),
+            typographyPopup.centerYAnchor
+                .constraint(equalTo: typographyLabel.centerYAnchor),
+            typographyPopup.widthAnchor.constraint(equalToConstant: 120),
         ])
     }
 
@@ -220,6 +257,15 @@ final class PreferencesWindowController: NSWindowController {
             "Spaces"
         case .tab:
             "Tab"
+        }
+    }
+
+    private func title(for locale: EditorSettings.TypographyLocale) -> String {
+        switch locale {
+        case .russian:
+            "Russian"
+        case .english:
+            "English"
         }
     }
 }

@@ -12,13 +12,15 @@ let package = Package(
         .executable(name: "Markwasnice", targets: ["Markwasnice"])
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0")
+        .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0"),
+        .package(path: "../swift-typograf"),
     ],
     targets: [
         .executableTarget(
             name: "Markwasnice",
             dependencies: [
-                .product(name: "Markdown", package: "swift-markdown")
+                .product(name: "Markdown", package: "swift-markdown"),
+                .product(name: "Typograf", package: "swift-typograf"),
             ],
             resources: [
                 .copy("../../Assets/Fonts"),

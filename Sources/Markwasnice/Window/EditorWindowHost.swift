@@ -208,6 +208,7 @@ private final class WindowLifecycleView: NSView {
         delegateProxy.session = session
         delegateProxy.appState = appState
         delegateProxy.chromeToolbarController = chromeToolbarController
+        delegateProxy.fullScreenToolbarController = fullScreenToolbarController
         chromeToolbarController.session = session
         window.delegate = delegateProxy
         window.title = session.title
@@ -254,6 +255,12 @@ private final class WindowLifecycleView: NSView {
         if let target = appState.takeTabAttachTarget(for: session.id),
            target !== window, target.isVisible
         {
+            // AppKit enrolls the new tab's fullscreen chrome with whatever
+            // geometry the window has at attach time; the stale pre-attach
+            // frame would park the toolbar window at that stale position.
+            if target.styleMask.contains(.fullScreen) {
+                window.setFrame(target.frame, display: false)
+            }
             target.addTabbedWindow(window, ordered: .above)
             window.makeKeyAndOrderFront(nil)
 
@@ -539,6 +546,7 @@ private final class WindowDelegateProxy: NSObject, NSWindowDelegate {
     weak var session: EditorDocumentSession?
     weak var appState: MarkwasniceAppState?
     weak var chromeToolbarController: ChromeToolbarController?
+    weak var fullScreenToolbarController: FullScreenToolbarController?
 
     func windowDidBecomeKey(_: Notification) {
         guard let session else {
@@ -568,6 +576,10 @@ private final class WindowDelegateProxy: NSObject, NSWindowDelegate {
 
     func windowDidMove(_: Notification) {
         appState?.noteWindowLayoutChanged()
+    }
+
+    func windowDidChangeScreen(_: Notification) {
+        fullScreenToolbarController?.handleScreenChange()
     }
 
     func windowDidEndLiveResize(_: Notification) {

@@ -36,6 +36,10 @@ final class FullScreenToolbarController: NSObject {
         else {
             didKickToolbarForFullScreenSession = false
             isToolbarKickPending = false
+            // Leaving fullscreen for real (not an ownership handoff):
+            // AppKit dismantles the toolbar window, hand it back pristine.
+            observedToolbarWindow?.alphaValue = 1
+            observedToolbarWindow?.ignoresMouseEvents = false
             stopObserving()
             session?.setFullScreenChromeOverlayHeight(0)
             return
@@ -79,6 +83,7 @@ final class FullScreenToolbarController: NSObject {
 
         installSeparator(in: toolbarWindow)
         hideSystemToolbarBackdrop(in: toolbarWindow)
+        updateToolbarWindowFade(toolbarWindow)
         syncAppearance()
         reportChromeOverlayHeight()
         scheduleStrayToolbarWindowCheck()
@@ -103,6 +108,30 @@ final class FullScreenToolbarController: NSObject {
         }
     }
 
+    /// Moving a fullscreen space between displays (an Exposé drag) leaves
+    /// the toolbar window parked at offsets enrolled for the previous
+    /// screen; until AppKit re-enrolls it there, reveals can land outside
+    /// the fade's reveal zone and read as a toolbar that vanishes on tab
+    /// clicks. Parking the window hidden at the new screen's top edge
+    /// resets the geometry so the next reveal starts clean.
+    func handleScreenChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  let window = self.editorWindow,
+                  window.styleMask.contains(.fullScreen),
+                  self.hasSteadyFullScreenFrame(window),
+                  let toolbarWindow = self.observedToolbarWindow
+            else {
+                return
+            }
+
+            var frame = toolbarWindow.frame
+            frame.origin.y = window.frame.maxY
+            toolbarWindow.setFrame(frame, display: false)
+            self.updateToolbarWindowFade(toolbarWindow)
+        }
+    }
+
     func stopObserving() {
         strayToolbarCheckWorkItem?.cancel()
         strayToolbarCheckWorkItem = nil
@@ -116,6 +145,11 @@ final class FullScreenToolbarController: NSObject {
             return
         }
 
+        // Deliberately no alpha reset here: ownership of the shared
+        // toolbar window hops between the tabs' controllers on tab
+        // switches, and restoring alpha on a handoff would flash the
+        // parked sliver back on screen. The next owner's fade pass (or
+        // AppKit tearing the window down on fullscreen exit) takes over.
         NotificationCenter.default.removeObserver(
             self,
             name: nil,
@@ -125,10 +159,14 @@ final class FullScreenToolbarController: NSObject {
     }
 
     private func performPendingToolbarKickIfHidden() {
+        // Parked short of fully hidden (reserved menu bar band displays)
+        // still counts: the window is faded out there, so the corrective
+        // repaint cannot flash.
         guard isToolbarKickPending,
               let window = editorWindow,
               let toolbarWindow = observedToolbarWindow,
               toolbarWindow.frame.minY >= window.frame.maxY - 0.5
+              || toolbarWindow.alphaValue < 0.05
         else {
             return
         }
@@ -221,23 +259,49 @@ final class FullScreenToolbarController: NSObject {
             return
         }
 
-        if let backdrop = backdropView,
-           backdrop.superview === titlebarView
-        {
+        // The tab bar rides along as a titlebar accessory, wrapped in an
+        // anonymous NSView sibling of NSToolbarView that sits lower in the
+        // titlebar view. The opaque backdrop has to slot in below whichever
+        // of the two is lowest, or it paints over the tab bar: invisible
+        // tabs that still receive mouse events through the backdrop's nil
+        // hitTest. The accessory container is only recognizable by its
+        // NSTitlebarAccessoryClipView descendant, not by its own class.
+        let anchorView = titlebarView.subviews.first { subview in
+            subview !== backdropView
+                && (String(describing: type(of: subview)) == "NSToolbarView"
+                    || findSubview(
+                        named: "NSTitlebarAccessoryClipView",
+                        in: subview
+                    ) != nil)
+        }
+
+        if let backdrop = backdropView, backdrop.superview === titlebarView {
+            // A tab bar accessory that appears after the install (second
+            // tab opened while already fullscreen) lands below the backdrop
+            // and would be painted over; re-anchor when that happens.
+            if let anchorView,
+               let backdropIndex = titlebarView.subviews.firstIndex(of: backdrop),
+               let anchorIndex = titlebarView.subviews.firstIndex(of: anchorView),
+               backdropIndex > anchorIndex
+            {
+                backdrop.removeFromSuperview()
+                titlebarView.addSubview(
+                    backdrop,
+                    positioned: .below,
+                    relativeTo: anchorView
+                )
+            }
             return
         }
 
         backdropView?.removeFromSuperview()
         let backdrop = FullScreenToolbarBackdropView(frame: titlebarView.bounds)
         backdrop.autoresizingMask = [.width, .height]
-        let toolbarView = titlebarView.subviews.first {
-            String(describing: type(of: $0)) == "NSToolbarView"
-        }
-        if let toolbarView {
+        if let anchorView {
             titlebarView.addSubview(
                 backdrop,
                 positioned: .below,
-                relativeTo: toolbarView
+                relativeTo: anchorView
             )
         } else {
             titlebarView.addSubview(backdrop)
@@ -259,6 +323,13 @@ final class FullScreenToolbarController: NSObject {
 
     private func hideBackdropLayerViews(in view: NSView) {
         for subview in view.subviews {
+            // The tab bar accessory draws its tabs with backdrop-backed
+            // glass of its own; hiding those layers erases the tabs while
+            // AppKit keeps reserving their row.
+            let className = String(describing: type(of: subview))
+            if className.contains("Accessory") || className.contains("TabBar") {
+                continue
+            }
             if !(subview is FullScreenToolbarBackdropView),
                let layer = subview.layer
             {
@@ -354,11 +425,86 @@ final class FullScreenToolbarController: NSObject {
         // AppKit can rebuild parts of the chrome when the reveal state
         // changes; keep the stale glass band suppressed.
         if let toolbarWindow = observedToolbarWindow {
+            updateToolbarWindowFade(toolbarWindow)
             hideSystemToolbarBackdrop(in: toolbarWindow)
         }
         performPendingToolbarKickIfHidden()
         reportChromeOverlayHeight()
         scheduleStrayToolbarWindowCheck()
+    }
+
+    /// AppKit owns the toolbar window's position: it re-asserts its parked
+    /// spot within ~60ms of any displacement, and on displays with a
+    /// reserved menu bar band that spot leaves a sliver of the tab bar
+    /// inside the editor (the auto-hide offset predates the tab bar).
+    /// Since the position cannot be corrected without a visible tug-of-war,
+    /// visibility is handled here: the window's alpha is a pure function of
+    /// how much of it is on screen — opaque through most of the travel,
+    /// fading out over the last points, so the parked sliver rests
+    /// invisible. Position-derived, hence no timers or direction heuristics,
+    /// and it composes with whatever animation AppKit happens to run.
+    private func updateToolbarWindowFade(_ toolbarWindow: NSWindow) {
+        guard let window = editorWindow,
+              window.styleMask.contains(.fullScreen),
+              hasSteadyFullScreenFrame(window)
+        else {
+            return
+        }
+
+        let visibleBand = window.frame.maxY - toolbarWindow.frame.minY
+        let alpha = Self.fadeAlpha(
+            band: visibleBand,
+            height: toolbarWindow.frame.height
+        )
+        if abs(toolbarWindow.alphaValue - alpha) > 0.001 {
+            toolbarWindow.alphaValue = alpha
+        }
+
+        // The invisible sliver must not swallow clicks aimed at the text
+        // below it.
+        let ignoresMouse = alpha < 0.05
+        if toolbarWindow.ignoresMouseEvents != ignoresMouse {
+            toolbarWindow.ignoresMouseEvents = ignoresMouse
+        }
+    }
+
+    /// Opaque only inside the legitimate reveal zone at the top of the
+    /// screen. AppKit's parked "hidden" spots leave slivers of varying
+    /// height on screen (12pt and 29pt observed), so anything up to 40pt
+    /// rests invisible; a reveal parked below the slid-in menu bar can
+    /// legitimately exceed the window height by ~30pt, so the plateau
+    /// extends that far before fading back out — a window parked way
+    /// outside the zone (AppKit creates new tabs' toolbar windows at the
+    /// screen origin, i.e. the bottom edge) stays invisible too.
+    private static func fadeAlpha(band: CGFloat, height: CGFloat) -> CGFloat {
+        let riseStart: CGFloat = 40
+        let riseEnd: CGFloat = 72
+        let dropStart = height + 40
+        let dropEnd = height + 72
+
+        if band <= riseStart || band >= dropEnd {
+            return 0
+        }
+        if band < riseEnd {
+            return (band - riseStart) / (riseEnd - riseStart)
+        }
+        if band <= dropStart {
+            return 1
+        }
+        return (dropEnd - band) / (dropEnd - dropStart)
+    }
+
+    /// A window mid tab-attach carries .fullScreen in its style mask while
+    /// its frame is still the stale pre-attach one; chrome math against
+    /// that frame would park or fade the toolbar window against geometry
+    /// that never existed on screen.
+    private func hasSteadyFullScreenFrame(_ window: NSWindow) -> Bool {
+        guard let screen = window.screen else {
+            return false
+        }
+
+        return abs(window.frame.width - screen.frame.width) < 1
+            && window.frame.height > screen.frame.height * 0.7
     }
 
     /// Debounced so reveal/hide animations, which move the window through
@@ -375,6 +521,7 @@ final class FullScreenToolbarController: NSObject {
     private func clampStrayToolbarWindow() {
         guard let window = editorWindow,
               window.styleMask.contains(.fullScreen),
+              hasSteadyFullScreenFrame(window),
               let toolbarWindow = observedToolbarWindow
         else {
             return
@@ -388,69 +535,56 @@ final class FullScreenToolbarController: NSObject {
             return
         }
 
+        // A partial band is AppKit's own parked position (its auto-hide
+        // offset is short by the tab bar height on displays with a
+        // reserved menu bar band). AppKit re-asserts that spot within
+        // ~60ms of any displacement, so moving the window is a tug-of-war
+        // that reads as flicker; the position-driven fade keeps the parked
+        // sliver invisible instead.
+        let revealedY = hiddenY - toolbarWindow.frame.height
+        if minY > revealedY + 0.5 {
+            return
+        }
+
+        // Fully revealed (allowing the menu bar shift) — legitimate only
+        // while the pointer is near the top of the screen keeping the
+        // reveal alive; with several displays the pointer also has to be
+        // on this window's screen. A toolbar window born into an
+        // already-fullscreen group is not enrolled in AppKit's auto-hide,
+        // so once the pointer leaves it just stays; that stuck window is
+        // the one worth clamping, and AppKit does not fight for it.
+        // Anything parked below the reveal zone (AppKit creates new tabs'
+        // toolbar windows at the screen origin — the bottom edge) is
+        // never legitimate and gets clamped back to the top.
+        let pointer = NSEvent.mouseLocation
+        let pointerOnScreen = window.screen.map { $0.frame.contains(pointer) }
+            ?? true
         let isSelectedTab = window.tabGroup.map { $0.selectedWindow === window }
             ?? true
-        if isSelectedTab {
-            // Fully revealed — legitimate only while the pointer is near the
-            // top of the screen keeping the reveal alive. A toolbar window
-            // born into an already-fullscreen group is not enrolled in
-            // AppKit's auto-hide, so once the pointer leaves it just stays;
-            // that is the stuck strip.
-            let revealedY = hiddenY - toolbarWindow.frame.height
-            if abs(minY - revealedY) < 0.5,
-               NSEvent.mouseLocation.y >= revealedY - 250
-            {
-                // No move events arrive when the pointer leaves; keep
-                // re-checking while the window remains on screen.
-                scheduleStrayToolbarWindowCheck(after: 1.5)
-                return
-            }
-
-            // Parked with just the tab bar row on screen — legitimate only
-            // while that strip actually renders the tab bar. Applies to the
-            // tab-bar-sized strip only, not to a fully revealed window.
-            if hiddenY - minY <= 44,
-               visibleStripShowsTabBar(
-                   of: window,
-                   toolbarWindow: toolbarWindow,
-                   hiddenY: hiddenY
-               )
-            {
-                scheduleStrayToolbarWindowCheck(after: 1.5)
-                return
-            }
+        if isSelectedTab, pointerOnScreen,
+           minY >= revealedY - 64, pointer.y >= minY - 250
+        {
+            // No move events arrive when the pointer leaves; keep
+            // re-checking while the window remains on screen.
+            scheduleStrayToolbarWindowCheck(after: 1.5)
+            return
         }
 
         var frame = toolbarWindow.frame
         frame.origin.y = hiddenY
+
+        // A window parked outside the reveal zone was never legitimately
+        // on screen; animating it would drag it visibly across the whole
+        // screen, so it snaps into the hidden spot instead.
+        guard minY >= revealedY - 64 else {
+            toolbarWindow.setFrame(frame, display: false)
+            return
+        }
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.22
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             toolbarWindow.animator().setFrame(frame, display: false)
-        }
-    }
-
-    private func visibleStripShowsTabBar(
-        of window: NSWindow,
-        toolbarWindow: NSWindow,
-        hiddenY: CGFloat
-    ) -> Bool {
-        let strip = NSRect(
-            x: toolbarWindow.frame.minX,
-            y: toolbarWindow.frame.minY,
-            width: toolbarWindow.frame.width,
-            height: hiddenY - toolbarWindow.frame.minY
-        )
-        return window.titlebarAccessoryViewControllers.contains { accessory in
-            guard !accessory.isHidden,
-                  !accessory.view.isHiddenOrHasHiddenAncestor,
-                  accessory.view.window === toolbarWindow
-            else {
-                return false
-            }
-
-            let rectInWindow = accessory.view.convert(accessory.view.bounds, to: nil)
-            return toolbarWindow.convertToScreen(rectInWindow).intersects(strip)
         }
     }
 }

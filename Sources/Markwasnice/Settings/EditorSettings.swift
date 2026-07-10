@@ -6,6 +6,11 @@ struct EditorSettings: Equatable {
         case tab
     }
 
+    enum TypographyLocale: String, CaseIterable {
+        case russian
+        case english
+    }
+
     static let maxTextWidthOptions = [64, 72, 80]
     static let tabWidthOptions = [1, 2, 4]
     static let defaultBasePointSize: CGFloat = 20
@@ -13,11 +18,13 @@ struct EditorSettings: Equatable {
     static let defaultMaxTextColumns = 64
     static let defaultTabInsertionMode = TabInsertionMode.spaces
     static let defaultTabWidth = 4
+    static let defaultTypographyLocale = TypographyLocale.russian
 
     var textSizeScale: CGFloat
     var maxTextColumns: Int
     var tabInsertionMode: TabInsertionMode
     var tabWidth: Int
+    var typographyLocale: TypographyLocale = EditorSettings.defaultTypographyLocale
 
     var basePointSize: CGFloat {
         Self.defaultBasePointSize * textSizeScale
@@ -34,6 +41,7 @@ final class EditorSettingsStore {
         static let maxTextColumns = "editor.maxTextColumns"
         static let tabInsertionMode = "editor.tabInsertionMode"
         static let tabWidth = "editor.tabWidth"
+        static let typographyLocale = "editor.typographyLocale"
     }
 
     private let defaults: UserDefaults
@@ -61,12 +69,18 @@ final class EditorSettingsStore {
             EditorSettings.tabWidthOptions.contains(storedTabWidth)
                 ? storedTabWidth
                 : EditorSettings.defaultTabWidth
+        let storedTypographyLocale = defaults.string(forKey: Key.typographyLocale)
+        let typographyLocale =
+            storedTypographyLocale
+                .flatMap(EditorSettings.TypographyLocale.init(rawValue:))
+                ?? EditorSettings.defaultTypographyLocale
 
         return EditorSettings(
             textSizeScale: textSizeScale,
             maxTextColumns: maxTextColumns,
             tabInsertionMode: tabInsertionMode,
-            tabWidth: tabWidth
+            tabWidth: tabWidth,
+            typographyLocale: typographyLocale
         )
     }
 
@@ -75,5 +89,6 @@ final class EditorSettingsStore {
         defaults.set(settings.maxTextColumns, forKey: Key.maxTextColumns)
         defaults.set(settings.tabInsertionMode.rawValue, forKey: Key.tabInsertionMode)
         defaults.set(settings.tabWidth, forKey: Key.tabWidth)
+        defaults.set(settings.typographyLocale.rawValue, forKey: Key.typographyLocale)
     }
 }

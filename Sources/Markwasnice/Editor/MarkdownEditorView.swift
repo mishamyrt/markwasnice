@@ -534,6 +534,38 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         _ = wrapSelection(opening: opening, closing: closing)
     }
 
+    func fixTypography() {
+        let selectedRange = textView.selectedRange()
+        let replacements = MarkdownTypographyCommand.replacements(
+            in: textView.string,
+            selectedRange: selectedRange,
+            locale: settings.typographyLocale
+        )
+        guard !replacements.isEmpty,
+              let textStorage = textView.textStorage,
+              textView.shouldChangeText(
+                  inRanges: replacements.map { NSValue(range: $0.range) },
+                  replacementStrings: replacements.map(\.replacement)
+              )
+        else {
+            return
+        }
+
+        textStorage.beginEditing()
+        for replacement in replacements.reversed() {
+            textStorage.replaceCharacters(
+                in: replacement.range,
+                with: replacement.replacement
+            )
+        }
+        textStorage.endEditing()
+        textView.didChangeText()
+        textView.setSelectedRange(MarkdownTypographyCommand.adjustedSelection(
+            selectedRange,
+            after: replacements
+        ))
+    }
+
     func markdownTextViewShowFind(_: NSTextView) {
         delegate?.markdownEditorViewShowSearch(self)
     }
