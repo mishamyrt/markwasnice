@@ -106,9 +106,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var isFocusTemporarilySuppressed = false
     private var activeFocusParagraphRange: NSRange?
     private var focusScrollAdjustmentCount = 0
+    private let focusScrollAnimator = CaretScrollAnimator()
 
     private var isAdjustingFocusScroll: Bool {
-        focusScrollAdjustmentCount > 0
+        focusScrollAdjustmentCount > 0 || focusScrollAnimator.isAnimating
     }
 
     private static let largeEditThreshold = 8000
@@ -161,6 +162,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             restyleAllText()
         }
         invalidateEditorCursorRects()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil {
+            focusScrollAnimator.cancel()
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -359,11 +367,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         isFocusModeEnabled = isEnabled
         isFocusTemporarilySuppressed = false
         activeFocusParagraphRange = isEnabled ? activeParagraphRangeAtSelection() : nil
+        updateCaretScrollOwnership()
         _ = updateTextContainerInset()
         restyleAllText()
         if isEnabled {
             centerCaretLineInVisibleArea(animated: true)
         }
+    }
+
+    /// While focus centering recenters on every caret move it owns the
+    /// scroll position, and the text view's own keyboard caret scrolling
+    /// must stand down; when centering is suspended for a user scroll the
+    /// text view takes over again.
+    private func updateCaretScrollOwnership() {
+        textView.skipsKeyboardCaretScrolling =
+            isFocusModeEnabled && !isFocusTemporarilySuppressed
     }
 
     func setFocusMode(_ mode: EditorFocusMode) {
@@ -2114,8 +2132,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     /// Keeps the caret line vertically centered in focus/typewriter mode.
     /// Animated so that line transitions (Enter, arrow keys) glide instead of
-    /// jumping.
+    /// jumping. Driven by the same retargetable display-link animator as
+    /// keyboard caret scrolling — the system animated scroll stacks a new
+    /// animation per key repeat and the overlap visibly bounces.
     private func centerCaretLineInVisibleArea(animated: Bool) {
+        // Centering takes over from any in-flight keyboard caret scroll.
+        textView.cancelKeyboardCaretScroll()
         guard let lineRect = caretLineRectAtSelection() else {
             return
         }
@@ -2136,28 +2158,25 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             max(minimumOffsetY, lineMidY - clipHeight / 2),
             maximumOffsetY
         )
-        guard abs(clipView.bounds.origin.y - targetOffsetY) > 0.5 else {
+        let currentOffsetY = focusScrollAnimator.isAnimating
+            ? focusScrollAnimator.targetOffsetY
+            : clipView.bounds.origin.y
+        guard abs(currentOffsetY - targetOffsetY) > 0.5 else {
             return
         }
 
-        let targetOrigin = NSPoint(x: clipView.bounds.origin.x, y: targetOffsetY)
-        focusScrollAdjustmentCount += 1
-
         guard animated else {
-            clipView.setBoundsOrigin(targetOrigin)
+            focusScrollAnimator.cancel()
+            focusScrollAdjustmentCount += 1
+            clipView.setBoundsOrigin(
+                NSPoint(x: clipView.bounds.origin.x, y: targetOffsetY)
+            )
             scrollView.reflectScrolledClipView(clipView)
             focusScrollAdjustmentCount -= 1
             return
         }
 
-        NSAnimationContext.runAnimationGroup { [self] context in
-            context.duration = 0.16
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            clipView.animator().setBoundsOrigin(targetOrigin)
-            scrollView.reflectScrolledClipView(clipView)
-        } completionHandler: { [weak self] in
-            self?.focusScrollAdjustmentCount -= 1
-        }
+        focusScrollAnimator.scroll(scrollView, toOffsetY: targetOffsetY)
     }
 
     private func caretLineRectAtSelection() -> NSRect? {
@@ -2217,6 +2236,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         isFocusTemporarilySuppressed = false
         activeFocusParagraphRange = activeParagraphRangeAtSelection()
+        updateCaretScrollOwnership()
         // Lifting the scroll suppression must re-dim the whole document —
         // the paragraph-delta restyle in updateFocusForSelection cannot know
         // how much of it the suppression undimmed.
@@ -2237,7 +2257,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
+        // The manual scroll takes over from an in-flight centering glide.
+        focusScrollAnimator.cancel()
         isFocusTemporarilySuppressed = true
+        updateCaretScrollOwnership()
         // Only focus mode dims text; typewriter mode has nothing to undim.
         if focusMode == .focus {
             restyleAllText()

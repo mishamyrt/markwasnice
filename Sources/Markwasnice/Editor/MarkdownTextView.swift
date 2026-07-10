@@ -473,8 +473,138 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        // A manual scroll takes over from any in-flight caret scroll.
+        caretScrollAnimator.cancel()
         onScrollWheel?(event)
         super.scrollWheel(with: event)
+    }
+
+    /// Keyboard-driven caret scrolls go through the system smooth-scroll
+    /// animation (NSScrollAnimationHelper). Under key auto-repeat a new
+    /// animation starts on every repeat while the previous one is still
+    /// running, and the overlapping animations fight over the clip origin —
+    /// the scroll visibly bounces backwards each frame. Those scrolls are
+    /// handled here instead, bypassing the system pass entirely, with a
+    /// retargetable display-link animator (see CaretScrollAnimator).
+    override func scrollRangeToVisible(_ range: NSRange) {
+        if NSApp.currentEvent?.type == .keyDown {
+            // In focus/typewriter mode the editor's caret centering owns the
+            // scroll position; the minimal-visibility scroll would only fight
+            // with it.
+            guard !skipsKeyboardCaretScrolling else {
+                return
+            }
+
+            if let rect = caretLineScrollRect(for: range),
+               scrollCaretLineRectIntoView(rect)
+            {
+                return
+            }
+        }
+
+        super.scrollRangeToVisible(range)
+    }
+
+    /// Set while the editor's focus-mode centering drives the scroll
+    /// position on every caret move.
+    var skipsKeyboardCaretScrolling = false
+
+    private let caretScrollAnimator = CaretScrollAnimator()
+
+    func cancelKeyboardCaretScroll() {
+        caretScrollAnimator.cancel()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil {
+            caretScrollAnimator.cancel()
+        }
+    }
+
+    /// Minimal scroll that puts the caret line inside the viewport with a
+    /// one-line margin. Returns false when the scroll could not be handled
+    /// and the caller must fall back to the system path.
+    private func scrollCaretLineRectIntoView(_ rect: NSRect) -> Bool {
+        guard let scrollView = enclosingScrollView else {
+            return false
+        }
+
+        let clipView = scrollView.contentView
+        let clipBounds = clipView.bounds
+        let margin = scrollView.lineScroll
+        let target = rect.insetBy(dx: 0, dy: -margin)
+
+        // While an animated scroll is in flight the clip origin lags behind
+        // the target; computing from the final target keeps successive key
+        // repeats from re-deriving (and jittering around) the same goal.
+        let currentOffsetY = caretScrollAnimator.isAnimating
+            ? caretScrollAnimator.targetOffsetY
+            : clipBounds.origin.y
+
+        var offsetY = currentOffsetY
+        if target.minY < offsetY {
+            offsetY = target.minY
+        } else if target.maxY > offsetY + clipBounds.height {
+            offsetY = target.maxY - clipBounds.height
+        }
+
+        let insets = scrollView.contentInsets
+        let minimumOffsetY = -insets.top
+        let maximumOffsetY = max(
+            minimumOffsetY,
+            frame.height - clipBounds.height + insets.bottom
+        )
+        offsetY = min(max(offsetY, minimumOffsetY), maximumOffsetY)
+        guard abs(offsetY - currentOffsetY) > 0.5 else {
+            return true
+        }
+
+        caretScrollAnimator.scroll(scrollView, toOffsetY: offsetY)
+        return true
+    }
+
+    /// The line-fragment rect (in view coordinates) of the moving end of the
+    /// given range — the end the caret is at during keyboard navigation.
+    private func caretLineScrollRect(for range: NSRange) -> NSRect? {
+        guard let layoutManager, let textContainer, let textStorage else {
+            return nil
+        }
+
+        let origin = textContainerOrigin
+        let length = textStorage.length
+        let location = min(
+            selectionAffinity == .upstream ? range.location : NSMaxRange(range),
+            length
+        )
+
+        var rect: NSRect
+        if location == length,
+           length == 0 || layoutManager.extraLineFragmentTextContainer === textContainer,
+           layoutManager.extraLineFragmentRect.height > 0
+        {
+            rect = layoutManager.extraLineFragmentRect
+        } else if length > 0 {
+            let glyphIndex = layoutManager
+                .glyphIndexForCharacter(at: min(location, length - 1))
+            guard glyphIndex < layoutManager.numberOfGlyphs else {
+                return nil
+            }
+
+            rect = layoutManager.lineFragmentRect(
+                forGlyphAt: glyphIndex,
+                effectiveRange: nil
+            )
+        } else {
+            return nil
+        }
+
+        // Only vertical visibility matters for the caret line; pinning x to
+        // the current viewport avoids any horizontal jump.
+        rect = rect.offsetBy(dx: origin.x, dy: origin.y)
+        rect.origin.x = visibleRect.origin.x
+        rect.size.width = 1
+        return rect
     }
 
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
