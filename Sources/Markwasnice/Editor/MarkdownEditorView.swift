@@ -866,6 +866,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         scrollView.backgroundColor = colors.background
         scrollView.contentInsets = NSEdgeInsetsZero
         scrollView.scrollerInsets = NSEdgeInsetsZero
+        // The scroll view's automaticallyAdjustsContentInsets=false is not
+        // enough: the flag also lives on each clip view (default true), and
+        // on Tahoe NSScrollView's tile pass reads the clip view's copy,
+        // stamping its own 16pt glass insets onto the clip view on every
+        // layout. That shifts the resting scroll offset to -16 while all
+        // scroll math here assumes the zero insets set above — any
+        // programmatic scroll to 0 then fights tile's re-assertion forever
+        // (the caret animator's display link never converges, and the
+        // resulting per-frame scroll events kept hiding the chrome).
+        clipView.automaticallyAdjustsContentInsets = false
         scrollView.contentView = clipView
         scrollView.documentView = textView
         scrollView.translatesAutoresizingMaskIntoConstraints = false

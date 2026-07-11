@@ -154,6 +154,10 @@ final class MarkdownPreviewView: NSView {
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsetsZero
         scrollView.scrollerInsets = NSEdgeInsetsZero
+        // Tahoe's tile pass reads the clip view's own copy of this flag
+        // (default true) and would stamp glass insets over the zero insets
+        // above; see the editor's configureScrollView.
+        scrollView.contentView.automaticallyAdjustsContentInsets = false
         scrollView.documentView = textView
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(

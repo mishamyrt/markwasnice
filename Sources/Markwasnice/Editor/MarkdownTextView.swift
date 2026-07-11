@@ -549,13 +549,16 @@ final class MarkdownTextView: NSTextView {
             offsetY = target.maxY - clipBounds.height
         }
 
-        let insets = scrollView.contentInsets
-        let minimumOffsetY = -insets.top
-        let maximumOffsetY = max(
-            minimumOffsetY,
-            frame.height - clipBounds.height + insets.bottom
-        )
-        offsetY = min(max(offsetY, minimumOffsetY), maximumOffsetY)
+        // Clamped by the clip view itself rather than by scroll-view inset
+        // math: the clip view is the authority on legal resting offsets
+        // (AppKit layout re-asserts them), and a target outside that range
+        // would leave the animator fighting layout forever.
+        offsetY = clipView.constrainBoundsRect(
+            NSRect(
+                origin: NSPoint(x: clipBounds.origin.x, y: offsetY),
+                size: clipBounds.size
+            )
+        ).origin.y
         guard abs(offsetY - currentOffsetY) > 0.5 else {
             return true
         }
