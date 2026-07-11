@@ -112,6 +112,65 @@ struct MarkdownPreviewRendererTests {
     }
 
     @Test
+    func tableCellsAreRenderedInsideTextTable() {
+        let rendered = render("""
+        | Name | Role |
+        | --- | --- |
+        | Ann | Dev |
+        | Bob | Ops |
+        """)
+        let text = rendered.string
+        #expect(text.contains("Name"))
+        #expect(text.contains("Role"))
+        #expect(text.contains("Ann"))
+        #expect(text.contains("Ops"))
+        // Pipe/dash markup is consumed by the table layout.
+        #expect(!text.contains("|"))
+        #expect(!text.contains("---"))
+
+        let location = (text as NSString).range(of: "Name").location
+        let style = rendered.attribute(
+            .paragraphStyle,
+            at: location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        let block = style?.textBlocks.first as? NSTextTableBlock
+        #expect(block != nil)
+        #expect(block?.table.numberOfColumns == 2)
+    }
+
+    @Test
+    func tableHeaderCellsAreBold() {
+        let rendered = render("| Name | Role |\n| --- | --- |\n| Ann | Dev |")
+        let headerLocation = (rendered.string as NSString).range(of: "Name").location
+        let bodyLocation = (rendered.string as NSString).range(of: "Ann").location
+        let headerFont = font(in: rendered, at: headerLocation)
+        let bodyFont = font(in: rendered, at: bodyLocation)
+        #expect(headerFont != nil && bodyFont != nil)
+        #expect(NSFontManager.shared.traits(of: headerFont!).contains(.boldFontMask))
+        #expect(!NSFontManager.shared.traits(of: bodyFont!).contains(.boldFontMask))
+    }
+
+    @Test
+    func tableColumnAlignmentIsApplied() {
+        let rendered = render("| L | R |\n| :--- | ---: |\n| a | b |")
+        let leftLocation = (rendered.string as NSString).range(of: "a").location
+        let rightLocation = (rendered.string as NSString).range(of: "b").location
+        let leftStyle = rendered.attribute(
+            .paragraphStyle,
+            at: leftLocation,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        let rightStyle = rendered.attribute(
+            .paragraphStyle,
+            at: rightLocation,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        #expect(leftStyle?.alignment == .left)
+        #expect(rightStyle?.alignment == .right)
+    }
+
+    @Test
     func blockQuoteAndThematicBreakAreStripped() {
         let rendered = render("> quoted line\n\n---\n\nafter")
         let text = rendered.string

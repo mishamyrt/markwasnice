@@ -64,9 +64,11 @@ struct MarkdownPreviewRenderer {
             }
         case is ThematicBreak:
             return renderThematicBreak(indent: indent)
+        case let table as Markdown.Table:
+            return renderTable(table, indent: indent, isQuoted: isQuoted)
         default:
-            // Unknown blocks (tables, directives, …) fall back to their
-            // markdown source rendered as body text.
+            // Unknown blocks (directives, …) fall back to their markdown
+            // source rendered as body text.
             return renderPlainParagraph(
                 block.format().trimmingCharacters(in: .whitespacesAndNewlines),
                 indent: indent,
@@ -271,6 +273,205 @@ struct MarkdownPreviewRenderer {
                 .paragraphStyle: style,
             ]
         )
+    }
+
+    // MARK: Tables
+
+    private func renderTable(
+        _ table: Markdown.Table,
+        indent: CGFloat,
+        isQuoted: Bool
+    ) -> NSAttributedString {
+        let columnCount = table.maxColumnCount
+        guard columnCount > 0 else {
+            return NSAttributedString()
+        }
+
+        let textTable = NSTextTable()
+        textTable.numberOfColumns = columnCount
+        textTable.layoutAlgorithm = .automaticLayoutAlgorithm
+        textTable.collapsesBorders = true
+        textTable.hidesEmptyCells = false
+
+        let alignments = table.columnAlignments
+        let bodyRows = table.body.children.compactMap { $0 as? Markdown.Table.Row }
+        let lastRowIndex = bodyRows.count
+
+        let result = NSMutableAttributedString()
+        result.append(renderTableRow(
+            cells: table.head.children.compactMap { $0 as? Markdown.Table.Cell },
+            rowIndex: 0,
+            isFirstRow: true,
+            isLastRow: lastRowIndex == 0,
+            table: textTable,
+            columnCount: columnCount,
+            alignments: alignments,
+            indent: indent,
+            isHeader: true,
+            isQuoted: isQuoted
+        ))
+        for (offset, row) in bodyRows.enumerated() {
+            let rowIndex = offset + 1
+            result.append(renderTableRow(
+                cells: row.children.compactMap { $0 as? Markdown.Table.Cell },
+                rowIndex: rowIndex,
+                isFirstRow: false,
+                isLastRow: rowIndex == lastRowIndex,
+                table: textTable,
+                columnCount: columnCount,
+                alignments: alignments,
+                indent: indent,
+                isHeader: false,
+                isQuoted: isQuoted
+            ))
+        }
+        return result
+    }
+
+    private func renderTableRow(
+        cells: [Markdown.Table.Cell],
+        rowIndex: Int,
+        isFirstRow: Bool,
+        isLastRow: Bool,
+        table: NSTextTable,
+        columnCount: Int,
+        alignments: [Markdown.Table.ColumnAlignment?],
+        indent: CGFloat,
+        isHeader: Bool,
+        isQuoted: Bool
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        var column = 0
+        for cell in cells {
+            guard column < columnCount else {
+                break
+            }
+
+            let span = min(max(1, Int(cell.colspan)), columnCount - column)
+            result.append(renderTableCell(
+                cell,
+                rowIndex: rowIndex,
+                column: column,
+                columnSpan: span,
+                isFirstRow: isFirstRow,
+                isLastRow: isLastRow,
+                table: table,
+                alignment: alignment(for: alignments, column: column),
+                indent: indent,
+                isHeader: isHeader,
+                isQuoted: isQuoted
+            ))
+            column += span
+        }
+        // Ragged rows still need a cell per column so the grid stays closed.
+        while column < columnCount {
+            result.append(renderTableCell(
+                nil,
+                rowIndex: rowIndex,
+                column: column,
+                columnSpan: 1,
+                isFirstRow: isFirstRow,
+                isLastRow: isLastRow,
+                table: table,
+                alignment: alignment(for: alignments, column: column),
+                indent: indent,
+                isHeader: isHeader,
+                isQuoted: isQuoted
+            ))
+            column += 1
+        }
+        return result
+    }
+
+    private func renderTableCell(
+        _ cell: Markdown.Table.Cell?,
+        rowIndex: Int,
+        column: Int,
+        columnSpan: Int,
+        isFirstRow: Bool,
+        isLastRow: Bool,
+        table: NSTextTable,
+        alignment: NSTextAlignment,
+        indent: CGFloat,
+        isHeader: Bool,
+        isQuoted: Bool
+    ) -> NSAttributedString {
+        let block = NSTextTableBlock(
+            table: table,
+            startingRow: rowIndex,
+            rowSpan: 1,
+            startingColumn: column,
+            columnSpan: columnSpan
+        )
+        block.setBorderColor(theme.colors.thematicBreak)
+        block.setWidth(1, type: .absoluteValueType, for: .border)
+        let padding = theme.baseFontSize * 0.45
+        block.setWidth(padding, type: .absoluteValueType, for: .padding)
+        if isHeader {
+            block.backgroundColor = theme.colors.codeBackground
+        }
+        // Detach the table from surrounding paragraphs without collapsing its
+        // internal borders.
+        if isFirstRow {
+            block.setWidth(
+                theme.baseFontSize * 0.7,
+                type: .absoluteValueType,
+                for: .margin,
+                edge: .minY
+            )
+        }
+        if isLastRow {
+            block.setWidth(
+                theme.baseFontSize * 0.7,
+                type: .absoluteValueType,
+                for: .margin,
+                edge: .maxY
+            )
+        }
+
+        let style = NSMutableParagraphStyle()
+        style.textBlocks = [block]
+        style.alignment = alignment
+        style.minimumLineHeight = baseLineHeight
+        style.maximumLineHeight = baseLineHeight
+        style.firstLineHeadIndent = indent
+        style.headIndent = indent
+
+        let context = InlineContext(
+            fontSize: theme.baseFontSize,
+            bold: isHeader,
+            foreground: foreground(isQuoted: isQuoted),
+            paragraphStyle: style
+        )
+        let result = NSMutableAttributedString()
+        if let cell {
+            result.append(renderInlineChildren(of: cell, context: context))
+        }
+        result.append(NSAttributedString(
+            string: "\n",
+            attributes: attributes(for: context)
+        ))
+        return result
+    }
+
+    private func alignment(
+        for alignments: [Markdown.Table.ColumnAlignment?],
+        column: Int
+    ) -> NSTextAlignment {
+        guard column < alignments.count else {
+            return .natural
+        }
+
+        switch alignments[column] {
+        case .left:
+            return .left
+        case .center:
+            return .center
+        case .right:
+            return .right
+        case nil:
+            return .natural
+        }
     }
 
     // MARK: Inlines
