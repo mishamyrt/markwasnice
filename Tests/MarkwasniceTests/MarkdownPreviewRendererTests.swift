@@ -179,4 +179,21 @@ struct MarkdownPreviewRendererTests {
         #expect(!text.contains("---"))
         #expect(text.contains("after"))
     }
+
+    @Test
+    func hidesFrontmatter() {
+        let rendered = render("---\ntitle: Secret\n---\n# Visible\n\nBody")
+        let text = rendered.string
+        #expect(!text.contains("Secret"))
+        #expect(!text.contains("title"))
+        #expect(text.contains("Visible"))
+        #expect(text.contains("Body"))
+    }
+
+    @Test
+    func rendersUnclosedLeadingDashesAsBefore() {
+        // No closing delimiter → not frontmatter; the body must survive.
+        let rendered = render("---\n\nText")
+        #expect(rendered.string.contains("Text"))
+    }
 }

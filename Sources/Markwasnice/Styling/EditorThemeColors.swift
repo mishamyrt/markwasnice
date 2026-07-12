@@ -11,6 +11,7 @@ struct EditorThemeColors: Equatable {
         var underline: NSColor
         var thematicBreak: NSColor
         var listMarker: NSColor
+        var frontmatter: NSColor
     }
 
     var light: Variant
@@ -59,7 +60,8 @@ struct EditorThemeColors: Equatable {
                 blue: 0.55,
                 alpha: 1
             ),
-            listMarker: lightForeground.withAlphaComponent(0.4)
+            listMarker: lightForeground.withAlphaComponent(0.4),
+            frontmatter: lightForeground.withAlphaComponent(0.5)
         ),
         dark: Variant(
             background: NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.08, alpha: 1),
@@ -80,7 +82,8 @@ struct EditorThemeColors: Equatable {
                 blue: 0.41,
                 alpha: 1
             ),
-            listMarker: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1)
+            listMarker: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1),
+            frontmatter: darkForeground.withAlphaComponent(0.5)
         )
     )
 }

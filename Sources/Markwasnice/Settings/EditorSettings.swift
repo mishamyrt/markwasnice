@@ -24,7 +24,7 @@ struct EditorSettings: Equatable {
     var maxTextColumns: Int
     var tabInsertionMode: TabInsertionMode
     var tabWidth: Int
-    var typographyLocale: TypographyLocale = EditorSettings.defaultTypographyLocale
+    var typographyLocale: TypographyLocale = Self.defaultTypographyLocale
 
     var basePointSize: CGFloat {
         Self.defaultBasePointSize * textSizeScale

@@ -34,6 +34,7 @@ struct ResolvedMarkdownStyleSpan: Equatable {
 }
 
 enum MarkdownStyleKind: Equatable, Hashable {
+    case frontmatter
     case heading
     case strong
     case emphasis
@@ -53,7 +54,8 @@ enum MarkdownStyleKind: Equatable, Hashable {
 extension MarkdownStyleKind {
     var isBlockStyle: Bool {
         switch self {
-        case .heading, .codeBlock, .blockQuote, .orderedList, .unorderedList:
+        case .frontmatter, .heading, .codeBlock, .blockQuote, .orderedList,
+             .unorderedList:
             return true
         case .strong, .emphasis, .strikethrough, .inlineCode, .link, .image,
              .linkSyntaxPunctuation, .linkDestination, .thematicBreak:

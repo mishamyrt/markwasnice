@@ -70,7 +70,7 @@ struct TypingOverSelectionFuzzTests {
                 editor.applyParsedStyles(
                     parse.spans, dirtyRanges: parse.dirtyRanges
                 )
-                if iteration % 2 == 0 {
+                if iteration.isMultiple(of: 2) {
                     editor.setFocusModeEnabled(true)
                 }
 

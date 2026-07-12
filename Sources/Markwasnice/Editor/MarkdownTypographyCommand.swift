@@ -32,7 +32,7 @@ enum MarkdownTypographyCommand {
             : NSRange(location: 0, length: nsString.length)
 
         let parsedRanges = parsedProtectedRanges(in: text)
-        let segments: [NSRange]
+        var segments: [NSRange]
         if hasSelection,
            parsedRanges.code.contains(where: { contains($0, selectedRange) })
         {
@@ -42,6 +42,22 @@ enum MarkdownTypographyCommand {
                 + markerPrefixRanges(in: nsString))
                 .sorted { $0.location < $1.location }
             segments = subtracting(protected, from: targetRange)
+        }
+
+        // The frontmatter block is protected as a whole above; only its
+        // string values come back as segments. Quote delimiters of quoted
+        // scalars are excluded from the segments, so the quote rule sees the
+        // inner content in isolation: embedded quotes become «guillemets»
+        // while the YAML delimiters stay straight ASCII.
+        if let frontmatter = MarkdownFrontmatter.range(in: text) {
+            let valueSegments = FrontmatterValueScanner
+                .valueRanges(in: frontmatter, source: nsString)
+                .compactMap { value -> NSRange? in
+                    let clipped = NSIntersectionRange(value, targetRange)
+                    return clipped.length > 0 ? clipped : nil
+                }
+            segments = (valueSegments + segments)
+                .sorted { $0.location < $1.location }
         }
 
         let typograf = Typograf(configuration: configuration(for: locale))
@@ -148,6 +164,11 @@ enum MarkdownTypographyCommand {
             case .codeBlock, .inlineCode:
                 code.append(span.range)
             case .thematicBreak:
+                structure.append(span.range)
+            case .frontmatter:
+                // Excluded from the generic pass as a whole; string values
+                // inside it are re-added as dedicated segments by
+                // FrontmatterValueScanner in replacements(in:selectedRange:locale:).
                 structure.append(span.range)
             default:
                 break

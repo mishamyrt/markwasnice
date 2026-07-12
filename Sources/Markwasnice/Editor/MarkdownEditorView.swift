@@ -1513,10 +1513,26 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let string = source as NSString
         var lineStart = range.location
         let upperBound = min(NSMaxRange(range), string.length)
+        let frontmatterRange = MarkdownFrontmatter.range(in: string)
 
         while lineStart < upperBound {
             let lineRange = string.lineRange(for: NSRange(location: lineStart, length: 0))
             defer { lineStart = max(NSMaxRange(lineRange), lineStart + 1) }
+
+            // Frontmatter is re-scanned per call (cheap: O(1) unless the
+            // document opens with "---") rather than cached like code blocks,
+            // so typing the delimiter lines opens/closes the block with no
+            // staleness. Suppresses the analyzer's thematic-break match on
+            // "---" and all markdown styling inside the block.
+            if let frontmatterRange,
+               NSIntersectionRange(frontmatterRange, lineRange).length > 0
+            {
+                spans.append(ResolvedMarkdownStyleSpan(
+                    range: frontmatterRange,
+                    kind: .frontmatter
+                ))
+                continue
+            }
 
             // Inside a known (parser-derived) code block: style as code and
             // skip the inline scanner. Markdown-looking tokens inside code
@@ -1606,6 +1622,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             textStorage.addAttribute(
                 .foregroundColor,
                 value: colors.thematicBreak,
+                range: range
+            )
+        case .frontmatter:
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: colors.frontmatter,
                 range: range
             )
         }

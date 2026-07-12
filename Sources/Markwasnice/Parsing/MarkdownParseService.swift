@@ -98,7 +98,25 @@ final class MarkdownParseService {
                 return ResolvedMarkdownStyleSpan(range: range, kind: span.kind)
             }
 
-        let spans = MarkdownLinkStyleResolver.resolve(spans: resolvedSpans, in: text)
+        var spans = MarkdownLinkStyleResolver.resolve(spans: resolvedSpans, in: text)
+        if let frontmatterRange = MarkdownFrontmatter.range(in: text) {
+            // cmark reads the block as thematic breaks, setext headings and
+            // paragraphs; every such span lies inside the block, so whole
+            // spans are dropped rather than clipped. Editing inside the block
+            // dirties all of its lines each parse (the span differ drops the
+            // block span when an edit overlaps it) — same shape as
+            // .codeBlock, and frontmatter blocks are small.
+            spans.removeAll {
+                NSIntersectionRange($0.range, frontmatterRange).length > 0
+            }
+            spans.insert(
+                ResolvedMarkdownStyleSpan(
+                    range: frontmatterRange,
+                    kind: .frontmatter
+                ),
+                at: 0
+            )
+        }
         guard !Task.isCancelled else {
             return nil
         }
