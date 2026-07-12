@@ -5,6 +5,10 @@ protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
     func markdownEditorViewDidScroll(_ editorView: MarkdownEditorView)
     func markdownEditorViewShowSearch(_ editorView: MarkdownEditorView)
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        requestOpenFileURLs urls: [URL]
+    )
 }
 
 private enum MarkdownEditorDiagnostics {
@@ -652,33 +656,53 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     func markdownTextViewDraggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        imageFileURL(from: sender.draggingPasteboard) == nil ? [] : .copy
+        dragOperation(for: sender)
     }
 
     func markdownTextViewPerformDragOperation(
         _ sender: NSDraggingInfo,
         in textView: NSTextView
     ) -> Bool {
-        guard let url = imageFileURL(from: sender.draggingPasteboard) else {
-            return false
-        }
-
-        let point = textView.convert(sender.draggingLocation, from: nil)
-        insertMarkdownImage(for: url, at: point)
-        return true
+        performFileDrop(sender, insertionView: textView)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        markdownTextViewDraggingEntered(sender)
+        dragOperation(for: sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let url = imageFileURL(from: sender.draggingPasteboard) else {
+        performFileDrop(sender, insertionView: textView)
+    }
+
+    /// A drop of markdown/text files opens them as documents; a dropped image
+    /// is inserted as a Markdown image link at the drop point. Opening takes
+    /// precedence so dragging a `.md` file never pastes its path into the text.
+    private func dragOperation(for sender: NSDraggingInfo) -> NSDragOperation {
+        let pasteboard = sender.draggingPasteboard
+        guard openableFileURLs(from: pasteboard).isEmpty else {
+            return .copy
+        }
+
+        return imageFileURL(from: pasteboard) == nil ? [] : .copy
+    }
+
+    private func performFileDrop(
+        _ sender: NSDraggingInfo,
+        insertionView: NSTextView
+    ) -> Bool {
+        let pasteboard = sender.draggingPasteboard
+        let openableURLs = openableFileURLs(from: pasteboard)
+        guard openableURLs.isEmpty else {
+            delegate?.markdownEditorView(self, requestOpenFileURLs: openableURLs)
+            return true
+        }
+
+        guard let url = imageFileURL(from: pasteboard) else {
             return false
         }
 
-        let point = convert(sender.draggingLocation, from: nil)
-        insertMarkdownImage(for: url, at: textView.convert(point, from: self))
+        let point = insertionView.convert(sender.draggingLocation, from: nil)
+        insertMarkdownImage(for: url, at: point)
         return true
     }
 
@@ -1865,6 +1889,28 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         return url.absoluteString
+    }
+
+    /// File URLs on the pasteboard that the editor can open as documents:
+    /// Markdown and plain-text files (Markdown conforms to `public.plain-text`).
+    private func openableFileURLs(from pasteboard: NSPasteboard) -> [URL] {
+        guard let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: nil
+        ) as? [URL]
+        else {
+            return []
+        }
+
+        return urls.filter { url in
+            guard url.isFileURL,
+                  let type = UTType(filenameExtension: url.pathExtension)
+            else {
+                return false
+            }
+
+            return type.conforms(to: .plainText)
+        }
     }
 
     private func imageFileURL(from pasteboard: NSPasteboard) -> URL? {

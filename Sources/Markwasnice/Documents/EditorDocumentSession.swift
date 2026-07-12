@@ -12,6 +12,10 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     let editorView: MarkdownEditorView
     let shellState: EditorShellState
 
+    /// Opens files dropped onto this session's window; wired by the app state,
+    /// which owns the session registry and the open flow.
+    var onOpenFiles: (([URL], NSWindow?) -> Void)?
+
     private let stylingController: MarkdownStylingController
     private let onAutosaveNeeded: () -> Void
     private var wordCountTask: Task<Void, Never>?
@@ -125,6 +129,13 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     func markdownEditorViewShowSearch(_: MarkdownEditorView) {
         showSearch()
+    }
+
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        requestOpenFileURLs urls: [URL]
+    ) {
+        onOpenFiles?(urls, editorView.window)
     }
 
     func updateWindowWidth(_ width: CGFloat) {

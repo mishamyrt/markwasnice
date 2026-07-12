@@ -370,6 +370,11 @@ final class MarkwasniceAppState: ObservableObject {
         ) { [weak self] in
             self?.scheduleAutosave()
         }
+        session.onOpenFiles = { [weak self] urls, window in
+            for url in urls {
+                self?.queueOpen(url, inTabOf: window)
+            }
+        }
         sessions[session.id] = session
         return session
     }
