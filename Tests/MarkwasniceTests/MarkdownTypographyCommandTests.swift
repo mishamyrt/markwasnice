@@ -118,9 +118,24 @@ struct MarkdownTypographyCommandTests {
         #expect(adjusted == NSRange(location: 0, length: (result as NSString).length))
     }
 
+    // The sample must avoid short prepositions ("без", "и"): those
+    // legitimately gain a non-breaking space, so text containing them is
+    // not "unchanged".
     @Test func returnsNothingForUnchangedText() {
         #expect(MarkdownTypographyCommand.replacements(
-            in: "Обычный текст без изменений",
+            in: "Совершенно обычный текст",
+            selectedRange: NSRange(location: 0, length: 0),
+            locale: .russian
+        ).isEmpty)
+    }
+
+    /// Text that already went through the command is typographically
+    /// settled: a second pass must be a no-op, otherwise repeated "Fix
+    /// Typography" invocations would keep dirtying the document.
+    @Test func secondPassReturnsNothing() {
+        let processed = apply("Он сказал \"привет\" - и ушел, без сомнений...")
+        #expect(MarkdownTypographyCommand.replacements(
+            in: processed,
             selectedRange: NSRange(location: 0, length: 0),
             locale: .russian
         ).isEmpty)
