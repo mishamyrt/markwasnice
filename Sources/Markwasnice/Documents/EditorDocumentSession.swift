@@ -131,6 +131,10 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         showSearch()
     }
 
+    func markdownEditorViewRequestInsertTable(_: MarkdownEditorView) {
+        requestInsertTable()
+    }
+
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
         requestOpenFileURLs urls: [URL]
@@ -216,6 +220,19 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
 
         editorView.applyMarkup(command)
+    }
+
+    func requestInsertTable() {
+        guard !shellState.isPreviewActive,
+              let window = editorView.window
+        else {
+            return
+        }
+
+        InsertTableDialog.present(in: window) { [weak self] rows, columns in
+            self?.editorView.insertTable(rows: rows, columns: columns)
+            self?.editorView.focus()
+        }
     }
 
     func fixTypography() {

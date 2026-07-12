@@ -175,6 +175,10 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.applyMarkup(command)
     }
 
+    func insertTable() {
+        activeSession?.requestInsertTable()
+    }
+
     func fixTypography() {
         activeSession?.fixTypography()
     }
@@ -550,6 +554,12 @@ struct MarkwasniceCommands: Commands {
                 "Code Block", .codeBlock,
                 keyEquivalent: "j", modifiers: [.command, .shift]
             )
+
+            Divider()
+            Button("Insert Table...") {
+                appState.insertTable()
+            }
+            .keyboardShortcut("g", modifiers: [.command, .option])
 
             Divider()
             markdownCommand(

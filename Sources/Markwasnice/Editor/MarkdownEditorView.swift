@@ -5,6 +5,7 @@ protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
     func markdownEditorViewDidScroll(_ editorView: MarkdownEditorView)
     func markdownEditorViewShowSearch(_ editorView: MarkdownEditorView)
+    func markdownEditorViewRequestInsertTable(_ editorView: MarkdownEditorView)
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
         requestOpenFileURLs urls: [URL]
@@ -553,6 +554,24 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
+    func insertTable(rows: Int, columns: Int) {
+        guard let edit = MarkdownTableCommand.edit(
+            in: textView.string,
+            selectedRange: textView.selectedRange(),
+            rows: rows,
+            columns: columns
+        ) else {
+            return
+        }
+
+        replaceText(
+            in: edit.replacementRange,
+            with: edit.replacementString,
+            selectedRange: edit.selectedRange
+        )
+        textView.scrollRangeToVisible(edit.selectedRange)
+    }
+
     func wrapSelectionWithQuotes(opening: String, closing: String) {
         _ = wrapSelection(opening: opening, closing: closing)
     }
@@ -597,6 +616,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         _: NSTextView, applyMarkup command: MarkdownMarkupCommand
     ) {
         applyMarkup(command)
+    }
+
+    func markdownTextViewRequestInsertTable(_: NSTextView) {
+        delegate?.markdownEditorViewRequestInsertTable(self)
     }
 
     func markdownTextViewInsertTab(_: NSTextView) {

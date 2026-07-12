@@ -8,6 +8,7 @@ protocol MarkdownTextViewCommandDelegate: AnyObject {
     func markdownTextView(
         _ textView: NSTextView, applyMarkup command: MarkdownMarkupCommand
     )
+    func markdownTextViewRequestInsertTable(_ textView: NSTextView)
     func markdownTextView(
         _ textView: NSTextView, wrapSelectionWith opening: String, closing: String
     ) -> Bool
@@ -376,14 +377,30 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = super.menu(for: event)
-        guard let menu, selectedRange().length > 0 else {
-            return menu
+        guard let menu = super.menu(for: event) else {
+            return nil
         }
 
-        menu.insertItem(submenuItem(title: "Style", menu: styleMenu()), at: 0)
-        menu.insertItem(submenuItem(title: "Copy as", menu: copyAsMenu()), at: 1)
-        menu.insertItem(NSMenuItem.separator(), at: 2)
+        var index = 0
+        if selectedRange().length > 0 {
+            menu.insertItem(
+                submenuItem(title: "Style", menu: styleMenu()), at: index
+            )
+            index += 1
+            menu.insertItem(
+                submenuItem(title: "Copy as", menu: copyAsMenu()), at: index
+            )
+            index += 1
+        }
+
+        let insertTable = NSMenuItem(
+            title: "Insert Table...",
+            action: #selector(insertTableMenuItem(_:)),
+            keyEquivalent: ""
+        )
+        insertTable.target = self
+        menu.insertItem(insertTable, at: index)
+        menu.insertItem(NSMenuItem.separator(), at: index + 1)
         return menu
     }
 
@@ -433,6 +450,10 @@ final class MarkdownTextView: NSTextView {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.submenu = menu
         return item
+    }
+
+    @objc private func insertTableMenuItem(_: NSMenuItem) {
+        commandDelegate?.markdownTextViewRequestInsertTable(self)
     }
 
     @objc private func applyStyleMenuItem(_ sender: NSMenuItem) {
