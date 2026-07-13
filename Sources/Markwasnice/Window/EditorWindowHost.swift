@@ -215,15 +215,8 @@ private final class WindowLifecycleView: NSView {
         window.tabbingIdentifier = EditorWindowTabbing.identifier
         window.tabbingMode = .automatic
         window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
         window.styleMask.insert(.fullSizeContentView)
-        if window.toolbar == nil {
-            let toolbar = NSToolbar()
-            toolbar.allowsUserCustomization = false
-            toolbar.displayMode = .iconOnly
-            window.toolbar = toolbar
-        }
-        window.toolbarStyle = .unified
+        EditorWindowChrome.installBaseToolbar(on: window)
         window.acceptsMouseMovedEvents = true
         window.isMovableByWindowBackground = false
         window.isOpaque = false

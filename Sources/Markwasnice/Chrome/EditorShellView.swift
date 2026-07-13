@@ -1090,11 +1090,8 @@ private final class ToolbarVisibilityView: NSView {
             }
 
             window.titlebarAppearsTransparent = true
-            if !isSystemManaged, window.toolbar == nil {
-                let toolbar = NSToolbar()
-                toolbar.allowsUserCustomization = false
-                toolbar.displayMode = .iconOnly
-                window.toolbar = toolbar
+            if !isSystemManaged {
+                EditorWindowChrome.installBaseToolbar(on: window)
             }
 
             let alpha = isSystemManaged || isToolbarVisible ? 1.0 : 0.0
