@@ -416,6 +416,12 @@ final class MarkwasniceAppState: ObservableObject {
     }
 
     private func applySettings(_ settings: EditorSettings) {
+        // Continuous slider drags resend unchanged values; skip the
+        // whole-document restyle of every session when nothing changed.
+        guard settings != self.settings else {
+            return
+        }
+
         self.settings = settings
         settingsStore.save(settings)
         for session in sessions.values {
