@@ -37,18 +37,17 @@ enum MarkdownStyleRangeDiffer {
         }
     }
 
+    /// `lineRanges` are the newline-inclusive UTF-16 line ranges of `source`,
+    /// as `SourceMap.lineRanges()` returns them — the parse pipeline already
+    /// has them, so the differ doesn't rescan the document.
     static func dirtyRanges(
         from previousSpans: [ResolvedMarkdownStyleSpan],
         to currentSpans: [ResolvedMarkdownStyleSpan],
-        source: String
+        source: String,
+        lineRanges: [NSRange]
     ) -> [NSRange] {
         let string = source as NSString
-        guard string.length > 0 else {
-            return []
-        }
-
-        let lineRanges = Self.lineRanges(in: source)
-        guard !lineRanges.isEmpty else {
+        guard string.length > 0, !lineRanges.isEmpty else {
             return []
         }
 
@@ -280,25 +279,6 @@ enum MarkdownStyleRangeDiffer {
         }
 
         return max(0, intersection.length - 1)
-    }
-
-    private static func lineRanges(in source: String) -> [NSRange] {
-        let string = source as NSString
-        var ranges: [NSRange] = []
-        var location = 0
-
-        while location <= string.length {
-            let range = string.lineRange(for: NSRange(location: location, length: 0))
-            ranges.append(range)
-
-            let nextLocation = NSMaxRange(range)
-            guard nextLocation > location else {
-                break
-            }
-            location = nextLocation
-        }
-
-        return ranges
     }
 
     private static func mergedRanges(_ ranges: [NSRange]) -> [NSRange] {

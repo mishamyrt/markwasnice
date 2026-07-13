@@ -135,7 +135,8 @@ struct MarkdownStyleRangeDifferTests {
         let dirtyRanges = MarkdownStyleRangeDiffer.dirtyRanges(
             from: spans,
             to: spans,
-            source: source
+            source: source,
+            lineRanges: SourceMap(text: source).lineRanges()
         )
 
         #expect(dirtyRanges.isEmpty)
@@ -155,7 +156,8 @@ struct MarkdownStyleRangeDifferTests {
         let dirtyRanges = MarkdownStyleRangeDiffer.dirtyRanges(
             from: previousSpans,
             to: currentSpans,
-            source: source
+            source: source,
+            lineRanges: SourceMap(text: source).lineRanges()
         )
 
         #expect(dirtyRanges == [lineRange(in: source, matching: "**word** here")])
@@ -179,7 +181,8 @@ struct MarkdownStyleRangeDifferTests {
         let dirtyRanges = MarkdownStyleRangeDiffer.dirtyRanges(
             from: previousSpans,
             to: currentSpans,
-            source: source
+            source: source,
+            lineRanges: SourceMap(text: source).lineRanges()
         )
 
         #expect(dirtyRanges.isEmpty)
@@ -196,7 +199,8 @@ struct MarkdownStyleRangeDifferTests {
         let dirtyRanges = MarkdownStyleRangeDiffer.dirtyRanges(
             from: previousSpans,
             to: currentSpans,
-            source: source
+            source: source,
+            lineRanges: SourceMap(text: source).lineRanges()
         )
 
         #expect(dirtyRanges == [lineRange(in: source, matching: "# Heading")])
@@ -293,7 +297,8 @@ struct MarkdownStyleRangeDifferTests {
         let dirtyRanges = MarkdownStyleRangeDiffer.dirtyRanges(
             from: previousSpans,
             to: currentSpans,
-            source: current
+            source: current,
+            lineRanges: SourceMap(text: current).lineRanges()
         )
 
         #expect(dirtyRanges == [lineRange(in: current, matching: "- new")])

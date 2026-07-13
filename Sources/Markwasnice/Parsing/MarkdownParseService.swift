@@ -126,14 +126,20 @@ final class MarkdownParseService {
             sourceLength: text.utf16.count,
             source: text,
             spans: spans,
-            dirtyRanges: dirtyRanges(from: previous, to: spans, source: text)
+            dirtyRanges: dirtyRanges(
+                from: previous,
+                to: spans,
+                source: text,
+                sourceMap: sourceMap
+            )
         )
     }
 
     nonisolated private static func dirtyRanges(
         from previous: MarkdownParseResult?,
         to spans: [ResolvedMarkdownStyleSpan],
-        source: String
+        source: String,
+        sourceMap: SourceMap
     ) -> [NSRange]? {
         guard let previous else {
             return nil
@@ -152,7 +158,8 @@ final class MarkdownParseService {
         var ranges = MarkdownStyleRangeDiffer.dirtyRanges(
             from: translatedSpans,
             to: spans,
-            source: source
+            source: source,
+            lineRanges: sourceMap.lineRanges()
         )
 
         // The heuristic local styling applied while typing can diverge from

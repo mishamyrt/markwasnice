@@ -22,6 +22,26 @@ struct SourceMap {
         return NSRange(location: lower, length: upper - lower)
     }
 
+    /// UTF-16 line ranges including the trailing newline, matching
+    /// NSString.lineRange(for:) semantics — the lines are already computed,
+    /// so callers avoid another full-document walk.
+    func lineRanges() -> [NSRange] {
+        var result: [NSRange] = []
+        result.reserveCapacity(lines.count)
+
+        for (index, line) in lines.enumerated() {
+            let nextLineStart = index + 1 < lines.count
+                ? lines[index + 1].utf16StartOffset
+                : textLength
+            result.append(NSRange(
+                location: line.utf16StartOffset,
+                length: nextLineStart - line.utf16StartOffset
+            ))
+        }
+
+        return result
+    }
+
     private func utf16Offset(for location: SourceLocation) -> Int? {
         guard location.line > 0, location.line <= lines.count else {
             return nil
