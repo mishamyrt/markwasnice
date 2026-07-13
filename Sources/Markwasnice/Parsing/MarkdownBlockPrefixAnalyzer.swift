@@ -11,26 +11,11 @@ enum MarkdownBlockPrefixAnalyzer {
         try! NSRegularExpression(pattern: #"^[ \t]*>"#)
     private static let thematicBreakRegex =
         try! NSRegularExpression(pattern: #"^[ \t]*([-+*][ \t]*){3,}$"#)
-    private static let anyFenceRegex =
-        try! NSRegularExpression(pattern: #"^[ \t]*(`{3,}|~{3,}).*$"#)
-    private static let closingFenceRegex =
-        try! NSRegularExpression(pattern: #"^[ \t]*(`{3,}|~{3,})[ \t]*$"#)
 
-    static func blockSpan(
-        for lineRange: NSRange,
-        source: String
-    ) -> ResolvedMarkdownStyleSpan? {
-        if let codeBlockRange = codeBlockRange(containing: lineRange, in: source) {
-            return ResolvedMarkdownStyleSpan(range: codeBlockRange, kind: .codeBlock)
-        }
-
-        return prefixBlockSpan(for: lineRange, source: source)
-    }
-
-    /// Line-prefix block detection only — no fenced-code-block containment
-    /// scan. The fence scan walks the document from the start and is too slow
-    /// to run per keystroke; callers that already know the code block ranges
-    /// (e.g. from the last parse) should use this variant.
+    /// Line-prefix block detection only — deliberately no fenced-code-block
+    /// containment scan, which would have to walk the document from the start
+    /// and is too slow to run per keystroke. Callers get code block ranges
+    /// from the last parse's spans instead.
     static func prefixBlockSpan(
         for lineRange: NSRange,
         source: String
@@ -60,108 +45,6 @@ enum MarkdownBlockPrefixAnalyzer {
         return nil
     }
 
-    private static func codeBlockRange(
-        containing lineRange: NSRange,
-        in source: String
-    ) -> NSRange? {
-        let string = source as NSString
-        guard let openingFence = openingFenceLine(before: lineRange.location, in: source)
-        else {
-            return nil
-        }
-
-        let openingLineRange = string.lineRange(for: NSRange(
-            location: openingFence.location,
-            length: 0
-        ))
-        var lineStart = NSMaxRange(openingLineRange)
-
-        while lineStart < string.length {
-            let currentLineRange = string.lineRange(for: NSRange(
-                location: lineStart,
-                length: 0
-            ))
-
-            if let marker = fenceMarker(
-                for: currentLineRange, in: source, matching: closingFenceRegex
-            ),
-                marker.character == openingFence.marker.character,
-                marker.length >= openingFence.marker.length
-            {
-                return NSRange(
-                    location: openingFence.location,
-                    length: NSMaxRange(currentLineRange) - openingFence.location
-                )
-            }
-
-            lineStart = NSMaxRange(currentLineRange)
-        }
-
-        return NSRange(
-            location: openingFence.location,
-            length: string.length - openingFence.location
-        )
-    }
-
-    private static func openingFenceLine(
-        before location: Int,
-        in source: String
-    ) -> (location: Int, marker: FenceMarker)? {
-        let string = source as NSString
-        var lineStart = 0
-        var activeFence: (location: Int, marker: FenceMarker)?
-
-        while lineStart < string.length {
-            let lineRange = string.lineRange(for: NSRange(location: lineStart, length: 0))
-            defer { lineStart = NSMaxRange(lineRange) }
-
-            if lineRange.location > location {
-                break
-            }
-
-            guard let marker = fenceMarker(
-                for: lineRange, in: source, matching: anyFenceRegex
-            ) else {
-                continue
-            }
-
-            if let active = activeFence {
-                if marker.character == active.marker.character,
-                   marker.length >= active.marker.length
-                {
-                    activeFence = nil
-                }
-            } else {
-                activeFence = (lineRange.location, marker)
-            }
-        }
-
-        return activeFence
-    }
-
-    private static func fenceMarker(
-        for lineRange: NSRange,
-        in source: String,
-        matching regex: NSRegularExpression
-    ) -> FenceMarker? {
-        let line = (source as NSString).substring(with: lineRange)
-        guard let match = regex.firstMatch(
-            in: line,
-            range: NSRange(location: 0, length: (line as NSString).length)
-        ),
-            match.numberOfRanges >= 2
-        else {
-            return nil
-        }
-
-        let markerRange = match.range(at: 1)
-        let marker = (line as NSString).substring(with: markerRange)
-        return FenceMarker(
-            character: marker.hasPrefix("`") ? .backtick : .tilde,
-            length: marker.utf16.count
-        )
-    }
-
     private static func lineMatches(
         _ regex: NSRegularExpression,
         _ line: String
@@ -171,14 +54,4 @@ enum MarkdownBlockPrefixAnalyzer {
             range: NSRange(location: 0, length: (line as NSString).length)
         ) != nil
     }
-}
-
-private struct FenceMarker {
-    let character: FenceCharacter
-    let length: Int
-}
-
-private enum FenceCharacter {
-    case backtick
-    case tilde
 }

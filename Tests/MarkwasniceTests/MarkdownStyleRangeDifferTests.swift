@@ -230,7 +230,7 @@ struct MarkdownStyleRangeDifferTests {
         let source = "# Title"
         let lineRange = (source as NSString).lineRange(for: NSRange(location: 0, length: 0))
 
-        let span = MarkdownBlockPrefixAnalyzer.blockSpan(for: lineRange, source: source)
+        let span = MarkdownBlockPrefixAnalyzer.prefixBlockSpan(for: lineRange, source: source)
 
         #expect(span?.kind == .heading)
     }
@@ -240,7 +240,7 @@ struct MarkdownStyleRangeDifferTests {
         let source = "- item"
         let lineRange = (source as NSString).lineRange(for: NSRange(location: 0, length: 0))
 
-        let span = MarkdownBlockPrefixAnalyzer.blockSpan(for: lineRange, source: source)
+        let span = MarkdownBlockPrefixAnalyzer.prefixBlockSpan(for: lineRange, source: source)
 
         #expect(span?.kind == .unorderedList)
     }
@@ -250,7 +250,7 @@ struct MarkdownStyleRangeDifferTests {
         let source = "1. item"
         let lineRange = (source as NSString).lineRange(for: NSRange(location: 0, length: 0))
 
-        let span = MarkdownBlockPrefixAnalyzer.blockSpan(for: lineRange, source: source)
+        let span = MarkdownBlockPrefixAnalyzer.prefixBlockSpan(for: lineRange, source: source)
 
         #expect(span?.kind == .orderedList)
     }
@@ -260,7 +260,7 @@ struct MarkdownStyleRangeDifferTests {
         let source = "> quote"
         let lineRange = (source as NSString).lineRange(for: NSRange(location: 0, length: 0))
 
-        let span = MarkdownBlockPrefixAnalyzer.blockSpan(for: lineRange, source: source)
+        let span = MarkdownBlockPrefixAnalyzer.prefixBlockSpan(for: lineRange, source: source)
 
         #expect(span?.kind == .blockQuote)
     }
@@ -270,30 +270,9 @@ struct MarkdownStyleRangeDifferTests {
         let source = "---"
         let lineRange = (source as NSString).lineRange(for: NSRange(location: 0, length: 0))
 
-        let span = MarkdownBlockPrefixAnalyzer.blockSpan(for: lineRange, source: source)
+        let span = MarkdownBlockPrefixAnalyzer.prefixBlockSpan(for: lineRange, source: source)
 
         #expect(span?.kind == .thematicBreak)
-    }
-
-    @Test
-    func blockAnalyzerFindsCodeBlockRange() {
-        let source = "```\ncode\n```"
-        let codeLineRange = (source as NSString).lineRange(for: NSRange(location: 4, length: 0))
-
-        let span = MarkdownBlockPrefixAnalyzer.blockSpan(for: codeLineRange, source: source)
-
-        #expect(span?.kind == .codeBlock)
-        #expect(span?.range == NSRange(location: 0, length: source.utf16.count))
-    }
-
-    @Test
-    func blockAnalyzerSkipsInlineMarkupInsideCodeBlock() {
-        let source = "```\n**not bold**\n```"
-        let lineRange = (source as NSString).lineRange(for: NSRange(location: 4, length: 0))
-
-        let blockSpan = MarkdownBlockPrefixAnalyzer.blockSpan(for: lineRange, source: source)
-
-        #expect(blockSpan?.kind == .codeBlock)
     }
 
     @Test
