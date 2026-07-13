@@ -106,19 +106,24 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         stylingController.scheduleParse(text: text)
         // didSet observers don't fire during init.
         updateTitle()
-        scheduleWordCount()
+        scheduleWordCount(text: text)
     }
 
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView) {
-        guard editorView.string != text else {
+        // Each editorView.string access bridges the whole backing store into
+        // a fresh String; read it once per change.
+        let newText = editorView.string
+        guard newText != text else {
             return
         }
 
-        text = editorView.string
-        hasUnsavedFileChanges = true
+        text = newText
+        if !hasUnsavedFileChanges {
+            hasUnsavedFileChanges = true
+        }
         onAutosaveNeeded()
-        stylingController.scheduleParse(text: editorView.string)
-        scheduleWordCount()
+        stylingController.scheduleParse(text: newText)
+        scheduleWordCount(text: newText)
         refreshSearchMatches(selectsFirstMatch: false)
         hideChrome()
     }
@@ -201,7 +206,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.documentURL = url
         editorView.setString(text, clearsUndo: true)
         stylingController.scheduleParse(text: text)
-        scheduleWordCount()
+        scheduleWordCount(text: text)
         refreshSearchMatches(selectsFirstMatch: false)
         onAutosaveNeeded()
     }
@@ -446,9 +451,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         shellState.updateTitle(title, isEdited: hasUnsavedFileChanges)
     }
 
-    private func scheduleWordCount() {
+    private func scheduleWordCount(text: String) {
         wordCountTask?.cancel()
-        let text = editorView.string
         wordCountTask = Task.detached { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else {
