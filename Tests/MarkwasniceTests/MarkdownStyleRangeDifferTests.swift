@@ -32,6 +32,47 @@ struct MarkdownStyleRangeDifferTests {
     }
 
     @Test
+    func sourceChangeDetectsEditAfterMultiChunkPrefix() {
+        let base = String(repeating: "a", count: 10_000)
+        let change = MarkdownStyleRangeDiffer.sourceChange(
+            from: base + "tail",
+            to: base + "xtail"
+        )
+
+        #expect(change.previousRange == NSRange(location: 10_000, length: 0))
+        #expect(change.currentRange == NSRange(location: 10_000, length: 1))
+        #expect(change.lengthDelta == 1)
+        #expect(change.insertedText == "x")
+    }
+
+    @Test
+    func sourceChangeDetectsEditBeforeMultiChunkSuffix() {
+        let base = String(repeating: "a", count: 10_000)
+        let change = MarkdownStyleRangeDiffer.sourceChange(
+            from: "x" + base,
+            to: "y" + base
+        )
+
+        #expect(change.previousRange == NSRange(location: 0, length: 1))
+        #expect(change.currentRange == NSRange(location: 0, length: 1))
+        #expect(change.lengthDelta == 0)
+        #expect(change.insertedText == "y")
+    }
+
+    @Test
+    func sourceChangeOfIdenticalMultiChunkTextHasNoEdits() {
+        let text = String(repeating: "ab", count: 5000)
+        let change = MarkdownStyleRangeDiffer.sourceChange(
+            from: text,
+            to: text
+        )
+
+        #expect(!change.hasSourceEdits)
+        #expect(change.lengthDelta == 0)
+        #expect(change.insertedText.isEmpty)
+    }
+
+    @Test
     func translatedSpansKeepSpansBeforeEdit() {
         let spans = [
             span(in: "hello world", matching: "hello", kind: .strong),

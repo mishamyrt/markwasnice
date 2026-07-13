@@ -84,24 +84,19 @@ enum MarkdownStyleRangeDiffer {
         let previous = previousSource as NSString
         let current = currentSource as NSString
         let sharedLength = min(previous.length, current.length)
-        var prefixLength = 0
 
-        while prefixLength < sharedLength,
-              previous.character(at: prefixLength) == current.character(at: prefixLength)
-        {
-            prefixLength += 1
-        }
-
-        var previousSuffixLocation = previous.length
-        var currentSuffixLocation = current.length
-        while previousSuffixLocation > prefixLength,
-              currentSuffixLocation > prefixLength,
-              previous.character(at: previousSuffixLocation - 1)
-              == current.character(at: currentSuffixLocation - 1)
-        {
-            previousSuffixLocation -= 1
-            currentSuffixLocation -= 1
-        }
+        let prefixLength = commonPrefixLength(
+            previous,
+            current,
+            limit: sharedLength
+        )
+        let suffixLength = commonSuffixLength(
+            previous,
+            current,
+            limit: sharedLength - prefixLength
+        )
+        let previousSuffixLocation = previous.length - suffixLength
+        let currentSuffixLocation = current.length - suffixLength
 
         return SourceChange(
             previousRange: NSRange(
@@ -118,6 +113,83 @@ enum MarkdownStyleRangeDiffer {
                 length: currentSuffixLocation - prefixLength
             ))
         )
+    }
+
+    /// Comparing through getCharacters copies each chunk once and scans it
+    /// natively; per-unit character(at:) would pay a bridged call per unit
+    /// over what is nearly the whole document for an edit near its end.
+    private static let comparisonChunkLength = 4096
+
+    private static func commonPrefixLength(
+        _ previous: NSString,
+        _ current: NSString,
+        limit: Int
+    ) -> Int {
+        var previousChunk = [unichar](repeating: 0, count: comparisonChunkLength)
+        var currentChunk = [unichar](repeating: 0, count: comparisonChunkLength)
+
+        var offset = 0
+        while offset < limit {
+            let chunkLength = min(comparisonChunkLength, limit - offset)
+            previous.getCharacters(
+                &previousChunk,
+                range: NSRange(location: offset, length: chunkLength)
+            )
+            current.getCharacters(
+                &currentChunk,
+                range: NSRange(location: offset, length: chunkLength)
+            )
+
+            for index in 0 ..< chunkLength
+                where previousChunk[index] != currentChunk[index]
+            {
+                return offset + index
+            }
+
+            offset += chunkLength
+        }
+
+        return limit
+    }
+
+    private static func commonSuffixLength(
+        _ previous: NSString,
+        _ current: NSString,
+        limit: Int
+    ) -> Int {
+        var previousChunk = [unichar](repeating: 0, count: comparisonChunkLength)
+        var currentChunk = [unichar](repeating: 0, count: comparisonChunkLength)
+
+        var suffixLength = 0
+        while suffixLength < limit {
+            let chunkLength = min(comparisonChunkLength, limit - suffixLength)
+            previous.getCharacters(
+                &previousChunk,
+                range: NSRange(
+                    location: previous.length - suffixLength - chunkLength,
+                    length: chunkLength
+                )
+            )
+            current.getCharacters(
+                &currentChunk,
+                range: NSRange(
+                    location: current.length - suffixLength - chunkLength,
+                    length: chunkLength
+                )
+            )
+
+            var index = chunkLength - 1
+            while index >= 0 {
+                if previousChunk[index] != currentChunk[index] {
+                    return suffixLength + (chunkLength - 1 - index)
+                }
+                index -= 1
+            }
+
+            suffixLength += chunkLength
+        }
+
+        return limit
     }
 
     private static func signaturesByLine(
