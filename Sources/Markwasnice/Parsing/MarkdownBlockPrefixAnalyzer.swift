@@ -20,38 +20,47 @@ enum MarkdownBlockPrefixAnalyzer {
         for lineRange: NSRange,
         source: String
     ) -> ResolvedMarkdownStyleSpan? {
-        let line = (source as NSString).substring(with: lineRange)
+        // Match within the parent string rather than materializing the line
+        // as a substring — this runs per keystroke. Same pattern as
+        // MarkdownFrontmatter.isDelimiterLine.
+        var start = 0
+        var contentsEnd = 0
+        (source as NSString).getLineStart(
+            &start,
+            end: nil,
+            contentsEnd: &contentsEnd,
+            for: lineRange
+        )
+        let content = NSRange(location: start, length: contentsEnd - start)
 
-        if lineMatches(headingPrefixRegex, line) {
+        if matches(headingPrefixRegex, in: source, range: content) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .heading)
         }
 
-        if lineMatches(unorderedListPrefixRegex, line) {
+        if matches(unorderedListPrefixRegex, in: source, range: content) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .unorderedList)
         }
 
-        if lineMatches(orderedListPrefixRegex, line) {
+        if matches(orderedListPrefixRegex, in: source, range: content) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .orderedList)
         }
 
-        if lineMatches(blockQuotePrefixRegex, line) {
+        if matches(blockQuotePrefixRegex, in: source, range: content) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .blockQuote)
         }
 
-        if lineMatches(thematicBreakRegex, line) {
+        if matches(thematicBreakRegex, in: source, range: content) {
             return ResolvedMarkdownStyleSpan(range: lineRange, kind: .thematicBreak)
         }
 
         return nil
     }
 
-    private static func lineMatches(
+    private static func matches(
         _ regex: NSRegularExpression,
-        _ line: String
+        in source: String,
+        range: NSRange
     ) -> Bool {
-        regex.firstMatch(
-            in: line,
-            range: NSRange(location: 0, length: (line as NSString).length)
-        ) != nil
+        regex.firstMatch(in: source, options: [.anchored], range: range) != nil
     }
 }
