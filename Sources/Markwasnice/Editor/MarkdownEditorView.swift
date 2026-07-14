@@ -117,10 +117,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         focusScrollAdjustmentCount > 0 || focusScrollAnimator.isAnimating
     }
 
-    private static let largeEditThreshold = 8000
     private static let immediateStyleThreshold = 20000
-    private static let styleChunkLength = 16000
-    private static let backgroundChunkLength = 4000
     private static let visibleStyleBuffer = 6000
     private static let backgroundStyleIdleDelayMilliseconds = 160
 
@@ -247,13 +244,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         _ dirtyRanges: [NSRange],
         spans: [ResolvedMarkdownStyleSpan]
     ) {
-        let ranges = mergedLineRanges(dirtyRanges)
+        let string = (textView.textStorage?.string ?? "") as NSString
+        let ranges = MarkdownStylingEngine.mergedLineRanges(dirtyRanges, in: string)
         let totalLength = ranges.reduce(0) { $0 + $1.length }
 
         // A huge dirty area (e.g. an edit that reflows the whole document)
         // goes through the chunked deferred pass instead of one synchronous
         // sweep.
-        guard totalLength <= Self.styleChunkLength else {
+        guard totalLength <= MarkdownStylingEngine.styleChunkLength else {
             scheduleDeferredDocumentStyling(spans: spans)
             return
         }
@@ -263,52 +261,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 continue
             }
 
-            applyStyles(in: range, spans: spansForRange(range, from: spans))
+            applyStyles(
+                in: range,
+                spans: MarkdownStylingEngine.spansForRange(range, from: spans)
+            )
         }
 
         resumeFullStylingIfNeeded(spans: spans)
-    }
-
-    private func mergedLineRanges(_ ranges: [NSRange]) -> [NSRange] {
-        guard let textStorage = textView.textStorage else {
-            return []
-        }
-
-        let string = textStorage.string as NSString
-        let lineRanges: [NSRange] = ranges.compactMap { range in
-            guard range.length >= 0,
-                  range.location >= 0,
-                  range.location <= string.length
-            else {
-                return nil
-            }
-
-            let length = min(range.length, string.length - range.location)
-            return string.lineRange(for: NSRange(
-                location: range.location,
-                length: length
-            ))
-        }
-
-        let sorted = lineRanges
-            .filter { $0.length > 0 }
-            .sorted { $0.location < $1.location }
-        guard var current = sorted.first else {
-            return []
-        }
-
-        var result: [NSRange] = []
-        for range in sorted.dropFirst() {
-            if range.location <= NSMaxRange(current) {
-                current.length = max(NSMaxRange(current), NSMaxRange(range))
-                    - current.location
-            } else {
-                result.append(current)
-                current = range
-            }
-        }
-        result.append(current)
-        return result
     }
 
     func applySettings(_ settings: EditorSettings, spans: [ResolvedMarkdownStyleSpan]) {
@@ -754,7 +713,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        let isLargeEdit = isLargeEdit(
+        let isLargeEdit = MarkdownStylingEngine.isLargeEdit(
             editedRange: editedRange,
             changeInLength: changeInLength
         )
@@ -790,7 +749,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // next selection change) subtract this range, and a stale one would
         // dim part of the paragraph being typed in.
         if let activeRange = activeFocusParagraphRange {
-            activeFocusParagraphRange = editAdjustedRange(
+            activeFocusParagraphRange = MarkdownStylingEngine.editAdjustedRange(
                 activeRange,
                 editLocation: editedRange.location,
                 changeInLength: changeInLength,
@@ -799,23 +758,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             )
         }
 
-        let location = min(editedRange.location, textStorage.length)
-        let length = max(0, min(editedRange.length, textStorage.length - location))
-        let string = textStorage.string as NSString
-        var dirtyRange = string.lineRange(
-            for: NSRange(location: location, length: length)
+        let dirtyRange = MarkdownStylingEngine.editDirtyRange(
+            editedRange: editedRange,
+            in: textStorage.string as NSString
         )
-        // Include the following line: pressing Enter splits a line and pushes
-        // its old terminator onto the next (possibly empty) line, carrying the
-        // old paragraph style with it. TextKit conforms paragraph styles to
-        // paragraph boundaries, so a heading's outdented indent would
-        // otherwise park the caret in the hash gutter until the next parse.
-        if NSMaxRange(dirtyRange) < string.length {
-            let followingLine = string.lineRange(
-                for: NSRange(location: NSMaxRange(dirtyRange), length: 0)
-            )
-            dirtyRange = NSUnionRange(dirtyRange, followingLine)
-        }
         guard let range = boundedRange(dirtyRange), range.length > 0 else {
             return
         }
@@ -1103,7 +1049,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         sourceLength: Int
     ) {
         func adjusted(_ range: NSRange) -> NSRange? {
-            editAdjustedRange(
+            MarkdownStylingEngine.editAdjustedRange(
                 range,
                 editLocation: editedRange.location,
                 changeInLength: changeInLength,
@@ -1116,40 +1062,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         codeBlockDrawRanges = codeBlockDrawRanges.compactMap(adjusted)
         pendingFullStyleRanges = pendingFullStyleRanges.compactMap(adjusted)
         pushCodeBackgroundRanges()
-    }
-
-    /// Shift/grow a range across an edit: content before the edit stays put,
-    /// content after shifts by the delta, and a range whose boundary touches
-    /// the edit absorbs it (typing at the edge of code or of the focused
-    /// paragraph extends them).
-    private func editAdjustedRange(
-        _ range: NSRange,
-        editLocation: Int,
-        changeInLength: Int,
-        editedLength: Int,
-        sourceLength: Int
-    ) -> NSRange? {
-        let removedLength = max(0, editedLength - changeInLength)
-        let editOldEnd = editLocation + removedLength
-        var lower = range.location
-        var upper = NSMaxRange(range)
-
-        if lower >= editOldEnd {
-            lower += changeInLength
-        } else if lower > editLocation {
-            lower = editLocation
-        }
-
-        if upper >= editOldEnd {
-            upper += changeInLength
-        } else if upper > editLocation {
-            upper = editLocation
-        }
-
-        lower = max(0, min(lower, sourceLength))
-        upper = max(lower, min(upper, sourceLength))
-        let length = upper - lower
-        return length > 0 ? NSRange(location: lower, length: length) : nil
     }
 
     /// The edit translation above is geometric and, at a span boundary,
@@ -1210,11 +1122,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
-    private func isLargeEdit(editedRange: NSRange, changeInLength: Int) -> Bool {
-        editedRange.length > Self.largeEditThreshold
-            || abs(changeInLength) > Self.largeEditThreshold
-    }
-
     private func cancelDeferredStyling() {
         deferredStyleTask?.cancel()
         deferredStyleTask = nil
@@ -1235,7 +1142,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 + "spans=\(spans.count)"
         )
         applyVisibleStyles(spans: spans)
-        pendingFullStyleRanges = chunkedDocumentStyleRanges()
+        pendingFullStyleRanges = MarkdownStylingEngine.chunkedStyleRanges(
+            in: textStorage.string as NSString,
+            excluding: visibleBufferedCharacterRange()
+        )
         startDeferredChunkStyling(spans: spans)
     }
 
@@ -1293,38 +1203,25 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 }
 
                 let chunk = pendingFullStyleRanges.removeFirst()
-                guard let range = boundedRange(lineNormalized(chunk)),
-                      range.length > 0
-                else {
+                let string = (textView.textStorage?.string ?? "") as NSString
+                guard let range = boundedRange(
+                    MarkdownStylingEngine.lineNormalized(chunk, in: string)
+                ), range.length > 0 else {
                     continue
                 }
 
                 MarkdownEditorDiagnostics.log(
                     "background chunk apply range=\(range.location)..\(NSMaxRange(range))"
                 )
-                applyStyles(in: range, spans: spansForRange(range, from: spans))
+                applyStyles(
+                    in: range,
+                    spans: MarkdownStylingEngine.spansForRange(range, from: spans)
+                )
                 await Task.yield()
             }
 
             deferredStyleTask = nil
         }
-    }
-
-    private func lineNormalized(_ range: NSRange) -> NSRange {
-        guard let textStorage = textView.textStorage else {
-            return range
-        }
-
-        let string = textStorage.string as NSString
-        guard range.location >= 0, range.location <= string.length else {
-            return NSRange(location: 0, length: 0)
-        }
-
-        let length = min(range.length, string.length - range.location)
-        return string.lineRange(for: NSRange(
-            location: range.location,
-            length: max(0, length)
-        ))
     }
 
     private func scheduleVisibleLocalStyling() {
@@ -1373,7 +1270,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        applyStyles(in: range, spans: spansForRange(range, from: spans))
+        applyStyles(
+            in: range,
+            spans: MarkdownStylingEngine.spansForRange(range, from: spans)
+        )
     }
 
     private func visibleBufferedCharacterRange(
@@ -1415,41 +1315,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         return (textStorage.string as NSString).lineRange(
             for: NSRange(location: lowerBound, length: upperBound - lowerBound)
         )
-    }
-
-    private func chunkedDocumentStyleRanges() -> [NSRange] {
-        guard let textStorage = textView.textStorage,
-              textStorage.length > 0
-        else {
-            return []
-        }
-
-        let source = textStorage.string as NSString
-        let visibleRange = visibleBufferedCharacterRange()
-        var ranges: [NSRange] = []
-        var location = 0
-        while location < source.length {
-            let upperBound = min(location + Self.backgroundChunkLength, source.length)
-            let range = source.lineRange(for: NSRange(
-                location: location,
-                length: upperBound - location
-            ))
-            for styleRange in visibleRange.map({ subtract($0, from: range) }) ?? [range] {
-                if let styleRange = boundedRange(styleRange), styleRange.length > 0 {
-                    ranges.append(styleRange)
-                }
-            }
-            location = max(NSMaxRange(range), location + 1)
-        }
-
-        return ranges
-    }
-
-    private func spansForRange(
-        _ range: NSRange,
-        from spans: [ResolvedMarkdownStyleSpan]
-    ) -> [ResolvedMarkdownStyleSpan] {
-        spans.filter { NSIntersectionRange($0.range, range).length > 0 }
     }
 
     private func applyStyles(
@@ -1848,7 +1713,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        for dimmedRange in subtract(activeRange, from: range) {
+        for dimmedRange in MarkdownStylingEngine.subtract(activeRange, from: range) {
             guard dimmedRange.length > 0 else {
                 continue
             }
@@ -2220,14 +2085,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             deltaRanges.append(activeRange)
         }
 
+        let string = (textView.textStorage?.string ?? "") as NSString
         for deltaRange in deltaRanges {
-            guard let range = boundedRange(lineNormalized(deltaRange)),
-                  range.length > 0
-            else {
+            guard let range = boundedRange(
+                MarkdownStylingEngine.lineNormalized(deltaRange, in: string)
+            ), range.length > 0 else {
                 continue
             }
 
-            applyStyles(in: range, spans: spansForRange(range, from: currentStyleSpans))
+            applyStyles(
+                in: range,
+                spans: MarkdownStylingEngine.spansForRange(
+                    range,
+                    from: currentStyleSpans
+                )
+            )
         }
     }
 
@@ -2366,32 +2238,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         if focusMode == .focus {
             restyleAllText()
         }
-    }
-
-    private func subtract(_ excludedRange: NSRange, from range: NSRange) -> [NSRange] {
-        let intersection = NSIntersectionRange(range, excludedRange)
-        guard intersection.length > 0 else {
-            return [range]
-        }
-
-        var result: [NSRange] = []
-        if intersection.location > range.location {
-            result.append(NSRange(
-                location: range.location,
-                length: intersection.location - range.location
-            ))
-        }
-
-        let excludedUpperBound = NSMaxRange(intersection)
-        let rangeUpperBound = NSMaxRange(range)
-        if excludedUpperBound < rangeUpperBound {
-            result.append(NSRange(
-                location: excludedUpperBound,
-                length: rangeUpperBound - excludedUpperBound
-            ))
-        }
-
-        return result
     }
 }
 

@@ -208,37 +208,10 @@ enum MarkdownTypographyCommand {
     ) -> [NSRange] {
         var segments = [range]
         for excludedRange in excludedRanges {
-            segments = segments.flatMap { subtract(excludedRange, from: $0) }
+            segments = segments.flatMap {
+                MarkdownStylingEngine.subtract(excludedRange, from: $0)
+            }
         }
         return segments.filter { $0.length > 0 }
-    }
-
-    private static func subtract(
-        _ excludedRange: NSRange,
-        from range: NSRange
-    ) -> [NSRange] {
-        let intersection = NSIntersectionRange(range, excludedRange)
-        guard intersection.length > 0 else {
-            return [range]
-        }
-
-        var result: [NSRange] = []
-        if intersection.location > range.location {
-            result.append(NSRange(
-                location: range.location,
-                length: intersection.location - range.location
-            ))
-        }
-
-        let excludedUpperBound = NSMaxRange(intersection)
-        let rangeUpperBound = NSMaxRange(range)
-        if excludedUpperBound < rangeUpperBound {
-            result.append(NSRange(
-                location: excludedUpperBound,
-                length: rangeUpperBound - excludedUpperBound
-            ))
-        }
-
-        return result
     }
 }
