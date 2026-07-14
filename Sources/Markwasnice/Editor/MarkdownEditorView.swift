@@ -97,6 +97,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var codeBlockDrawRanges: [NSRange] = []
     private var searchMatchRanges: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
+    private var previousSelectionRange = NSRange(location: 0, length: 0)
     private var isApplyingStyles = false
     private var isSettingTextProgrammatically = false
     private var isNormalizingEditedText = false
@@ -786,12 +787,23 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     func textViewDidChangeSelection(_: Notification) {
+        let selectedRange = textView.selectedRange()
+        let didClearSelection = previousSelectionRange.length > 0
+            && selectedRange.length == 0
+        previousSelectionRange = selectedRange
+
         guard !isApplyingStyles else {
             return
         }
 
         textView.typingAttributes = baseAttributes()
         updateFocusForSelection()
+        if didClearSelection {
+            // AppKit invalidates using the selection's current glyph geometry.
+            // If styling changed that geometry while it was selected, pixels
+            // just outside the new bounds otherwise remain in the backing store.
+            textView.setNeedsDisplay(textView.visibleRect)
+        }
     }
 
     @available(*, unavailable)
