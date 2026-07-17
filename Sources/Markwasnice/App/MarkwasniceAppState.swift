@@ -130,6 +130,7 @@ final class MarkwasniceAppState: ObservableObject {
         panel.allowedContentTypes = [
             UTType(filenameExtension: "md") ?? .plainText,
             UTType(filenameExtension: "markdown") ?? .plainText,
+            .plainText,
         ]
 
         guard panel.runModal() == .OK else {
