@@ -21,7 +21,6 @@ final class MarkdownPreviewView: NSView {
     private let textView: PreviewTextView
     private var lastScrollOffsetY: CGFloat?
     private var lastScrollClipSize: NSSize?
-    private var topInset: CGFloat = 0
     private var scrollerTopInset: CGFloat = 0
 
     init() {
@@ -71,10 +70,12 @@ final class MarkdownPreviewView: NSView {
     }
 
     func setInsets(top: CGFloat, bottom: CGFloat, horizontal: CGFloat) {
-        topInset = top
         let contentInsets = NSEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
-        if !edgeInsets(scrollView.contentInsets, equalTo: contentInsets) {
-            scrollView.contentInsets = contentInsets
+        // With automaticallyAdjustsContentInsets off, the scroll view's own
+        // contentInsets setter never reaches the clip view (whose insets
+        // drive bounds clamping), so the clip view is set directly.
+        if !edgeInsets(scrollView.contentView.contentInsets, equalTo: contentInsets) {
+            scrollView.contentView.contentInsets = contentInsets
         }
         let containerInset = NSSize(width: horizontal, height: 0)
         if textView.textContainerInset != containerInset {
@@ -84,8 +85,9 @@ final class MarkdownPreviewView: NSView {
     }
 
     /// Mirrors the editor's scroller offset (bar height while the chrome is
-    /// visible, 0 otherwise). The preview pads content via contentInsets,
-    /// which already move the scroller, so only the difference is applied.
+    /// visible, 0 otherwise). Content padding lives on the clip view, which
+    /// the scroll view's scroller tiling does not see, so the full offset
+    /// is applied here just like in the editor.
     func setScrollerTopInset(_ inset: CGFloat) {
         scrollerTopInset = inset
         applyScrollerInsets()
@@ -97,11 +99,11 @@ final class MarkdownPreviewView: NSView {
 
     var scrollFraction: CGFloat {
         let clipView = scrollView.contentView
-        let minOffset = -scrollView.contentInsets.top
+        let minOffset = -scrollView.contentView.contentInsets.top
         let maxOffset = max(
             minOffset,
             textView.frame.height - clipView.bounds.height
-                + scrollView.contentInsets.bottom
+                + scrollView.contentView.contentInsets.bottom
         )
         guard maxOffset > minOffset else {
             return 0
@@ -115,11 +117,11 @@ final class MarkdownPreviewView: NSView {
         previewLayoutManager.ensureLayout(for: textContainer)
 
         let clipView = scrollView.contentView
-        let minOffset = -scrollView.contentInsets.top
+        let minOffset = -scrollView.contentView.contentInsets.top
         let maxOffset = max(
             minOffset,
             textView.frame.height - clipView.bounds.height
-                + scrollView.contentInsets.bottom
+                + scrollView.contentView.contentInsets.bottom
         )
         let clamped = min(max(fraction, 0), 1)
         let target = minOffset + (maxOffset - minOffset) * clamped
@@ -169,12 +171,7 @@ final class MarkdownPreviewView: NSView {
     }
 
     private func applyScrollerInsets() {
-        let insets = NSEdgeInsets(
-            top: scrollerTopInset - topInset,
-            left: 0,
-            bottom: 0,
-            right: 0
-        )
+        let insets = NSEdgeInsets(top: scrollerTopInset, left: 0, bottom: 0, right: 0)
         if !edgeInsets(scrollView.scrollerInsets, equalTo: insets) {
             scrollView.scrollerInsets = insets
         }
