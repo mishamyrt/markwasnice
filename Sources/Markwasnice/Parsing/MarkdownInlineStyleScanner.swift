@@ -14,7 +14,24 @@ enum MarkdownInlineStyleScanner {
             return []
         }
 
-        let line = string.substring(with: lineRange)
+        // Scan the line dedented: indentation is a visual shift in this
+        // editor (see MarkdownShiftedContentReparser), while cmark would read
+        // a 4-space or tab shift as an indented code block and drop every
+        // inline span on the line.
+        var leadingLength = 0
+        while leadingLength < lineRange.length {
+            let character = string.character(at: lineRange.location + leadingLength)
+            guard character == 0x20 || character == 0x09 else { // ' ' or '\t'
+                break
+            }
+
+            leadingLength += 1
+        }
+
+        let line = string.substring(with: NSRange(
+            location: lineRange.location + leadingLength,
+            length: lineRange.length - leadingLength
+        ))
         let trimmedLine = line.trimmingCharacters(in: .newlines)
         guard !trimmedLine.isEmpty else {
             return []
@@ -25,7 +42,7 @@ enum MarkdownInlineStyleScanner {
         collector.visit(document)
 
         let sourceMap = SourceMap(text: trimmedLine)
-        let lineStartOffset = lineRange.location
+        let lineStartOffset = lineRange.location + leadingLength
 
         return collector.spans.compactMap { span in
             guard !span.kind.isBlockStyle else {

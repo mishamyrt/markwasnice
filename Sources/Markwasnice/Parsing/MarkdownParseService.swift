@@ -98,7 +98,15 @@ final class MarkdownParseService {
                 return ResolvedMarkdownStyleSpan(range: range, kind: span.kind)
             }
 
-        var spans = MarkdownLinkStyleResolver.resolve(spans: resolvedSpans, in: text)
+        // Before link resolution so links inside re-parsed shifted text get
+        // their punctuation/destination sub-spans like everywhere else.
+        let dedentedSpans = MarkdownShiftedContentReparser.spans(
+            replacing: resolvedSpans,
+            in: text,
+            document: document,
+            sourceMap: sourceMap
+        )
+        var spans = MarkdownLinkStyleResolver.resolve(spans: dedentedSpans, in: text)
         if let frontmatterRange = MarkdownFrontmatter.range(in: text) {
             // cmark reads the block as thematic breaks, setext headings and
             // paragraphs; every such span lies inside the block, so whole
