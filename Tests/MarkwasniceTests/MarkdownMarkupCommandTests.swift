@@ -122,6 +122,32 @@ struct MarkdownMarkupCommandTests {
     }
 
     @Test
+    func wrapsWholeWordWithCursorInside() {
+        let edit = MarkdownMarkupCommand.italic.edit(
+            in: "say hello now", selectedRange: NSRange(location: 6, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 4, length: 5),
+            replacementString: "*hello*",
+            selectedRange: NSRange(location: 7, length: 0)
+        ))
+    }
+
+    @Test
+    func unwrapsWholeWordWithCursorInside() {
+        let edit = MarkdownMarkupCommand.italic.edit(
+            in: "say *hello* now", selectedRange: NSRange(location: 7, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 4, length: 7),
+            replacementString: "hello",
+            selectedRange: NSRange(location: 6, length: 0)
+        ))
+    }
+
+    @Test
     func insertsEmptyPairAfterWhitespace() {
         let edit = MarkdownMarkupCommand.highlight.edit(
             in: "hello ", selectedRange: NSRange(location: 6, length: 0)

@@ -259,25 +259,31 @@ enum MarkdownMarkupCommand: Int {
                 location: target.range.location - openingLength,
                 length: openingLength + target.range.length + closingLength
             )
+            let collapsedLocation = target.cursorLocation
+                .map { $0 - openingLength }
+                ?? replacementRange.location + selectedText.utf16.count
             return MarkdownMarkupEdit(
                 replacementRange: replacementRange,
                 replacementString: selectedText,
                 selectedRange: NSRange(
                     location: target.isExplicitSelection
                         ? replacementRange.location
-                        : replacementRange.location + selectedText.utf16.count,
+                        : collapsedLocation,
                     length: target.isExplicitSelection ? selectedText.utf16.count : 0
                 )
             )
         }
 
+        let wrappedCollapsedLocation = target.cursorLocation
+            .map { $0 + openingLength }
+            ?? target.range.location + openingLength + selectedText.utf16.count
         return MarkdownMarkupEdit(
             replacementRange: target.range,
             replacementString: opening + selectedText + closing,
             selectedRange: NSRange(
                 location: target.isExplicitSelection
                     ? target.range.location + openingLength
-                    : target.range.location + openingLength + selectedText.utf16.count,
+                    : wrappedCollapsedLocation,
                 length: target.isExplicitSelection ? selectedText.utf16.count : 0
             )
         )
@@ -611,12 +617,18 @@ enum MarkdownMarkupCommand: Int {
             location -= 1
         }
 
+        var endLocation = selectedRange.location
+        while endLocation < nsString.length, isLetter(in: nsString, at: endLocation) {
+            endLocation += 1
+        }
+
         return MarkupTarget(
             range: NSRange(
                 location: location,
-                length: selectedRange.location - location
+                length: endLocation - location
             ),
-            isExplicitSelection: false
+            isExplicitSelection: false,
+            cursorLocation: selectedRange.location
         )
     }
 
@@ -1002,6 +1014,7 @@ private func isHorizontalWhitespace(_ nsString: NSString, at location: Int) -> B
 private struct MarkupTarget {
     let range: NSRange
     let isExplicitSelection: Bool
+    var cursorLocation: Int?
 }
 
 private struct ExistingLink {
