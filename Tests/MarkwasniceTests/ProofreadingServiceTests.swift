@@ -78,12 +78,17 @@ struct ProofreadingServiceTests {
                 range: NSRange(location: 30, length: 15),
                 kind: .codeBlock
             ),
+            ResolvedMarkdownStyleSpan(
+                range: NSRange(location: 50, length: 20),
+                kind: .linkDestination
+            ),
         ]
         let protected = ProofreadingService.protectedRanges(from: spans)
         #expect(protected == [
             NSRange(location: 0, length: 10),
             NSRange(location: 20, length: 8),
             NSRange(location: 30, length: 15),
+            NSRange(location: 50, length: 20),
         ])
     }
 }

@@ -823,7 +823,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         textView.typingAttributes = baseAttributes()
-        updateFocusForSelection()
+        // A caret move from the keyboard (arrow keys, typing) ends a
+        // scroll-induced focus suppression the same way a mouse click does;
+        // updateFocusForSelection alone would leave the suppression in place.
+        if isFocusTemporarilySuppressed, NSApp.currentEvent?.type == .keyDown {
+            restoreFocusAfterEditorInteraction()
+        } else {
+            updateFocusForSelection()
+        }
         proofreadingPresenter.handleSelectionChange(selectedRange)
         if didClearSelection {
             // AppKit invalidates using the selection's current glyph geometry.
