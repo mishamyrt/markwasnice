@@ -13,7 +13,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0"),
-        .package(path: "../swift-typograf"),
+        .package(url: "https://github.com/mishamyrt/swift-typograf.git", from: "0.2.0"),
     ],
     targets: [
         .executableTarget(

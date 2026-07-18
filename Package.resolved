@@ -1,5 +1,5 @@
 {
-  "originHash" : "ee6ffdad6d70b0230e573ad02e3022397603b2cf3ce8cab59435002de8dd8c7c",
+  "originHash" : "724d879fe2cd466988488808361d45a54386d4d63bd3619d5d9d1493cedbdd67",
   "pins" : [
     {
       "identity" : "swift-cmark",
@@ -17,6 +17,15 @@
       "state" : {
         "revision" : "3c6f9523da3a1ec2fd829673e472d95b8097a3b8",
         "version" : "0.8.0"
+      }
+    },
+    {
+      "identity" : "swift-typograf",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mishamyrt/swift-typograf.git",
+      "state" : {
+        "revision" : "f5a5123f70bab1b976107d02ff5712dcd2edcacf",
+        "version" : "0.2.0"
       }
     }
   ],
