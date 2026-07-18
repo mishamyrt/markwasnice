@@ -68,6 +68,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         shellState.onFocusModeSelected = { [weak self] mode in
             self?.editorView.setFocusMode(mode)
         }
+        shellState.onProofreadingEnabledChanged = { [weak self] isEnabled in
+            // Editor view first so tracking and decoration state are ready
+            // before the first check result arrives.
+            self?.editorView.setProofreadingEnabled(isEnabled)
+            self?.stylingController.setProofreadingEnabled(isEnabled)
+        }
         shellState.onSearchPresentationChanged = { [weak self] isPresented in
             self?.handleSearchPresentationChanged(isPresented)
         }

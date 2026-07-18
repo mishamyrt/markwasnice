@@ -89,9 +89,31 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
+    struct ProofreadingDrawItem: Equatable {
+        let range: NSRange
+        let color: NSColor
+    }
+
+    private var proofreadingUnderlines: [ProofreadingDrawItem] = []
+    private var proofreadingHighlights: [ProofreadingDrawItem] = []
+
+    func setProofreadingDecorations(
+        underlines: [ProofreadingDrawItem],
+        highlights: [ProofreadingDrawItem]
+    ) {
+        let didChange = underlines != proofreadingUnderlines
+            || highlights != proofreadingHighlights
+        proofreadingUnderlines = underlines
+        proofreadingHighlights = highlights
+        if didChange {
+            needsDisplay = true
+        }
+    }
+
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         drawCodeBackgrounds(in: rect)
+        drawProofreadingDecorations(in: rect)
     }
 
     private func drawCodeBackgrounds(in rect: NSRect) {
@@ -261,6 +283,144 @@ final class MarkdownTextView: NSTextView {
         return rects
     }
 
+    private static let proofreadingWaveAmplitude: CGFloat = 1.25
+    private static let proofreadingWaveLength: CGFloat = 12
+    private static let proofreadingWaveOffset: CGFloat = 7
+    private static let proofreadingHighlightCornerRadius: CGFloat = 3
+
+    private func drawProofreadingDecorations(in rect: NSRect) {
+        guard !(proofreadingUnderlines.isEmpty && proofreadingHighlights.isEmpty)
+        else {
+            return
+        }
+
+        let origin = textContainerOrigin
+        let visibleRange = characterRange(forViewRect: rect, origin: origin)
+
+        for item in proofreadingHighlights
+            where visibleRange == nil
+            || NSIntersectionRange(item.range, visibleRange ?? item.range).length > 0
+        {
+            item.color.setFill()
+            for segment in inlineLineRects(for: item.range, origin: origin)
+                where segment.intersects(rect)
+            {
+                let padding = segment.height * Self.codeHorizontalPaddingRatio
+                NSBezierPath(
+                    roundedRect: segment.insetBy(dx: -padding, dy: 0),
+                    xRadius: Self.proofreadingHighlightCornerRadius,
+                    yRadius: Self.proofreadingHighlightCornerRadius
+                ).fill()
+            }
+        }
+
+        for item in proofreadingUnderlines
+            where visibleRange == nil
+            || NSIntersectionRange(item.range, visibleRange ?? item.range).length > 0
+        {
+            drawProofreadingUnderline(
+                range: item.range,
+                color: item.color,
+                origin: origin,
+                dirtyRect: rect
+            )
+        }
+    }
+
+    private func drawProofreadingUnderline(
+        range: NSRange,
+        color: NSColor,
+        origin: NSPoint,
+        dirtyRect: NSRect
+    ) {
+        guard let layoutManager, let textContainer,
+              let storageLength = textStorage?.length,
+              range.location >= 0,
+              NSMaxRange(range) <= storageLength
+        else {
+            return
+        }
+
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: range,
+            actualCharacterRange: nil
+        )
+        guard glyphRange.location != NSNotFound, glyphRange.length > 0 else {
+            return
+        }
+
+        color.setStroke()
+        layoutManager.enumerateLineFragments(
+            forGlyphRange: glyphRange
+        ) { fragmentRect, _, _, lineGlyphRange, _ in
+            let lineRange = NSIntersectionRange(lineGlyphRange, glyphRange)
+            guard lineRange.length > 0 else {
+                return
+            }
+
+            let bounds = layoutManager.boundingRect(
+                forGlyphRange: lineRange,
+                in: textContainer
+            )
+            guard !bounds.isEmpty else {
+                return
+            }
+
+            let baseline = fragmentRect.minY
+                + layoutManager.location(forGlyphAt: lineRange.location).y
+            let waveY = baseline + Self.proofreadingWaveOffset + origin.y
+            let minX = bounds.minX + origin.x
+            let maxX = bounds.maxX + origin.x
+            guard maxX > minX,
+                  dirtyRect.intersects(NSRect(
+                      x: minX,
+                      y: waveY - Self.proofreadingWaveAmplitude - 1,
+                      width: maxX - minX,
+                      height: 2 * Self.proofreadingWaveAmplitude + 2
+                  ))
+            else {
+                return
+            }
+
+            self.strokeWave(from: minX, to: maxX, y: waveY)
+        }
+    }
+
+    /// One sine-like period per `proofreadingWaveLength` points, built from a
+    /// quadratic curve per half-wave (two path elements per period instead of
+    /// a per-point polyline), phase anchored to the segment start so the
+    /// squiggle is stable across repaints.
+    private func strokeWave(from minX: CGFloat, to maxX: CGFloat, y: CGFloat) {
+        let path = NSBezierPath()
+        path.lineWidth = 1.5
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+
+        // A quadratic curve's apex sits at half the control-point offset, so
+        // the control point goes twice the amplitude out. The trailing
+        // partial half-wave scales its apex with its width, so short tails
+        // flatten out instead of ending in a full-height kink.
+        let halfWaveLength = Self.proofreadingWaveLength / 2
+        let controlOffset = 2 * Self.proofreadingWaveAmplitude
+        var x = minX
+        var direction: CGFloat = 1
+        path.move(to: NSPoint(x: x, y: y))
+        while x < maxX {
+            let nextX = min(x + halfWaveLength, maxX)
+            let apexScale = (nextX - x) / halfWaveLength
+            path.curve(
+                to: NSPoint(x: nextX, y: y),
+                controlPoint: NSPoint(
+                    x: (x + nextX) / 2,
+                    y: y + direction * controlOffset * apexScale
+                )
+            )
+            direction = -direction
+            x = nextX
+        }
+        path.stroke()
+    }
+
     private func segmentRects(for range: NSRange, origin: NSPoint) -> [NSRect] {
         guard let layoutManager, let textContainer,
               let storageLength = textStorage?.length,
@@ -315,13 +475,71 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
-    override func mouseMoved(with event: NSEvent) {
-        if eventIsInTopChrome(event) {
-            NSCursor.arrow.set()
+    /// Point in view coordinates while the pointer moves over the text,
+    /// nil when it leaves. Only fires while proofreading tracking is on.
+    var onProofreadingHover: ((NSPoint?) -> Void)?
+
+    var isProofreadingTrackingEnabled = false {
+        didSet {
+            guard isProofreadingTrackingEnabled != oldValue else {
+                return
+            }
+
+            if !isProofreadingTrackingEnabled {
+                onProofreadingHover?(nil)
+            }
+            updateTrackingAreas()
+        }
+    }
+
+    private var proofreadingTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let area = proofreadingTrackingArea {
+            removeTrackingArea(area)
+            proofreadingTrackingArea = nil
+        }
+        guard isProofreadingTrackingEnabled else {
             return
         }
 
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [
+                .mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow,
+                .inVisibleRect,
+            ],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        proofreadingTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        if eventIsInTopChrome(event) {
+            NSCursor.arrow.set()
+            if isProofreadingTrackingEnabled {
+                onProofreadingHover?(nil)
+            }
+            return
+        }
+
+        if isProofreadingTrackingEnabled {
+            onProofreadingHover?(convert(event.locationInWindow, from: nil))
+        }
         super.mouseMoved(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if isProofreadingTrackingEnabled,
+           event.trackingArea === proofreadingTrackingArea
+        {
+            onProofreadingHover?(nil)
+        }
+        super.mouseExited(with: event)
     }
 
     override func mouseEntered(with event: NSEvent) {

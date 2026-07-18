@@ -12,6 +12,19 @@ struct EditorThemeColors: Equatable {
         var thematicBreak: NSColor
         var listMarker: NSColor
         var frontmatter: NSColor
+        var proofreadingLow: NSColor
+        var proofreadingMedium: NSColor
+        var proofreadingHigh: NSColor
+        var proofreadingCritical: NSColor
+
+        func proofreadingColor(for severity: ProofreadingSeverity) -> NSColor {
+            switch severity {
+            case .low: proofreadingLow
+            case .medium: proofreadingMedium
+            case .high: proofreadingHigh
+            case .critical: proofreadingCritical
+            }
+        }
     }
 
     var light: Variant
@@ -61,7 +74,31 @@ struct EditorThemeColors: Equatable {
                 alpha: 1
             ),
             listMarker: lightForeground.withAlphaComponent(0.4),
-            frontmatter: lightForeground.withAlphaComponent(0.5)
+            frontmatter: lightForeground.withAlphaComponent(0.5),
+            proofreadingLow: NSColor(
+                calibratedRed: 0.22,
+                green: 0.60,
+                blue: 0.32,
+                alpha: 1
+            ),
+            proofreadingMedium: NSColor(
+                calibratedRed: 0.95,
+                green: 0.60,
+                blue: 0.20,
+                alpha: 1
+            ),
+            proofreadingHigh: NSColor(
+                calibratedRed: 0.93,
+                green: 0.42,
+                blue: 0.10,
+                alpha: 1
+            ),
+            proofreadingCritical: NSColor(
+                calibratedRed: 0.85,
+                green: 0.22,
+                blue: 0.18,
+                alpha: 1
+            )
         ),
         dark: Variant(
             background: NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.08, alpha: 1),
@@ -83,7 +120,31 @@ struct EditorThemeColors: Equatable {
                 alpha: 1
             ),
             listMarker: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1),
-            frontmatter: darkForeground.withAlphaComponent(0.5)
+            frontmatter: darkForeground.withAlphaComponent(0.5),
+            proofreadingLow: NSColor(
+                calibratedRed: 0.36,
+                green: 0.72,
+                blue: 0.44,
+                alpha: 1
+            ),
+            proofreadingMedium: NSColor(
+                calibratedRed: 0.98,
+                green: 0.68,
+                blue: 0.32,
+                alpha: 1
+            ),
+            proofreadingHigh: NSColor(
+                calibratedRed: 0.98,
+                green: 0.52,
+                blue: 0.22,
+                alpha: 1
+            ),
+            proofreadingCritical: NSColor(
+                calibratedRed: 0.94,
+                green: 0.36,
+                blue: 0.32,
+                alpha: 1
+            )
         )
     )
 }

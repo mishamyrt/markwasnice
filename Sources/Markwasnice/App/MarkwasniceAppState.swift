@@ -192,6 +192,10 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.shellState.toggleFocusMode()
     }
 
+    func toggleProofreading() {
+        activeSession?.shellState.toggleProofreading()
+    }
+
     func showPreferences(_ sender: Any?) {
         if preferencesWindowController == nil {
             preferencesWindowController = PreferencesWindowController(
@@ -520,6 +524,11 @@ struct MarkwasniceCommands: Commands {
                 appState.toggleFocusMode()
             }
             .keyboardShortcut("d")
+
+            Button("Proofreading") {
+                appState.toggleProofreading()
+            }
+            .keyboardShortcut("r")
         }
 
         CommandGroup(after: .pasteboard) {

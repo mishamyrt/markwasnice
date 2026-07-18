@@ -14,6 +14,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0"),
         .package(url: "https://github.com/mishamyrt/swift-typograf.git", from: "0.2.0"),
+        .package(url: "https://github.com/mishamyrt/rdktr.git", from: "0.1.1"),
     ],
     targets: [
         .executableTarget(
@@ -21,6 +22,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Markdown", package: "swift-markdown"),
                 .product(name: "Typograf", package: "swift-typograf"),
+                .product(name: "Rdktr", package: "rdktr"),
             ],
             resources: [
                 .copy("../../Assets/Fonts"),
@@ -32,6 +34,7 @@ let package = Package(
             dependencies: [
                 "Markwasnice",
                 .product(name: "Markdown", package: "swift-markdown"),
+                .product(name: "Rdktr", package: "rdktr"),
             ]
         ),
     ]

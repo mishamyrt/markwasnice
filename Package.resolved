@@ -1,6 +1,15 @@
 {
-  "originHash" : "724d879fe2cd466988488808361d45a54386d4d63bd3619d5d9d1493cedbdd67",
+  "originHash" : "a151afe29d26f712146469d4264e1a5cd02313bad630ab127ffd6790dcbff8e3",
   "pins" : [
+    {
+      "identity" : "rdktr",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/mishamyrt/rdktr.git",
+      "state" : {
+        "revision" : "710b3b86f24406dc5f6a90997da2c84db883ae90",
+        "version" : "0.1.1"
+      }
+    },
     {
       "identity" : "swift-cmark",
       "kind" : "remoteSourceControl",

@@ -108,6 +108,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var isFocusModeEnabled = false
     private var focusMode: EditorFocusMode = .focus
     private lazy var previewPresenter = makePreviewPresenter()
+    private lazy var proofreadingPresenter = ProofreadingPresenter(
+        textView: textView
+    ) { [weak self] severity in
+        self?.colors.proofreadingColor(for: severity) ?? .systemOrange
+    }
+
     private var previewHorizontalInset: CGFloat = 6
     private var isFocusTemporarilySuppressed = false
     private var activeFocusParagraphRange: NSRange?
@@ -179,9 +185,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         applyEditorColors()
         restyleAllText()
         previewPresenter.refreshIfActive()
+        proofreadingPresenter.refreshColors()
     }
 
     func setString(_ string: String, clearsUndo: Bool) {
+        proofreadingPresenter.clearIssues()
         let selectedRange = textView.selectedRange()
         isSettingTextProgrammatically = true
         textView.string = string
@@ -198,7 +206,18 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     func setPreviewActive(_ isActive: Bool) {
+        if isActive {
+            proofreadingPresenter.dismissPopup()
+        }
         previewPresenter.setActive(isActive)
+    }
+
+    func setProofreadingEnabled(_ isEnabled: Bool) {
+        proofreadingPresenter.setEnabled(isEnabled)
+    }
+
+    func setProofreadingIssues(_ issues: [ProofreadingIssue]) {
+        proofreadingPresenter.setIssues(issues)
     }
 
     func focus() {
@@ -745,6 +764,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             sourceLength: textStorage.length
         )
 
+        proofreadingPresenter.handleTextEdit(
+            editedRange: editedRange,
+            changeInLength: changeInLength,
+            sourceLength: textStorage.length
+        )
+
         // Keep the active focus paragraph glued to the text the same way:
         // the dimming applied below (and the paragraph-delta restyle on the
         // next selection change) subtract this range, and a stale one would
@@ -769,6 +794,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         guard !isLargeEdit else {
             currentStyleSpans = []
+            proofreadingPresenter.clearIssues()
             updateCodeBackgroundRanges()
             pendingFullStyleRanges = []
             hasRecentLargeEdit = true
@@ -798,6 +824,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         textView.typingAttributes = baseAttributes()
         updateFocusForSelection()
+        proofreadingPresenter.handleSelectionChange(selectedRange)
         if didClearSelection {
             // AppKit invalidates using the selection's current glyph geometry.
             // If styling changed that geometry while it was selected, pixels
@@ -1002,6 +1029,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // focus mode).
         guard !isAdjustingFocusScroll else {
             return
+        }
+
+        if let lastScrollOffsetY, lastScrollOffsetY != offsetY {
+            proofreadingPresenter.dismissPopup()
         }
 
         // While focus dimming is suppressed for a user scroll, newly revealed

@@ -19,6 +19,7 @@ final class EditorShellState: ObservableObject {
     @Published var isFullScreen = false
     @Published var isFocusModeEnabled = false
     @Published var focusMode: EditorFocusMode = .focus
+    @Published var isProofreadingEnabled = false
     @Published var isSearchPresented = false
     @Published var isTabBarVisible = false
     @Published var tabBarTopInset: CGFloat = 0
@@ -34,6 +35,7 @@ final class EditorShellState: ObservableObject {
     var onTopHoverChanged: ((Bool) -> Void)?
     var onFocusModeEnabledChanged: ((Bool) -> Void)?
     var onFocusModeSelected: ((EditorFocusMode) -> Void)?
+    var onProofreadingEnabledChanged: ((Bool) -> Void)?
     var onSearchPresentationChanged: ((Bool) -> Void)?
     var onSearchQueryChanged: ((String) -> Void)?
     var onSearchOptionsChanged: ((EditorSearchOptions) -> Void)?
@@ -148,6 +150,19 @@ final class EditorShellState: ObservableObject {
 
         isFocusModeEnabled = isEnabled
         onFocusModeEnabledChanged?(isEnabled)
+    }
+
+    func toggleProofreading() {
+        setProofreadingEnabled(!isProofreadingEnabled)
+    }
+
+    func setProofreadingEnabled(_ isEnabled: Bool) {
+        guard isProofreadingEnabled != isEnabled else {
+            return
+        }
+
+        isProofreadingEnabled = isEnabled
+        onProofreadingEnabledChanged?(isEnabled)
     }
 
     func selectFocusMode(_ mode: EditorFocusMode) {
