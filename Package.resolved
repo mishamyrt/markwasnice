@@ -1,13 +1,13 @@
 {
-  "originHash" : "a151afe29d26f712146469d4264e1a5cd02313bad630ab127ffd6790dcbff8e3",
+  "originHash" : "2ec60c6a8728b4b6377787d00ba0be484cb982168198cba3d29341998393edb7",
   "pins" : [
     {
       "identity" : "rdktr",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mishamyrt/rdktr.git",
       "state" : {
-        "revision" : "710b3b86f24406dc5f6a90997da2c84db883ae90",
-        "version" : "0.1.1"
+        "revision" : "fc4993df4ad75592981b2c88a886e820a2ca9641",
+        "version" : "0.1.2"
       }
     },
     {
