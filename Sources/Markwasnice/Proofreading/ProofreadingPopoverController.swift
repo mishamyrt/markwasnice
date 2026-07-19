@@ -1,9 +1,13 @@
 import AppKit
 
-/// Content of the issue popup: bold rule title over a wrapping hint.
 final class ProofreadingPopoverController: NSViewController {
     private static let contentWidth: CGFloat = 300
-    private static let padding = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+    private static let padding = NSEdgeInsets(
+        top: 12,
+        left: 14,
+        bottom: 12,
+        right: 14
+    )
 
     private let issueTitle: String
     private let issueHint: String
@@ -20,16 +24,21 @@ final class ProofreadingPopoverController: NSViewController {
     }
 
     override func loadView() {
-        let maxTextWidth = Self.contentWidth
-            - Self.padding.left - Self.padding.right
+        let padding = Self.padding
+        let maxTextWidth =
+            Self.contentWidth - padding.left - padding.right
 
-        let titleLabel = NSTextField(wrappingLabelWithString: issueTitle)
-        titleLabel.font = NSFont.boldSystemFont(ofSize: 15)
+        let titleLabel = NSTextField(
+            wrappingLabelWithString: issueTitle
+        )
+        titleLabel.font = .boldSystemFont(ofSize: 15)
         titleLabel.textColor = .labelColor
 
-        let hintLabel = NSTextField(wrappingLabelWithString: issueHint)
-        hintLabel.font = NSFont.systemFont(ofSize: 12)
-        hintLabel.textColor = .secondaryLabelColor
+        let hintLabel = NSTextField(
+            wrappingLabelWithString: issueHint
+        )
+        hintLabel.font = .systemFont(ofSize: 12)
+        hintLabel.textColor = .labelColor
 
         for label in [titleLabel, hintLabel] {
             label.isEditable = false
@@ -42,20 +51,47 @@ final class ProofreadingPopoverController: NSViewController {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 5
-        stack.edgeInsets = Self.padding
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView()
+        let container = OpaquePopoverView()
         container.addSubview(stack)
+
+        let safeArea = container.safeAreaLayoutGuide
+
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: container.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            container.widthAnchor.constraint(
+            safeArea.widthAnchor.constraint(
                 equalToConstant: Self.contentWidth
             ),
+
+            stack.leadingAnchor.constraint(
+                equalTo: safeArea.leadingAnchor,
+                constant: padding.left
+            ),
+            stack.trailingAnchor.constraint(
+                equalTo: safeArea.trailingAnchor,
+                constant: -padding.right
+            ),
+            stack.topAnchor.constraint(
+                equalTo: safeArea.topAnchor,
+                constant: padding.top
+            ),
+            stack.bottomAnchor.constraint(
+                equalTo: safeArea.bottomAnchor,
+                constant: -padding.bottom
+            ),
         ])
+
         view = container
+    }
+}
+
+final class OpaquePopoverView: NSView {
+    override var isOpaque: Bool {
+        true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        dirtyRect.fill()
     }
 }

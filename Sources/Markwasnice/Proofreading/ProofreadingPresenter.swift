@@ -16,7 +16,7 @@ final class ProofreadingPresenter {
         let trigger: ActivationTrigger
     }
 
-    private static let hoverDwellSeconds: TimeInterval = 0.2
+    private static let hoverDwellSeconds: TimeInterval = 0.15
     private static let lightHighlightAlpha: CGFloat = 0.16
     private static let darkHighlightAlpha: CGFloat = 0.26
 
@@ -378,6 +378,7 @@ final class ProofreadingPresenter {
         let popover = NSPopover()
         popover.behavior = .applicationDefined
         popover.animates = true
+        popover.hasFullSizeContent = true
         popover.contentViewController = ProofreadingPopoverController(
             title: issue.title,
             hint: issue.hint
