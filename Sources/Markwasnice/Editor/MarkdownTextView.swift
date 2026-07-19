@@ -295,7 +295,15 @@ final class MarkdownTextView: NSTextView {
         }
 
         let origin = textContainerOrigin
-        let visibleRange = characterRange(forViewRect: rect, origin: origin)
+        let waveReach = Self.proofreadingWaveOffset
+            + Self.proofreadingWaveAmplitude + 2
+        let queryRect = NSRect(
+            x: rect.minX,
+            y: rect.minY - waveReach,
+            width: rect.width,
+            height: rect.height + waveReach
+        )
+        let visibleRange = characterRange(forViewRect: queryRect, origin: origin)
 
         for item in proofreadingHighlights
             where visibleRange == nil
