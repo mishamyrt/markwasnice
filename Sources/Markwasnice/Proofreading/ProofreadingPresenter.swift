@@ -19,6 +19,8 @@ final class ProofreadingPresenter {
     private static let hoverDwellSeconds: TimeInterval = 0.15
     private static let lightHighlightAlpha: CGFloat = 0.16
     private static let darkHighlightAlpha: CGFloat = 0.26
+    private static let highlightFadeSeconds: TimeInterval = 0.14
+    private static let fadeFrameInterval: TimeInterval = 1.0 / 60.0
 
     private let textView: MarkdownTextView
     private let severityColor: (ProofreadingSeverity) -> NSColor
@@ -29,6 +31,13 @@ final class ProofreadingPresenter {
     private var dwellTimer: Timer?
     private var dwellCandidateIndex: Int?
     private var popover: NSPopover?
+
+    /// Underline-to-highlight crossfade per rule: 0 draws only the wavy
+    /// underline, 1 only the tinted highlight. Entries animate toward 1 for
+    /// the active rule and 0 for everything else, then settled zeros drop out.
+    private var fadeProgress: [Int: CGFloat] = [:]
+    private var fadeTimer: Timer?
+    private var lastFadeTick: CFTimeInterval = 0
 
     init(
         textView: MarkdownTextView,
@@ -41,8 +50,9 @@ final class ProofreadingPresenter {
         }
     }
 
-    // No deinit invalidation needed: the dwell timer fires once, holds self
-    // weakly, and the presenter lives as long as the editor view anyway.
+    // No deinit invalidation needed: both timers hold self weakly (the dwell
+    // timer fires once, the fade timer stops itself once every fade settles),
+    // and the presenter lives as long as the editor view anyway.
 
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else {
@@ -261,9 +271,13 @@ final class ProofreadingPresenter {
 
     private func pushDecorations() {
         guard isEnabled, !issues.isEmpty else {
+            fadeProgress = [:]
+            stopFadeTimer()
             textView.setProofreadingDecorations(underlines: [], highlights: [])
             return
         }
+
+        retargetFade()
 
         let isDark = textView.effectiveAppearance
             .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -279,11 +293,14 @@ final class ProofreadingPresenter {
         for index in issues.indices.sorted(by: issueSpecificityOrder) {
             let issue = issues[index]
             let color = severityColor(issue.severity)
-            if let state = activeState, issue.ruleID == state.ruleID {
+            let fade = easedFade(for: issue.ruleID)
+            if fade > 0 {
                 highlights.append(.init(
                     range: issue.range,
-                    color: color.withAlphaComponent(highlightAlpha)
+                    color: color.withAlphaComponent(highlightAlpha * fade)
                 ))
+            }
+            if fade >= 1 {
                 claimedRanges.append(issue.range)
                 continue
             }
@@ -299,8 +316,11 @@ final class ProofreadingPresenter {
                     MarkdownStylingEngine.subtract(claimed, from: $0)
                 }
             }
+            let underlineColor = fade > 0
+                ? color.withAlphaComponent(color.alphaComponent * (1 - fade))
+                : color
             underlines += visibleSegments.map {
-                .init(range: $0, color: color)
+                .init(range: $0, color: underlineColor)
             }
             claimedRanges.append(issue.range)
         }
@@ -308,6 +328,92 @@ final class ProofreadingPresenter {
             underlines: underlines,
             highlights: highlights
         )
+    }
+
+    // MARK: - Highlight crossfade
+
+    /// Ensures the active rule has a fade entry, drops entries for rules that
+    /// no longer exist, and runs the frame timer while anything is mid-fade.
+    private func retargetFade() {
+        let activeRuleID = activeState?.ruleID
+        if let activeRuleID, fadeProgress[activeRuleID] == nil {
+            fadeProgress[activeRuleID] = 0
+        }
+        if !fadeProgress.isEmpty {
+            let liveRuleIDs = Set(issues.map(\.ruleID))
+            fadeProgress = fadeProgress.filter { liveRuleIDs.contains($0.key) }
+        }
+        let needsAnimation = fadeProgress.contains { ruleID, progress in
+            progress != (ruleID == activeRuleID ? 1 : 0)
+        }
+        if needsAnimation {
+            startFadeTimer()
+        }
+    }
+
+    private func easedFade(for ruleID: Int) -> CGFloat {
+        guard let progress = fadeProgress[ruleID], progress > 0 else {
+            return 0
+        }
+
+        // Smoothstep: gentle in and out of the crossfade.
+        return progress * progress * (3 - 2 * progress)
+    }
+
+    private func startFadeTimer() {
+        guard fadeTimer == nil else {
+            return
+        }
+
+        lastFadeTick = CACurrentMediaTime()
+        let timer = Timer(
+            timeInterval: Self.fadeFrameInterval,
+            repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.stepFade()
+            }
+        }
+        // Default-mode timers stall during scroll and event tracking; the
+        // crossfade should keep moving there.
+        RunLoop.main.add(timer, forMode: .common)
+        fadeTimer = timer
+    }
+
+    private func stopFadeTimer() {
+        fadeTimer?.invalidate()
+        fadeTimer = nil
+    }
+
+    private func stepFade() {
+        let now = CACurrentMediaTime()
+        // Clamp hitches so a stalled frame advances, not teleports, the fade.
+        let delta = CGFloat(
+            min(now - lastFadeTick, 4 * Self.fadeFrameInterval)
+                / Self.highlightFadeSeconds
+        )
+        lastFadeTick = now
+
+        let activeRuleID = activeState?.ruleID
+        var settled = true
+        var next: [Int: CGFloat] = [:]
+        for (ruleID, progress) in fadeProgress {
+            let target: CGFloat = ruleID == activeRuleID ? 1 : 0
+            let value = progress < target
+                ? min(target, progress + delta)
+                : max(target, progress - delta)
+            if value != target {
+                settled = false
+            }
+            if value > 0 || ruleID == activeRuleID {
+                next[ruleID] = value
+            }
+        }
+        fadeProgress = next
+        if settled {
+            stopFadeTimer()
+        }
+        pushDecorations()
     }
 
     /// Smaller range first (more specific wins overlaps), then higher
