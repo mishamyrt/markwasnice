@@ -286,7 +286,18 @@ final class MarkdownTextView: NSTextView {
     private static let proofreadingWaveAmplitude: CGFloat = 1.25
     private static let proofreadingWaveLength: CGFloat = 12
     private static let proofreadingWaveOffset: CGFloat = 7
+    private static let proofreadingWaveLineWidth: CGFloat = 1.5
     private static let proofreadingHighlightCornerRadius: CGFloat = 3
+
+    /// The wave metrics above were tuned for the default body font. The line
+    /// thickness and its baseline offset scale with the current font size so
+    /// the squiggle keeps the same visual weight at any text size.
+    private static let proofreadingReferenceFontSize: CGFloat = 20
+
+    private var proofreadingScale: CGFloat {
+        (font?.pointSize ?? Self.proofreadingReferenceFontSize)
+            / Self.proofreadingReferenceFontSize
+    }
 
     private func drawProofreadingDecorations(in rect: NSRect) {
         guard !(proofreadingUnderlines.isEmpty && proofreadingHighlights.isEmpty)
@@ -295,7 +306,7 @@ final class MarkdownTextView: NSTextView {
         }
 
         let origin = textContainerOrigin
-        let waveReach = Self.proofreadingWaveOffset
+        let waveReach = Self.proofreadingWaveOffset * proofreadingScale
             + Self.proofreadingWaveAmplitude + 2
         let queryRect = NSRect(
             x: rect.minX,
@@ -376,7 +387,8 @@ final class MarkdownTextView: NSTextView {
 
             let baseline = fragmentRect.minY
                 + layoutManager.location(forGlyphAt: lineRange.location).y
-            let waveY = baseline + Self.proofreadingWaveOffset + origin.y
+            let waveY = baseline
+                + Self.proofreadingWaveOffset * self.proofreadingScale + origin.y
             let minX = bounds.minX + origin.x
             let maxX = bounds.maxX + origin.x
             guard maxX > minX,
@@ -400,7 +412,7 @@ final class MarkdownTextView: NSTextView {
     /// squiggle is stable across repaints.
     private func strokeWave(from minX: CGFloat, to maxX: CGFloat, y: CGFloat) {
         let path = NSBezierPath()
-        path.lineWidth = 1.5
+        path.lineWidth = Self.proofreadingWaveLineWidth * proofreadingScale
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
 
