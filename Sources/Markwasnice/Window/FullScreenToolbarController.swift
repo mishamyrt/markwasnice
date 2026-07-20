@@ -26,8 +26,8 @@ final class FullScreenToolbarController: NSObject {
     /// adding a tab), AppKit's auto-hide can retract the NSToolbarFullScreenWindow
     /// by its pre-tab-bar height, leaving a strip of it stuck on screen. A
     /// settled toolbar window only has two valid resting positions — fully
-    /// hidden, or fully revealed (the latter only for the selected tab); once
-    /// it stops moving anywhere in between, clamp it fully off-screen.
+    /// hidden, or fully revealed with the pointer keeping the reveal alive;
+    /// once it stops moving anywhere else, clamp it fully off-screen.
     func refresh(editorWindow: NSWindow?, session: EditorDocumentSession?) {
         self.editorWindow = editorWindow
         self.session = session
@@ -584,12 +584,15 @@ final class FullScreenToolbarController: NSObject {
         // Anything parked below the reveal zone (AppKit creates new tabs'
         // toolbar windows at the screen origin — the bottom edge) is
         // never legitimate and gets clamped back to the top.
+        // Tab selection deliberately plays no role here: on a tab switch
+        // the deselected tab's controller can still hold the observation
+        // of the shared toolbar window, and clamping from it would retract
+        // a reveal the pointer is actively keeping alive (clicking a tab
+        // happens with the pointer on the tab bar, inside the reveal zone).
         let pointer = NSEvent.mouseLocation
         let pointerOnScreen = window.screen.map { $0.frame.contains(pointer) }
             ?? true
-        let isSelectedTab = window.tabGroup.map { $0.selectedWindow === window }
-            ?? true
-        if isSelectedTab, pointerOnScreen,
+        if pointerOnScreen,
            minY >= revealedY - 64, pointer.y >= minY - 250
         {
             // No move events arrive when the pointer leaves; keep
