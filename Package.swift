@@ -14,7 +14,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0"),
         .package(url: "https://github.com/mishamyrt/swift-typograf.git", from: "0.2.0"),
-        .package(url: "https://github.com/mishamyrt/rdktr.git", from: "0.1.2"),
+        .package(url: "https://github.com/mishamyrt/rdktr.git", from: "0.1.3"),
     ],
     targets: [
         .executableTarget(
