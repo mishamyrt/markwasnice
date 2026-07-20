@@ -450,10 +450,10 @@ private struct EditorSearchBar: View {
         }
         .frame(height: state.searchBarHeight)
         .onAppear {
-            isSearchFieldFocused = true
+            focusSearchField()
         }
         .onChange(of: state.searchFocusRequest) { _, _ in
-            isSearchFieldFocused = true
+            focusSearchField()
         }
         .onChange(of: state.isReplaceEnabled) { _, isEnabled in
             if isEnabled {
@@ -461,6 +461,19 @@ private struct EditorSearchBar: View {
             } else {
                 isSearchFieldFocused = true
             }
+        }
+    }
+
+    /// Cmd+F can arrive while the editor already owns first responder and
+    /// the focus binding still reads true from the previous grab, making a
+    /// plain re-set a no-op; on first presentation the field is not in the
+    /// window yet when onAppear runs. Dropping the value and re-requesting
+    /// on the next runloop turn produces a fresh false→true transition
+    /// after the field exists, so the request lands in both cases.
+    private func focusSearchField() {
+        isSearchFieldFocused = false
+        DispatchQueue.main.async {
+            isSearchFieldFocused = true
         }
     }
 

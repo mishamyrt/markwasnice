@@ -462,8 +462,58 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         textView.setSelectedRange(range)
-        textView.scrollRangeToVisible(range)
+        scrollSearchMatchToCenter(range)
         textView.showFindIndicator(for: range)
+    }
+
+    /// Centers the match in the area below the chrome band (the search bar
+    /// is always visible while searching); near the document edges the
+    /// offset clamps, landing the match as close to center as the scroll
+    /// range allows.
+    private func scrollSearchMatchToCenter(_ range: NSRange) {
+        editorLayoutManager.ensureLayout(for: textContainer)
+        let glyphRange = editorLayoutManager.glyphRange(
+            forCharacterRange: range,
+            actualCharacterRange: nil
+        )
+        let matchRect = editorLayoutManager.boundingRect(
+            forGlyphRange: glyphRange,
+            in: textContainer
+        )
+
+        let clipHeight = clipView.bounds.height
+        guard clipHeight > 0 else {
+            textView.scrollRangeToVisible(range)
+            return
+        }
+
+        let matchMidY = textView.textContainerOrigin.y + matchRect.midY
+        let visibleCenterY = (textTopPadding + clipHeight) / 2
+        let insets = scrollView.contentInsets
+        let minimumOffsetY = -insets.top
+        let maximumOffsetY = max(
+            minimumOffsetY,
+            textView.frame.height - clipHeight + insets.bottom
+        )
+        let targetOffsetY = min(
+            max(minimumOffsetY, matchMidY - visibleCenterY),
+            maximumOffsetY
+        )
+        guard abs(clipView.bounds.origin.y - targetOffsetY) > 0.5 else {
+            return
+        }
+
+        // The jump must not read as user scrolling (it would hide the
+        // chrome and suppress focus mode), and any in-flight caret
+        // centering would fight the new offset.
+        focusScrollAnimator.cancel()
+        textView.cancelKeyboardCaretScroll()
+        focusScrollAdjustmentCount += 1
+        clipView.setBoundsOrigin(
+            NSPoint(x: clipView.bounds.origin.x, y: targetOffsetY)
+        )
+        scrollView.reflectScrolledClipView(clipView)
+        focusScrollAdjustmentCount -= 1
     }
 
     @discardableResult
