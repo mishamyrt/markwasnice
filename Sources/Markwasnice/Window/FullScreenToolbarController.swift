@@ -16,6 +16,7 @@ final class FullScreenToolbarController: NSObject {
     private weak var separatorView: NSView?
     private weak var backdropView: NSView?
     private var strayToolbarCheckWorkItem: DispatchWorkItem?
+    private var pendingKickWorkItem: DispatchWorkItem?
 
     private var isKickingToolbarAppearance = false
     private var didKickToolbarForFullScreenSession = false
@@ -87,6 +88,11 @@ final class FullScreenToolbarController: NSObject {
         syncAppearance()
         reportChromeOverlayHeight()
         scheduleStrayToolbarWindowCheck()
+        // A toolbar window first observed while already parked (app opened
+        // straight into fullscreen) emits no move notifications, so the
+        // pending kick has to be scheduled from here or it would discharge
+        // on the first reveal instead.
+        schedulePendingToolbarKick()
     }
 
     /// NSToolbarFullScreenWindow does not track system appearance changes:
@@ -135,6 +141,8 @@ final class FullScreenToolbarController: NSObject {
     func stopObserving() {
         strayToolbarCheckWorkItem?.cancel()
         strayToolbarCheckWorkItem = nil
+        pendingKickWorkItem?.cancel()
+        pendingKickWorkItem = nil
         toolbarAppearanceObservation = nil
         toolbarEffectiveAppearanceObservation = nil
         separatorView?.removeFromSuperview()
@@ -156,6 +164,26 @@ final class FullScreenToolbarController: NSObject {
             object: observedToolbarWindow
         )
         self.observedToolbarWindow = nil
+    }
+
+    /// The hidden-position guard alone is not enough to fire the kick: the
+    /// first frames of a reveal animation also satisfy it (the window
+    /// leaves its parked spot with alpha still 0), and a kick fired there
+    /// paints the whole revealing band in the opposite theme for its 0.35s
+    /// hold. Debouncing on move notifications means the kick only fires
+    /// once the window has stopped moving — genuinely parked — never mid
+    /// animation.
+    private func schedulePendingToolbarKick() {
+        guard isToolbarKickPending else {
+            return
+        }
+
+        pendingKickWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.performPendingToolbarKickIfHidden()
+        }
+        pendingKickWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
     }
 
     private func performPendingToolbarKickIfHidden() {
@@ -428,7 +456,7 @@ final class FullScreenToolbarController: NSObject {
             updateToolbarWindowFade(toolbarWindow)
             hideSystemToolbarBackdrop(in: toolbarWindow)
         }
-        performPendingToolbarKickIfHidden()
+        schedulePendingToolbarKick()
         reportChromeOverlayHeight()
         scheduleStrayToolbarWindowCheck()
     }
