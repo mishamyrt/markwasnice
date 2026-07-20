@@ -183,6 +183,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyEditorColors()
+        updateSearchMatchDecorations()
         restyleAllText()
         previewPresenter.refreshIfActive()
         proofreadingPresenter.refreshColors()
@@ -453,6 +454,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         searchMatchRanges = ranges
         selectedSearchMatchIndex = selectedIndex
+        updateSearchMatchDecorations()
         restyleAllText()
     }
 
@@ -461,7 +463,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        textView.setSelectedRange(range)
+        // A caret, not a range selection: selecting the match makes AppKit
+        // draw the inactive-selection gray over the yellow match fill while
+        // the search field owns focus. The caret still lands the editor at
+        // the match when the search closes.
+        textView.setSelectedRange(NSRange(location: NSMaxRange(range), length: 0))
         scrollSearchMatchToCenter(range)
         textView.showFindIndicator(for: range)
     }
@@ -1445,8 +1451,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         applyNonbreakingSpaceStyle(range: targetRange)
-        applySearchHighlights(intersecting: [targetRange])
+        // Dimming first: the selected match's dark text must survive focus
+        // mode's foreground override.
         applyFocusDimming(in: targetRange)
+        applySearchHighlights(intersecting: [targetRange])
 
         textStorage.endEditing()
         textView.undoManager?.enableUndoRegistration()
@@ -1775,31 +1783,33 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
     }
 
+    /// The selected match sits on the opaque yellow fill drawn in the text
+    /// view's background pass; the theme foreground has no contrast there,
+    /// so its text flips to a dark color. The fill and the borders around
+    /// the other matches are drawn in MarkdownTextView, not applied as
+    /// attributes — see updateSearchMatchDecorations().
     private func applySearchHighlights(intersecting ranges: [NSRange]) {
         guard let textStorage = textView.textStorage,
-              !searchMatchRanges.isEmpty
+              let selectedIndex = selectedSearchMatchIndex,
+              searchMatchRanges.indices.contains(selectedIndex)
         else {
             return
         }
 
-        for (index, matchRange) in searchMatchRanges.enumerated() {
-            for range in ranges {
-                let intersection = NSIntersectionRange(matchRange, range)
-                guard intersection.length > 0,
-                      boundedRange(intersection) != nil
-                else {
-                    continue
-                }
-
-                if !MarkdownEditorDiagnostics.disableBackgroundColor {
-                    textStorage.addAttribute(
-                        .backgroundColor,
-                        value: searchHighlightColor(isSelected: index ==
-                            selectedSearchMatchIndex),
-                        range: intersection
-                    )
-                }
+        let matchRange = searchMatchRanges[selectedIndex]
+        for range in ranges {
+            let intersection = NSIntersectionRange(matchRange, range)
+            guard intersection.length > 0,
+                  boundedRange(intersection) != nil
+            else {
+                continue
             }
+
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: Self.searchSelectedMatchTextColor,
+                range: intersection
+            )
         }
     }
 
@@ -1827,17 +1837,30 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
     }
 
-    private func searchHighlightColor(isSelected: Bool) -> NSColor {
-        let match = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
-        if isSelected {
-            return match == .darkAqua
-                ? NSColor.systemOrange.withAlphaComponent(0.52)
-                : NSColor.systemOrange.withAlphaComponent(0.38)
-        }
+    private static let searchSelectedMatchFillColor = NSColor.systemYellow
+    private static let searchSelectedMatchTextColor = NSColor.black
+        .withAlphaComponent(0.88)
 
-        return match == .darkAqua
-            ? NSColor.systemYellow.withAlphaComponent(0.34)
-            : NSColor.systemYellow.withAlphaComponent(0.28)
+    private static let searchMatchBorderColor = NSColor.textColor
+
+    private func updateSearchMatchDecorations() {
+        let selectedRange: NSRange? =
+            if let selectedSearchMatchIndex,
+            searchMatchRanges.indices.contains(selectedSearchMatchIndex)
+        {
+            searchMatchRanges[selectedSearchMatchIndex]
+        } else {
+            nil
+        }
+        let borderRanges = searchMatchRanges.enumerated()
+            .filter { $0.offset != selectedSearchMatchIndex }
+            .map(\.element)
+        textView.setSearchMatchDecorations(
+            borderRanges: borderRanges,
+            selectedRange: selectedRange,
+            borderColor: Self.searchMatchBorderColor,
+            fillColor: Self.searchSelectedMatchFillColor
+        )
     }
 
     private func replaceSelectedText(with string: String) {

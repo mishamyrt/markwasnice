@@ -89,6 +89,31 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
+    private var searchBorderRanges: [NSRange] = []
+    private var searchSelectedMatchRange: NSRange?
+    private var searchMatchBorderColor: NSColor = .clear
+    private var searchMatchFillColor: NSColor = .clear
+
+    func setSearchMatchDecorations(
+        borderRanges: [NSRange],
+        selectedRange: NSRange?,
+        borderColor: NSColor,
+        fillColor: NSColor
+    ) {
+        let didChange =
+            borderRanges != searchBorderRanges
+                || selectedRange != searchSelectedMatchRange
+                || borderColor != searchMatchBorderColor
+                || fillColor != searchMatchFillColor
+        searchBorderRanges = borderRanges
+        searchSelectedMatchRange = selectedRange
+        searchMatchBorderColor = borderColor
+        searchMatchFillColor = fillColor
+        if didChange {
+            needsDisplay = true
+        }
+    }
+
     struct ProofreadingDrawItem: Equatable {
         let range: NSRange
         let color: NSColor
@@ -114,6 +139,79 @@ final class MarkdownTextView: NSTextView {
         super.drawBackground(in: rect)
         drawCodeBackgrounds(in: rect)
         drawProofreadingDecorations(in: rect)
+        drawSearchMatchDecorations(in: rect)
+    }
+
+    private static let searchMatchCornerRadius: CGFloat = 2
+    private static let searchMatchHorizontalPadding: CGFloat = 1.5
+    private static let searchMatchVerticalPadding: CGFloat = 5
+
+    private func drawSearchMatchDecorations(in rect: NSRect) {
+        guard searchSelectedMatchRange != nil || !searchBorderRanges.isEmpty
+        else {
+            return
+        }
+
+        let origin = textContainerOrigin
+        // Decorations reach beyond their glyphs; when a scroll exposes just
+        // that overhang, the dirty rect alone would miss the match's glyphs
+        // and leave the border edge unpainted until the next full redraw.
+        let reach = Self.searchMatchVerticalPadding + 1
+        let queryRect = rect.insetBy(
+            dx: -(Self.searchMatchHorizontalPadding + 1),
+            dy: -reach
+        )
+        let visibleRange = characterRange(forViewRect: queryRect, origin: origin)
+
+        searchMatchBorderColor.setStroke()
+        for range in searchBorderRanges
+            where visibleRange == nil
+            || NSIntersectionRange(range, visibleRange ?? range).length > 0
+        {
+            for segment in inlineLineRects(for: range, origin: origin) {
+                let padded = segment.insetBy(
+                    dx: -Self.searchMatchHorizontalPadding,
+                    dy: -Self.searchMatchVerticalPadding
+                )
+                guard padded.intersects(rect) else {
+                    continue
+                }
+
+                // The half-point inset keeps the 1pt stroke on pixel
+                // boundaries instead of blurring across two rows.
+                let path = NSBezierPath(
+                    roundedRect: padded.insetBy(dx: 0.5, dy: 0.5),
+                    xRadius: Self.searchMatchCornerRadius,
+                    yRadius: Self.searchMatchCornerRadius
+                )
+                path.lineWidth = 1
+                path.stroke()
+            }
+        }
+
+        if let selectedRange = searchSelectedMatchRange,
+           visibleRange == nil
+           || NSIntersectionRange(
+               selectedRange, visibleRange ?? selectedRange
+           ).length > 0
+        {
+            searchMatchFillColor.setFill()
+            for segment in inlineLineRects(for: selectedRange, origin: origin) {
+                let padded = segment.insetBy(
+                    dx: -Self.searchMatchHorizontalPadding,
+                    dy: -Self.searchMatchVerticalPadding
+                )
+                guard padded.intersects(rect) else {
+                    continue
+                }
+
+                NSBezierPath(
+                    roundedRect: padded,
+                    xRadius: Self.searchMatchCornerRadius,
+                    yRadius: Self.searchMatchCornerRadius
+                ).fill()
+            }
+        }
     }
 
     private func drawCodeBackgrounds(in rect: NSRect) {
