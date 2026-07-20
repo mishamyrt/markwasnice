@@ -48,6 +48,83 @@ private enum NewTabActionInterceptor {
     }
 }
 
+/// Opening a SwiftUI scene window while a fullscreen space is active makes
+/// the system materialize that window straight into a fullscreen space of
+/// its own — no orderFront to pre-empt, no willEnterFullScreen transition —
+/// and manually attaching it to the existing tab group afterwards merges
+/// the two spaces, stranding the old one as a black husk. Fullscreen tabs
+/// therefore bypass SwiftUI window creation entirely: a plain AppKit window
+/// hosts the same editor content and joins the fullscreen tab group before
+/// it is ever shown, the one order of operations AppKit handles cleanly.
+@MainActor
+enum FullScreenTabWindowFactory {
+    private static var controllers: [ObjectIdentifier: NSWindowController] = [:]
+
+    static func open(
+        session: EditorDocumentSession,
+        appState: MarkwasniceAppState,
+        attachedTo target: NSWindow
+    ) {
+        let window = NSWindow(
+            contentRect: target.frame,
+            styleMask: [
+                .titled, .closable, .miniaturizable, .resizable,
+                .fullSizeContentView,
+            ],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.isRestorable = false
+
+        let controller = EditorTabWindowController(window: window)
+        controller.appState = appState
+        controllers[ObjectIdentifier(window)] = controller
+
+        var closeObserver: NSObjectProtocol?
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak window] _ in
+            if let closeObserver {
+                NotificationCenter.default.removeObserver(closeObserver)
+            }
+            // Released outside the close callout so the window is not
+            // deallocated mid-teardown.
+            DispatchQueue.main.async {
+                guard let window else {
+                    return
+                }
+
+                MainActor.assumeIsolated {
+                    controllers[ObjectIdentifier(window)] = nil
+                }
+            }
+        }
+
+        window.contentView = NSHostingView(
+            rootView: EditorWindowView(session: session)
+                .environmentObject(appState)
+        )
+        // The hosting view materializes its AppKit subtree lazily; forcing
+        // layout makes WindowLifecycleView configure the window and run the
+        // tab attach while the window is still unshown.
+        window.layoutIfNeeded()
+    }
+}
+
+/// Keeps the native tab bar "+" button functional on factory-made windows:
+/// the button only appears when a responder implements newWindowForTab:.
+@MainActor
+private final class EditorTabWindowController: NSWindowController {
+    weak var appState: MarkwasniceAppState?
+
+    override func newWindowForTab(_: Any?) {
+        appState?.requestNewTab(attachedTo: window)
+    }
+}
+
 struct EditorWindowHost: View {
     @Binding var sessionID: EditorDocumentSession.ID?
 

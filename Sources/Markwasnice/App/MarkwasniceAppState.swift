@@ -80,6 +80,14 @@ final class MarkwasniceAppState: ObservableObject {
            window.tabbingIdentifier == EditorWindowTabbing.identifier
         {
             tabAttachTargets[session.id] = WeakWindowBox(window: window)
+            if window.styleMask.contains(.fullScreen) {
+                FullScreenTabWindowFactory.open(
+                    session: session,
+                    appState: self,
+                    attachedTo: window
+                )
+                return
+            }
         }
         pendingWindowIDs.append(session.id)
     }
@@ -347,13 +355,21 @@ final class MarkwasniceAppState: ObservableObject {
 
             let session = makeSession(text: text, fileURL: url, isEdited: false)
             activate(session)
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            scheduleAutosave()
             if let tabTarget,
                tabTarget.tabbingIdentifier == EditorWindowTabbing.identifier
             {
                 tabAttachTargets[session.id] = WeakWindowBox(window: tabTarget)
+                if tabTarget.styleMask.contains(.fullScreen) {
+                    FullScreenTabWindowFactory.open(
+                        session: session,
+                        appState: self,
+                        attachedTo: tabTarget
+                    )
+                    return
+                }
             }
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
-            scheduleAutosave()
             if queuesWindow {
                 pendingWindowIDs.append(session.id)
             }
