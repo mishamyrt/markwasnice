@@ -21,6 +21,9 @@ final class FullScreenToolbarController: NSObject {
     private var isKickingToolbarAppearance = false
     private var didKickToolbarForFullScreenSession = false
     private var isToolbarKickPending = false
+    private var kickReleaseWorkItem: DispatchWorkItem?
+    private weak var kickedChromeView: NSView?
+    private var kickFiredAt: CFTimeInterval = 0
 
     /// When the tab bar appears inside a fullscreen window (manually or by
     /// adding a tab), AppKit's auto-hide can retract the NSToolbarFullScreenWindow
@@ -82,6 +85,7 @@ final class FullScreenToolbarController: NSObject {
             }
         }
 
+        abortKickIfToolbarOnScreen()
         installSeparator(in: toolbarWindow)
         hideSystemToolbarBackdrop(in: toolbarWindow)
         updateToolbarWindowFade(toolbarWindow)
@@ -226,14 +230,45 @@ final class FullScreenToolbarController: NSObject {
                 ? .aqua
                 : .darkAqua
         isKickingToolbarAppearance = true
+        kickedChromeView = chromeView
+        kickFiredAt = CACurrentMediaTime()
         chromeView.appearance = NSAppearance(named: oppositeName)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [
-            weak self,
-            weak chromeView
-        ] in
-            self?.isKickingToolbarAppearance = false
-            chromeView?.appearance = nil
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.releaseToolbarAppearanceKick()
         }
+        kickReleaseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
+    }
+
+    private func releaseToolbarAppearanceKick() {
+        kickReleaseWorkItem?.cancel()
+        kickReleaseWorkItem = nil
+        isKickingToolbarAppearance = false
+        kickedChromeView?.appearance = nil
+        kickedChromeView = nil
+    }
+
+    /// A reveal can begin inside the kick's 0.35s hold: the hover both
+    /// schedules the kick (the toolbar window is still parked when it
+    /// fires) and, a beat later, starts the reveal animation — which would
+    /// slide the whole band in wearing the opposite theme. The first move
+    /// notification of the reveal arrives before its frame is committed,
+    /// so releasing here keeps the flipped repaint off screen. A kick that
+    /// held for less than one render pass is re-armed so a later parked
+    /// period can redo it.
+    private func abortKickIfToolbarOnScreen() {
+        guard isKickingToolbarAppearance,
+              let window = editorWindow,
+              let toolbarWindow = observedToolbarWindow,
+              toolbarWindow.frame.minY < window.frame.maxY - 0.5
+        else {
+            return
+        }
+
+        if CACurrentMediaTime() - kickFiredAt < 0.05 {
+            isToolbarKickPending = true
+        }
+        releaseToolbarAppearanceKick()
     }
 
     /// The fullscreen toolbar slides down over the text without any band
@@ -450,6 +485,7 @@ final class FullScreenToolbarController: NSObject {
     }
 
     @objc private func toolbarWindowDidMove(_: Notification) {
+        abortKickIfToolbarOnScreen()
         // AppKit can rebuild parts of the chrome when the reveal state
         // changes; keep the stale glass band suppressed.
         if let toolbarWindow = observedToolbarWindow {
