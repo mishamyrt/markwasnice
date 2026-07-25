@@ -291,7 +291,7 @@ final class FullScreenToolbarController: NSObject {
     }
 
     private func releaseToolbarAppearanceKick() {
-        guard case .kicking(let view, _, let release) = kickState else {
+        guard case let .kicking(view, _, release) = kickState else {
             return
         }
 
@@ -305,7 +305,7 @@ final class FullScreenToolbarController: NSObject {
     /// the flipped appearance immediately, and disarms the one-shot so
     /// the next fullscreen session starts fresh.
     private func resetKick() {
-        if case .kicking(let view, _, let release) = kickState {
+        if case let .kicking(view, _, release) = kickState {
             release.cancel()
             view.view?.appearance = nil
         }
@@ -321,7 +321,7 @@ final class FullScreenToolbarController: NSObject {
     /// held for less than one render pass is re-armed so a later parked
     /// period can redo it.
     private func abortKickIfToolbarOnScreen() {
-        guard case .kicking(_, let firedAt, _) = kickState,
+        guard case let .kicking(_, firedAt, _) = kickState,
               let window = editorWindow,
               let toolbarWindow = observedToolbarWindow,
               toolbarWindow.frame.minY < window.frame.maxY - 0.5

@@ -1,0 +1,56 @@
+import Foundation
+import Testing
+@testable import Markwasnice
+
+/// The app quits when its last editor window closes, but not while windows
+/// are still on their way: SwiftUI restores its scene windows at launch with
+/// no session value and the editor host dismisses them again, so quitting on
+/// every last-window closure would kill the app mid-launch.
+@MainActor
+struct AppTerminationPolicyTests {
+    private func makeAppState() throws -> (state: MarkwasniceAppState, directory: URL) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AppTerminationPolicyTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let store = AutosaveStore(
+            fileURL: directory.appendingPathComponent("AutosavedDraft.json")
+        )
+        return (MarkwasniceAppState(autosaveStore: store), directory)
+    }
+
+    @Test
+    func doesNotQuitWhileASessionIsOpen() async throws {
+        let (state, directory) = try makeAppState()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let id = await state.initialSessionID()
+
+        #expect(id != nil)
+        #expect(!state.canTerminateAfterLastWindowClosed)
+    }
+
+    @Test
+    func quitsOnceTheLastSessionIsGone() async throws {
+        let (state, directory) = try makeAppState()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let id = await state.initialSessionID()
+        let session = try #require(state.session(for: id))
+        state.remove(session)
+
+        #expect(state.canTerminateAfterLastWindowClosed)
+    }
+
+    /// Before any session exists the app is quittable — a stray window
+    /// closure must not leave a windowless app running.
+    @Test
+    func quitsWhenNoSessionWasEverCreated() throws {
+        let (state, directory) = try makeAppState()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        #expect(state.canTerminateAfterLastWindowClosed)
+    }
+}

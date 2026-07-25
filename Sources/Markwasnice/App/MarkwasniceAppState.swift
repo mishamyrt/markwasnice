@@ -23,7 +23,13 @@ final class MarkwasniceAppState: ObservableObject {
     private var autosaveTask: Task<Bool, Never>?
     private var preferencesWindowController: PreferencesWindowController?
     private var didCreateInitialSessions = false
+    /// Set while the launch-time sessions are being read back from autosave:
+    /// for that moment the app has neither a session nor a window.
+    private var isResolvingInitialSessions = false
     private var activeSessionID: EditorDocumentSession.ID?
+    /// Externally opened documents whose window has not materialized yet: they
+    /// still owe the app an activation (see `revealDocument`).
+    private var sessionsAwaitingActivation: Set<EditorDocumentSession.ID> = []
     private var tabAttachTargets: [EditorDocumentSession.ID: WeakWindowBox] = [:]
     /// Follower session → lead session of its restored tab group. Resolved to
     /// the lead's window lazily, because at restore time no windows exist yet.
@@ -33,6 +39,14 @@ final class MarkwasniceAppState: ObservableObject {
     init(autosaveStore: AutosaveStore = AutosaveStore()) {
         self.autosaveStore = autosaveStore
         settings = settingsStore.load()
+    }
+
+    /// SwiftUI restores its own scene windows at launch with no session value,
+    /// and the editor host dismisses them again. Quitting on those closures
+    /// would kill the app before its real windows have appeared, so the app
+    /// only quits once no session is left and none is on its way.
+    var canTerminateAfterLastWindowClosed: Bool {
+        sessions.isEmpty && !isResolvingInitialSessions
     }
 
     func session(for id: EditorDocumentSession.ID?) -> EditorDocumentSession? {
@@ -53,8 +67,12 @@ final class MarkwasniceAppState: ObservableObject {
         }
 
         didCreateInitialSessions = true
-        if let session = await autosaveStore.loadSession(), !session.drafts.isEmpty {
-            let drafts = session.drafts
+        isResolvingInitialSessions = true
+        let autosaved = await autosaveStore.loadSession()
+        isResolvingInitialSessions = false
+
+        if let autosaved, !autosaved.drafts.isEmpty {
+            let drafts = autosaved.drafts
             let restoredSessions = restoredSessions(from: drafts)
             var leadSessionIDs: [UUID: EditorDocumentSession.ID] = [:]
             for (draft, session) in zip(drafts, restoredSessions) {
@@ -100,8 +118,14 @@ final class MarkwasniceAppState: ObservableObject {
            tabTarget.tabbingIdentifier == EditorWindowTabbing.identifier
         {
             tabAttachTargets[session.id] = WeakWindowBox(window: tabTarget)
-            if tabTarget.styleMask.contains(.fullScreen) {
-                FullScreenTabWindowFactory.open(
+            // Fullscreen targets and targets on another space both need the
+            // tab to join the group before it is ever shown (see
+            // EditorTabWindowFactory); the latter happens when an external
+            // open arrives from a space the editor is not on.
+            if tabTarget.styleMask.contains(.fullScreen)
+                || !tabTarget.isOnActiveSpace
+            {
+                EditorTabWindowFactory.open(
                     session: session,
                     appState: self,
                     attachedTo: tabTarget
@@ -141,12 +165,21 @@ final class MarkwasniceAppState: ObservableObject {
         restoreTabLeads[id] = nil
     }
 
-    @discardableResult
-    func queueOpen(_ url: URL, inTabOf window: NSWindow? = nil) -> Bool {
+    func queueOpen(_ url: URL, inTabOf window: NSWindow? = nil) {
+        queueOpen(url, placement: .window(window))
+    }
+
+    /// Opens a file requested from outside the app — Finder, `open`, or the
+    /// `markwasnice` command line launcher — next to the document the user is
+    /// already looking at.
+    func queueExternalOpen(_ url: URL) {
+        queueOpen(url, placement: .frontmostTab)
+    }
+
+    private func queueOpen(_ url: URL, placement: OpenPlacement) {
         Task {
-            await open(url, queuesWindow: true, tabTarget: window)
+            await open(url, queuesWindow: true, placement: placement)
         }
-        return true
     }
 
     func openDocuments() {
@@ -180,6 +213,7 @@ final class MarkwasniceAppState: ObservableObject {
 
     func remove(_ session: EditorDocumentSession) {
         sessions[session.id] = nil
+        sessionsAwaitingActivation.remove(session.id)
         if activeSessionID == session.id {
             activeSessionID = sessions.keys.first
         }
@@ -358,14 +392,88 @@ final class MarkwasniceAppState: ObservableObject {
         activeSessionID.flatMap { sessions[$0] }
     }
 
+    /// Brings a freshly opened document to the front, and the app with it when
+    /// the request came from outside. The launch-time activation in
+    /// `applicationDidFinishLaunching` happens before any editor window exists
+    /// — too early for the system to bring the window forward — so a document
+    /// whose window is still on its way is activated once it appears.
+    ///
+    /// The deprecated `activate(ignoringOtherApps:)` is deliberate: cooperative
+    /// `NSApplication.activate()` leaves the app behind the terminal it was
+    /// launched from, because by the time the window exists the app no longer
+    /// holds the activation the `open` command granted it.
+    private func revealDocument(
+        of session: EditorDocumentSession,
+        activatesApp: Bool
+    ) {
+        guard let window = session.editorView.window else {
+            if activatesApp {
+                sessionsAwaitingActivation.insert(session.id)
+            }
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        if activatesApp {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    /// Completes the activation of an externally opened document once the
+    /// window bridge has a window for it.
+    func revealPendingDocument(
+        of session: EditorDocumentSession,
+        in window: NSWindow
+    ) {
+        guard sessionsAwaitingActivation.remove(session.id) != nil else {
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func tabTarget(for placement: OpenPlacement) -> NSWindow? {
+        switch placement {
+        case let .window(window):
+            window
+        case .frontmostTab:
+            frontmostEditorWindow
+        }
+    }
+
+    /// The key window is preferred, with the window order as a fallback: an
+    /// external open reaches a backgrounded app, where no window is key.
+    private var frontmostEditorWindow: NSWindow? {
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow,
+           Self.isEditorWindow(window)
+        {
+            return window
+        }
+
+        return NSApp.orderedWindows.first(where: Self.isEditorWindow)
+    }
+
+    /// Editor windows carry the shared tabbing identifier; the preferences
+    /// window and windows still being configured during launch do not.
+    private static func isEditorWindow(_ window: NSWindow) -> Bool {
+        window.isVisible
+            && window.tabbingIdentifier == EditorWindowTabbing.identifier
+    }
+
     private func open(
         _ url: URL,
         queuesWindow: Bool,
-        tabTarget: NSWindow? = nil
+        placement: OpenPlacement = .window(nil)
     ) async {
         if let existing = sessions.values.first(where: { $0.fileURL == url }) {
             activate(existing)
-            if queuesWindow {
+            // Already on screen: selecting the window (its tab, when it is
+            // tabbed) is what reopening a file should do, and asking SwiftUI
+            // to open a scene for a value it already presents would not.
+            if existing.editorView.window != nil {
+                revealDocument(of: existing, activatesApp: placement.isFrontmostTab)
+            } else if queuesWindow {
                 pendingWindowIDs.append(existing.id)
             }
             return
@@ -373,16 +481,22 @@ final class MarkwasniceAppState: ObservableObject {
 
         do {
             let text = try await FileIO.readUTF8(from: url)
+            // Resolved only now: an external open can arrive mid-launch,
+            // before the first editor window has been configured.
+            let tabTarget = tabTarget(for: placement)
 
             // Opening into a window whose current document is still empty
             // reuses that document instead of spawning a tab next to it.
-            if tabTarget != nil,
+            // External opens reuse it even when no window is up yet, so a
+            // launch triggered by the CLI leaves no empty window behind.
+            if tabTarget != nil || placement.isFrontmostTab,
                let active = activeSession,
                active.isEmptyDocument
             {
                 active.adoptFile(url: url, text: text)
                 NSDocumentController.shared.noteNewRecentDocumentURL(url)
                 scheduleAutosave()
+                revealDocument(of: active, activatesApp: placement.isFrontmostTab)
                 return
             }
 
@@ -391,6 +505,7 @@ final class MarkwasniceAppState: ObservableObject {
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             scheduleAutosave()
             placeSession(session, tabTarget: tabTarget, queuesWindow: queuesWindow)
+            revealDocument(of: session, activatesApp: placement.isFrontmostTab)
         } catch {
             NSAlert(error: error).runModal()
         }
@@ -500,6 +615,22 @@ final class MarkwasniceAppState: ObservableObject {
 
 private struct WeakWindowBox {
     weak var window: NSWindow?
+}
+
+/// Where a newly opened document should be placed.
+private enum OpenPlacement {
+    /// Tab of this window when it accepts editor tabs, own window otherwise.
+    case window(NSWindow?)
+    /// Tab of whichever editor window is frontmost when the file is ready.
+    case frontmostTab
+
+    var isFrontmostTab: Bool {
+        if case .frontmostTab = self {
+            return true
+        }
+
+        return false
+    }
 }
 
 struct MarkwasniceCommands: Commands {

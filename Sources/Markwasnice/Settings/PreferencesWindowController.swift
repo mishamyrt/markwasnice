@@ -2,6 +2,14 @@ import AppKit
 
 @MainActor
 final class PreferencesWindowController: NSWindowController {
+    private enum Layout {
+        static let width: CGFloat = 420
+        static let height: CGFloat = 320
+        /// The CLI helper row is the last one, so a build without it simply
+        /// ends after Typography.
+        static let heightWithoutCLIHelper: CGFloat = 260
+    }
+
     private var settings: EditorSettings
     private let onChange: (EditorSettings) -> Void
     private let textSizeSlider = NSSlider(
@@ -13,12 +21,28 @@ final class PreferencesWindowController: NSWindowController {
     private let tabModePopup = NSPopUpButton()
     private let tabWidthPopup = NSPopUpButton()
     private let typographyPopup = NSPopUpButton()
+    private let cliHelperLabel = NSTextField(labelWithString: "CLI Helper")
+    private let cliHelperButton = NSButton(
+        title: "Install CLI helper", target: nil, action: nil
+    )
+    private let cliHelperStatus = NSTextField(
+        labelWithString: "CLI helper is installed"
+    )
+    private let cliHelperPath = NSTextField(labelWithString: "")
+    private let cliHelperInstaller: CLIHelperInstaller
 
-    init(settings: EditorSettings, onChange: @escaping (EditorSettings) -> Void) {
+    init(
+        settings: EditorSettings,
+        cliHelperInstaller: CLIHelperInstaller = .bundled,
+        onChange: @escaping (EditorSettings) -> Void
+    ) {
         self.settings = settings
+        self.cliHelperInstaller = cliHelperInstaller
         self.onChange = onChange
 
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let contentView = NSView(
+            frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height)
+        )
         let window = NSWindow(
             contentRect: contentView.frame,
             styleMask: [.titled, .closable],
@@ -41,6 +65,10 @@ final class PreferencesWindowController: NSWindowController {
         tabModePopup.selectItem(withTitle: title(for: settings.tabInsertionMode))
         tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
         typographyPopup.selectItem(withTitle: title(for: settings.typographyLocale))
+        // The link can come and go behind the app's back (removed manually,
+        // a deleted bundle), so the row is re-read every time the window is
+        // about to be shown.
+        refreshCLIHelperRow()
     }
 
     @available(*, unavailable)
@@ -95,6 +123,46 @@ final class PreferencesWindowController: NSWindowController {
         onChange(settings)
     }
 
+    @objc private func installCLIHelper(_: NSButton) {
+        do {
+            try cliHelperInstaller.install()
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+
+        refreshCLIHelperRow()
+    }
+
+    private func refreshCLIHelperRow() {
+        let state = cliHelperInstaller.state
+        // Nothing to offer in an unbundled build: the whole row goes away
+        // rather than showing a button that cannot work.
+        let isAvailable = state != .unavailable
+        cliHelperLabel.isHidden = !isAvailable
+        cliHelperButton.isHidden = state != .notInstalled
+        cliHelperStatus.isHidden = !isAvailable || state == .notInstalled
+        cliHelperPath.isHidden = cliHelperStatus.isHidden
+
+        if case let .installed(link) = state {
+            cliHelperPath.stringValue = abbreviatedPath(of: link)
+        }
+
+        let height = isAvailable ? Layout.height : Layout.heightWithoutCLIHelper
+        if window?.contentView?.frame.height != height {
+            window?.setContentSize(NSSize(width: Layout.width, height: height))
+        }
+    }
+
+    /// Home-relative so the row does not have to fit an absolute path.
+    private func abbreviatedPath(of url: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        guard url.path.hasPrefix(home + "/") else {
+            return url.path
+        }
+
+        return "~" + url.path.dropFirst(home.count)
+    }
+
     private func configureControls(in contentView: NSView) {
         let textSizeLabel = NSTextField(labelWithString: "Text Size")
         let widthLabel = NSTextField(labelWithString: "Text Width")
@@ -141,12 +209,26 @@ final class PreferencesWindowController: NSWindowController {
         typographyPopup.action = #selector(typographyChanged(_:))
         typographyPopup.selectItem(withTitle: title(for: settings.typographyLocale))
 
+        cliHelperButton.target = self
+        cliHelperButton.action = #selector(installCLIHelper(_:))
+        cliHelperButton.bezelStyle = .rounded
+        cliHelperPath.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        cliHelperPath.textColor = .secondaryLabelColor
+        // A long path must be truncated, never widen the settings window.
+        cliHelperPath.lineBreakMode = .byTruncatingMiddle
+        cliHelperPath.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
+        refreshCLIHelperRow()
+
         for view in [
             textSizeLabel, smallTextSizeLabel, textSizeSlider, largeTextSizeLabel,
             widthLabel,
             widthPopup, widthCaption, tabModeLabel, tabModePopup, tabWidthLabel,
             tabWidthPopup,
             tabWidthCaption, typographyLabel, typographyPopup,
+            cliHelperLabel, cliHelperButton, cliHelperStatus, cliHelperPath,
         ] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
@@ -248,6 +330,35 @@ final class PreferencesWindowController: NSWindowController {
             typographyPopup.centerYAnchor
                 .constraint(equalTo: typographyLabel.centerYAnchor),
             typographyPopup.widthAnchor.constraint(equalToConstant: 120),
+
+            cliHelperLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
+            cliHelperLabel.topAnchor.constraint(
+                equalTo: typographyLabel.bottomAnchor,
+                constant: 28
+            ),
+            cliHelperLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
+
+            cliHelperButton.leadingAnchor.constraint(
+                equalTo: cliHelperLabel.trailingAnchor, constant: 12
+            ),
+            cliHelperButton.centerYAnchor
+                .constraint(equalTo: cliHelperLabel.centerYAnchor),
+
+            cliHelperStatus.leadingAnchor.constraint(
+                equalTo: cliHelperLabel.trailingAnchor, constant: 12
+            ),
+            cliHelperStatus.centerYAnchor
+                .constraint(equalTo: cliHelperLabel.centerYAnchor),
+
+            cliHelperPath.leadingAnchor
+                .constraint(equalTo: cliHelperStatus.leadingAnchor),
+            cliHelperPath.topAnchor.constraint(
+                equalTo: cliHelperStatus.bottomAnchor,
+                constant: 4
+            ),
+            cliHelperPath.trailingAnchor.constraint(
+                equalTo: contentView.trailingAnchor, constant: -24
+            ),
         ])
     }
 

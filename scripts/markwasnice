@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Command line launcher for Markwasnice. Ships inside the app bundle at
+# Contents/Resources/markwasnice and is symlinked into a bin directory by
+# the "Install CLI helper" button in the app's settings.
+set -euo pipefail
+
+APP_NAME="Markwasnice"
+BUNDLE_ID="co.myrt.markwasnice"
+
+usage() {
+  cat <<EOF
+Usage: markwasnice [file ...]
+
+Opens each file in a new tab of the frontmost $APP_NAME window, launching
+the app when it is not running. Files that do not exist yet are created
+empty. Without arguments the app is just brought to the front.
+
+Options:
+  -h, --help  print this message
+EOF
+}
+
+# The bundle that owns this launcher is preferred over whatever
+# LaunchServices would pick, so a launcher symlinked from a specific build
+# always opens that build.
+resolve_bundle() {
+  local script="${BASH_SOURCE[0]}"
+  local link
+  while [[ -L "$script" ]]; do
+    link="$(readlink "$script")"
+    if [[ "$link" == /* ]]; then
+      script="$link"
+    else
+      script="$(dirname "$script")/$link"
+    fi
+  done
+
+  local dir bundle
+  dir="$(cd "$(dirname "$script")" && pwd)"
+  bundle="${dir%/Contents/Resources}"
+  if [[ "$bundle" != "$dir" && -d "$bundle/Contents/MacOS" ]]; then
+    printf '%s\n' "$bundle"
+  fi
+}
+
+# `open` resolves relative paths against its own working directory, so the
+# paths are absolutized here while the shell's directory still applies.
+absolute_path() {
+  local file="$1"
+  local dir
+  dir="$(cd "$(dirname "$file")" && pwd)"
+  printf '%s/%s\n' "${dir%/}" "$(basename "$file")"
+}
+
+files=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      printf 'markwasnice: unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      files+=("$1")
+      shift
+      ;;
+  esac
+done
+files+=("$@")
+
+targets=()
+for file in ${files[@]+"${files[@]}"}; do
+  if [[ -d "$file" ]]; then
+    printf 'markwasnice: not a file: %s\n' "$file" >&2
+    exit 1
+  fi
+
+  if [[ ! -e "$file" ]]; then
+    if [[ ! -d "$(dirname "$file")" ]]; then
+      printf 'markwasnice: no such directory: %s\n' "$(dirname "$file")" >&2
+      exit 1
+    fi
+    : >"$file"
+  fi
+
+  targets+=("$(absolute_path "$file")")
+done
+
+bundle="$(resolve_bundle)"
+if [[ -n "$bundle" ]]; then
+  app=(-a "$bundle")
+else
+  app=(-b "$BUNDLE_ID")
+fi
+
+exec open "${app[@]}" ${targets[@]+"${targets[@]}"}

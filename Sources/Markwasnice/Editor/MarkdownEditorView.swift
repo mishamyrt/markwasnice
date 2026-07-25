@@ -66,6 +66,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         get { fileDropController.documentURL }
         set { fileDropController.documentURL = newValue }
     }
+
     /// Fired when the preview asks to leave (Escape); the owning session
     /// flips the shell state, which calls back into setPreviewActive(false).
     var onPreviewExitRequested: (() -> Void)?
@@ -104,6 +105,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var previousSelectionRange = NSRange(location: 0, length: 0)
 
     // MARK: Styling/edit reentrancy flags
+
     //
     // The three flags below mark self-inflicted text-storage mutations so
     // the storage and selection hooks can tell them from user edits. Each is
@@ -1938,12 +1940,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private func updateSearchMatchDecorations() {
         let selectedRange: NSRange? =
             if let selectedSearchMatchIndex,
-            searchMatchRanges.indices.contains(selectedSearchMatchIndex)
-        {
-            searchMatchRanges[selectedSearchMatchIndex]
-        } else {
-            nil
-        }
+            searchMatchRanges.indices.contains(selectedSearchMatchIndex) {
+                searchMatchRanges[selectedSearchMatchIndex]
+            } else {
+                nil
+            }
         let borderRanges = searchMatchRanges.enumerated()
             .filter { $0.offset != selectedSearchMatchIndex }
             .map(\.element)
@@ -2147,7 +2148,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let pointInContentView = contentView.convert(pointInWindow, from: nil)
         return chromeRect.contains(pointInContentView)
     }
-
 }
 
 extension String {

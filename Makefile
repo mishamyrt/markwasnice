@@ -6,6 +6,7 @@ XCODE_CONTENTS_DIR := $(XCODE_DIR)/Contents
 ASSETS_DIR := Assets
 ASSETS_ICON_PATH := $(ASSETS_DIR)/AppIcon.icon
 ASSETS_MANIFEST_PATH := $(ASSETS_DIR)/Info.plist
+CLI_SCRIPT_PATH := scripts/markwasnice
 
 # Distribution paths
 RELEASE_DIR := .build/arm64-apple-macosx/release
@@ -20,6 +21,10 @@ FRAMEWORKS_DIR := $(APP_CONTENTS_DIR)/Frameworks
 # Release
 VERSION := 1.0.0
 VERSION_BUNDLE := 1
+
+# Installation paths
+APP_INSTALL_DIR := /Applications/$(APP_NAME).app
+CLI_NAME := markwasnice
 
 # Build tools
 ICTOOL := $(XCODE_CONTENTS_DIR)/Applications/Icon\ Composer.app/Contents/Executables/ictool
@@ -53,14 +58,15 @@ fmt: ## format the code
 	@swiftformat Sources/
 
 install: $(APP_DIST) ## build and install the app
-	@rm -rf "/Applications/$(APP_NAME).app"
-	@ditto "$(APP_DIST)" "/Applications/$(APP_NAME).app"
+	@rm -rf "$(APP_INSTALL_DIR)"
+	@ditto "$(APP_DIST)" "$(APP_INSTALL_DIR)"
 	@echo "$(APP_NAME).app is installed successfully"
 
 $(APP_DIST): \
 	$(RESOURCES_DIR)/AppIcon.icns \
 	$(RESOURCES_DIR)/Assets.car \
 	$(LPROJ_FILES) \
+	$(CLI_SCRIPT_PATH) \
 	$(RELEASE_DIR)/$(APP_NAME)
 
 	@echo "Packaging $(APP_NAME).app"
@@ -74,6 +80,8 @@ $(APP_DIST): \
 
 	@cp -r "$(RESOURCES_DIR)" "$(APP_CONTENTS_DIR)/Resources"
 	@cp -r $(ASSETS_MANIFEST_PATH) "$(APP_CONTENTS_DIR)/Info.plist"
+
+	@install -m 755 "$(CLI_SCRIPT_PATH)" "$(APP_CONTENTS_DIR)/Resources/$(CLI_NAME)"
 
 	@install_name_tool -add_rpath @executable_path/../Frameworks "$(APP_CONTENTS_DIR)/MacOS/$(APP_NAME)" 2>/dev/null || true
 

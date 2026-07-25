@@ -15,7 +15,7 @@ enum EditorWindowTabbing {
 /// requestNewTab keeps the native "+" button and system New Tab functional.
 @MainActor
 private enum NewTabActionInterceptor {
-    private(set) static weak var appState: MarkwasniceAppState?
+    private(set) weak static var appState: MarkwasniceAppState?
     private static var isInstalled = false
 
     static func installIfNeeded(
@@ -48,16 +48,21 @@ private enum NewTabActionInterceptor {
     }
 }
 
-/// Opening a SwiftUI scene window while a fullscreen space is active makes
-/// the system materialize that window straight into a fullscreen space of
-/// its own — no orderFront to pre-empt, no willEnterFullScreen transition —
-/// and manually attaching it to the existing tab group afterwards merges
-/// the two spaces, stranding the old one as a black husk. Fullscreen tabs
-/// therefore bypass SwiftUI window creation entirely: a plain AppKit window
-/// hosts the same editor content and joins the fullscreen tab group before
-/// it is ever shown, the one order of operations AppKit handles cleanly.
+/// A SwiftUI scene window materializes on whichever space is active at that
+/// moment, which corrupts a tab attach whenever the target window lives on a
+/// different space. With a fullscreen target the new window lands in a
+/// fullscreen space of its own — no orderFront to pre-empt, no
+/// willEnterFullScreen transition — and attaching it afterwards merges the
+/// two spaces, stranding the old one as a black husk. With a target on
+/// another desktop (an external open arriving from a different space, while
+/// the activation-driven space switch is still in flight) the newborn window
+/// pulls the target's tab group onto the caller's space, so the switch
+/// finishes on a desktop the group has just left. Such tabs therefore bypass
+/// SwiftUI window creation entirely: a plain AppKit window hosts the same
+/// editor content and joins the tab group before it is ever shown — never
+/// having been on any space, it has none to drag the group to.
 @MainActor
-enum FullScreenTabWindowFactory {
+enum EditorTabWindowFactory {
     private static var controllers: [ObjectIdentifier: NSWindowController] = [:]
 
     static func open(
@@ -313,6 +318,7 @@ private final class WindowLifecycleView: NSView {
         if !didConfigureWindow {
             didConfigureWindow = true
             placeWindow(window, session: session, appState: appState, attempt: 0)
+            appState.revealPendingDocument(of: session, in: window)
         }
     }
 
