@@ -44,20 +44,18 @@ enum MarkdownInlineStyleScanner {
         let sourceMap = SourceMap(text: trimmedLine)
         let lineStartOffset = lineRange.location + leadingLength
 
-        return collector.spans.compactMap { span in
-            guard !span.kind.isBlockStyle else {
-                return nil
-            }
+        // Unlike the parse pipeline, zero-length spans are dropped right at
+        // resolution: the scanner only feeds local restyling, which has no
+        // later mapping step to drop them.
+        let resolvedSpans = sourceMap.resolvedSpans(
+            from: collector.spans.filter { !$0.kind.isBlockStyle },
+            droppingZeroLength: true
+        )
 
-            guard let substringRange = sourceMap.nsRange(for: span.range),
-                  substringRange.length > 0
-            else {
-                return nil
-            }
-
+        return resolvedSpans.compactMap { span in
             let fullRange = NSRange(
-                location: lineStartOffset + substringRange.location,
-                length: substringRange.length
+                location: lineStartOffset + span.range.location,
+                length: span.range.length
             )
 
             guard NSMaxRange(fullRange) <= NSMaxRange(lineRange) else {

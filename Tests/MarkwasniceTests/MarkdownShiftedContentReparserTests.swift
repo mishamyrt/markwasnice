@@ -103,6 +103,16 @@ struct MarkdownShiftedContentReparserTests {
     }
 
     @Test
+    func unshiftedSpanBetweenTwoRegionsSurvives() {
+        let text = "    **a**\n\nplain *mid*\n\n    *b*"
+        let spans = parsedSpans(for: text)
+
+        #expect(spanTexts(of: .strong, in: text) == ["**a**"])
+        #expect(spanTexts(of: .emphasis, in: text) == ["*mid*", "*b*"])
+        #expect(!spans.contains { $0.kind == .codeBlock })
+    }
+
+    @Test
     func fencedBlockStaysCode() {
         let spans = parsedSpans(for: "```\n**not bold**\n```")
 

@@ -8,6 +8,14 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     static let editorTopInset: CGFloat = 0
     static let editorBottomInset: CGFloat = 72
 
+    /// Single source of truth for the open and save panels' type lists so
+    /// they cannot drift apart again.
+    static let markdownContentTypes: [UTType] = [
+        UTType(filenameExtension: "md") ?? .plainText,
+        UTType(filenameExtension: "markdown") ?? .plainText,
+        .plainText,
+    ]
+
     let id = UUID()
     let editorView: MarkdownEditorView
     let shellState: EditorShellState
@@ -275,12 +283,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     func saveAs() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [
-            UTType(filenameExtension: "md") ?? .plainText,
-            .plainText,
-        ]
-        panel.nameFieldStringValue = suggestedSaveFileName
+        let panel = makeSavePanel()
 
         guard panel.runModal() == .OK, let url = panel.url else {
             return
@@ -301,6 +304,17 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
         promptToSaveBeforeClosing(window, onApprovedClose: onApprovedClose)
         return false
+    }
+
+    /// Applies the asynchronously refined edited flag computed during launch
+    /// restore. Ignored once the user has changed the text, so a slow file
+    /// read can never clear an edit made in the meantime.
+    func applyRestoredEditedState(_ isEdited: Bool, expectedText: String) {
+        guard text == expectedText, hasUnsavedFileChanges != isEdited else {
+            return
+        }
+
+        hasUnsavedFileChanges = isEdited
     }
 
     func autosavedDraft(windowID: UUID?, windowFrame: String?) -> AutosavedDraft {
@@ -335,16 +349,35 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             ?? "Untitled.md"
     }
 
+    private func makeSavePanel() -> NSSavePanel {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = Self.markdownContentTypes
+        panel.nameFieldStringValue = suggestedSaveFileName
+        return panel
+    }
+
     private func save(
         to url: URL,
         onCompletion: ((Bool) -> Void)? = nil
     ) {
         let savedText = text
-        saveTask?.cancel()
+        let previousSaveTask = saveTask
+        previousSaveTask?.cancel()
         saveTask = Task { [weak self, savedText, url] in
+            // The superseded save's detached write cannot be interrupted;
+            // wait for it so two quick saves to the same URL cannot land
+            // with the older content last.
+            await previousSaveTask?.value
+
             do {
                 try await FileIO.writeUTF8(savedText, to: url)
             } catch {
+                // A superseded save must not alert: the newer save owns
+                // the outcome the user will see.
+                guard !Task.isCancelled else {
+                    return
+                }
+
                 NSAlert(error: error).runModal()
                 onCompletion?(false)
                 return
@@ -417,12 +450,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [
-            UTType(filenameExtension: "md") ?? .plainText,
-            .plainText,
-        ]
-        panel.nameFieldStringValue = suggestedSaveFileName
+        let panel = makeSavePanel()
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self else {
                 return
@@ -468,12 +496,19 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             let words = Self.wordCount(in: text)
             let characters = text.count
             await MainActor.run {
-                guard !Task.isCancelled else {
+                guard !Task.isCancelled, let shellState = self?.shellState else {
                     return
                 }
 
-                self?.shellState.wordCount = words
-                self?.shellState.characterCount = characters
+                // @Published fires objectWillChange even for equal values;
+                // skip unchanged counts so typing doesn't invalidate the
+                // whole shell every debounce tick.
+                if shellState.wordCount != words {
+                    shellState.wordCount = words
+                }
+                if shellState.characterCount != characters {
+                    shellState.characterCount = characters
+                }
             }
         }
     }

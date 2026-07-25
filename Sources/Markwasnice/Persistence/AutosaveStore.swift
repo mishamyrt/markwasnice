@@ -34,14 +34,6 @@ actor AutosaveStore {
         self.fileURL = fileURL
     }
 
-    func load() -> AutosavedDraft? {
-        guard let data = try? Data(contentsOf: fileURL) else {
-            return nil
-        }
-
-        return try? JSONDecoder().decode(AutosavedDraft.self, from: data)
-    }
-
     func loadSession() -> AutosavedSession? {
         guard let data = try? Data(contentsOf: fileURL) else {
             return nil
@@ -56,22 +48,27 @@ actor AutosaveStore {
             return AutosavedSession(drafts: [draft])
         }
 
+        // The file exists but is undecodable; move it aside so the next
+        // autosave cannot overwrite the only copy of whatever it contains.
+        quarantineCorruptFile()
         return nil
     }
 
-    func save(_ draft: AutosavedDraft) {
-        guard let data = try? JSONEncoder().encode(draft) else {
-            return
-        }
-
-        try? data.write(to: fileURL, options: .atomic)
+    func saveSession(_ session: AutosavedSession) throws {
+        let data = try JSONEncoder().encode(session)
+        try data.write(to: fileURL, options: .atomic)
     }
 
-    func saveSession(_ session: AutosavedSession) {
-        guard let data = try? JSONEncoder().encode(session) else {
-            return
+    private func quarantineCorruptFile() {
+        let fileManager = FileManager.default
+        var backupURL = fileURL.appendingPathExtension("corrupt")
+        if fileManager.fileExists(atPath: backupURL.path) {
+            // Never clobber an earlier quarantined copy; a timestamped name
+            // is unique enough for a once-per-launch failure path.
+            backupURL = fileURL.appendingPathExtension(
+                "corrupt-\(UInt64(Date().timeIntervalSince1970))"
+            )
         }
-
-        try? data.write(to: fileURL, options: .atomic)
+        try? fileManager.moveItem(at: fileURL, to: backupURL)
     }
 }

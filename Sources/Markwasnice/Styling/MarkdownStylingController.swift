@@ -8,14 +8,26 @@ final class MarkdownStylingController {
     private var resolvedStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var isProofreadingEnabled = false
 
+    /// Bumped on every scheduled parse — i.e. on every editor text change,
+    /// since all edit paths re-schedule. Async results carry the version
+    /// their text was scheduled at, so freshness checks compare two integers
+    /// (plus an O(1) length sanity check) instead of walking the whole
+    /// document per delivery on the main thread.
+    private var textVersion = 0
+    private var proofreadScheduledTextVersion = 0
+
     init(editorView: MarkdownEditorView) {
         self.editorView = editorView
         parseService.onParse = { [weak self] result in
             self?.applyParseResult(result)
         }
         proofreadingService.onCheck = { [weak self] issues, source in
+            // The service only delivers its latest scheduled check; if no
+            // edit bumped textVersion since that check was scheduled, the
+            // editor still holds the checked text.
             guard let self, isProofreadingEnabled,
-                  source == editorView.string
+                  proofreadScheduledTextVersion == textVersion,
+                  source.utf16.count == editorTextLength
             else {
                 return
             }
@@ -25,7 +37,8 @@ final class MarkdownStylingController {
     }
 
     func scheduleParse(text: String) {
-        parseService.scheduleParse(text: text)
+        textVersion += 1
+        parseService.scheduleParse(text: text, version: textVersion)
     }
 
     func applySettings(_ settings: EditorSettings) {
@@ -43,6 +56,7 @@ final class MarkdownStylingController {
 
         isProofreadingEnabled = enabled
         if enabled {
+            proofreadScheduledTextVersion = textVersion
             proofreadingService.scheduleCheck(
                 text: editorView.string,
                 protectedRanges: ProofreadingService.protectedRanges(
@@ -57,7 +71,9 @@ final class MarkdownStylingController {
     }
 
     private func applyParseResult(_ result: MarkdownParseResult) {
-        guard result.source == editorView.string else {
+        guard result.textVersion == textVersion,
+              result.sourceLength == editorTextLength
+        else {
             return
         }
 
@@ -67,6 +83,7 @@ final class MarkdownStylingController {
             dirtyRanges: result.dirtyRanges
         )
         if isProofreadingEnabled {
+            proofreadScheduledTextVersion = textVersion
             proofreadingService.scheduleCheck(
                 text: result.source,
                 protectedRanges: ProofreadingService.protectedRanges(
@@ -74,5 +91,11 @@ final class MarkdownStylingController {
                 )
             )
         }
+    }
+
+    /// O(1), unlike `editorView.string`, which bridges the whole backing
+    /// store into a fresh String on every access.
+    private var editorTextLength: Int {
+        editorView.textView.textStorage?.length ?? 0
     }
 }

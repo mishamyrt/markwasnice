@@ -68,6 +68,14 @@ struct MarkdownTypographyCommandTests {
         #expect(result == "```\nпривет — мир\n```\n")
     }
 
+    @Test func clipsProtectedRangeAtSelectionStart() {
+        let text = "`aб` и \"привет\""
+        // Selection starts inside the code span and runs to the end.
+        let selection = NSRange(location: 2, length: (text as NSString).length - 2)
+        let result = normalized(apply(text, selectedRange: selection))
+        #expect(result == "`aб` и «привет»")
+    }
+
     @Test func keepsListMarkers() {
         let text = "- первый пункт\n- второй пункт\n"
         #expect(apply(text) == text)

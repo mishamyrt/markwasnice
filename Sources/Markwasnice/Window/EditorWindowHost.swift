@@ -15,7 +15,7 @@ enum EditorWindowTabbing {
 /// requestNewTab keeps the native "+" button and system New Tab functional.
 @MainActor
 private enum NewTabActionInterceptor {
-    private(set) weak static var appState: MarkwasniceAppState?
+    private(set) static weak var appState: MarkwasniceAppState?
     private static var isInstalled = false
 
     static func installIfNeeded(

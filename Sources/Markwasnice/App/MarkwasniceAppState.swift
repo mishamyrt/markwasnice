@@ -1,9 +1,15 @@
 import AppKit
+import os
 import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
 final class MarkwasniceAppState: ObservableObject {
+    nonisolated private static let autosaveLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "Markwasnice",
+        category: "autosave"
+    )
+
     @Published private(set) var sessions: [EditorDocumentSession
         .ID: EditorDocumentSession] = [:]
     @Published private(set) var pendingWindowIDs: [EditorDocumentSession.ID] = []
@@ -12,7 +18,9 @@ final class MarkwasniceAppState: ObservableObject {
     private let settingsStore = EditorSettingsStore()
     private let autosaveStore: AutosaveStore
     private var autosaveWorkItem: DispatchWorkItem?
-    private var autosaveTask: Task<Void, Never>?
+    /// Resolves to false when the write failed; a cancelled (superseded)
+    /// flush counts as success because the newer flush covers it.
+    private var autosaveTask: Task<Bool, Never>?
     private var preferencesWindowController: PreferencesWindowController?
     private var didCreateInitialSessions = false
     private var activeSessionID: EditorDocumentSession.ID?
@@ -47,7 +55,7 @@ final class MarkwasniceAppState: ObservableObject {
         didCreateInitialSessions = true
         if let session = await autosaveStore.loadSession(), !session.drafts.isEmpty {
             let drafts = session.drafts
-            let restoredSessions = await restoredSessions(from: drafts)
+            let restoredSessions = restoredSessions(from: drafts)
             var leadSessionIDs: [UUID: EditorDocumentSession.ID] = [:]
             for (draft, session) in zip(drafts, restoredSessions) {
                 guard let windowID = draft.windowID else {
@@ -76,20 +84,34 @@ final class MarkwasniceAppState: ObservableObject {
 
     func requestNewTab(attachedTo window: NSWindow?) {
         let session = newSession()
-        if let window,
-           window.tabbingIdentifier == EditorWindowTabbing.identifier
+        placeSession(session, tabTarget: window, queuesWindow: true)
+    }
+
+    /// Routes a session toward a window: registers a tab-attach target when
+    /// the target window supports editor tabs (with fullscreen targets
+    /// getting their tab window opened directly), otherwise queues a regular
+    /// window when requested.
+    private func placeSession(
+        _ session: EditorDocumentSession,
+        tabTarget: NSWindow?,
+        queuesWindow: Bool
+    ) {
+        if let tabTarget,
+           tabTarget.tabbingIdentifier == EditorWindowTabbing.identifier
         {
-            tabAttachTargets[session.id] = WeakWindowBox(window: window)
-            if window.styleMask.contains(.fullScreen) {
+            tabAttachTargets[session.id] = WeakWindowBox(window: tabTarget)
+            if tabTarget.styleMask.contains(.fullScreen) {
                 FullScreenTabWindowFactory.open(
                     session: session,
                     appState: self,
-                    attachedTo: window
+                    attachedTo: tabTarget
                 )
                 return
             }
         }
-        pendingWindowIDs.append(session.id)
+        if queuesWindow {
+            pendingWindowIDs.append(session.id)
+        }
     }
 
     func takeTabAttachTarget(
@@ -135,11 +157,7 @@ final class MarkwasniceAppState: ObservableObject {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = [
-            UTType(filenameExtension: "md") ?? .plainText,
-            UTType(filenameExtension: "markdown") ?? .plainText,
-            .plainText,
-        ]
+        panel.allowedContentTypes = EditorDocumentSession.markdownContentTypes
 
         guard panel.runModal() == .OK else {
             return
@@ -230,10 +248,18 @@ final class MarkwasniceAppState: ObservableObject {
         let session = AutosavedSession(drafts: autosavedDrafts())
         autosaveTask = Task.detached(priority: .utility) { [autosaveStore, session] in
             guard !Task.isCancelled else {
-                return
+                return true
             }
 
-            await autosaveStore.saveSession(session)
+            do {
+                try await autosaveStore.saveSession(session)
+                return true
+            } catch {
+                Self.autosaveLogger.error(
+                    "Failed to write autosaved session: \(error.localizedDescription, privacy: .public)"
+                )
+                return false
+            }
         }
     }
 
@@ -310,9 +336,16 @@ final class MarkwasniceAppState: ObservableObject {
         return NSStringFromRect(source.frame)
     }
 
-    func flushAutosaveAndWait(force: Bool = false) async {
+    /// Returns false when the flush failed to write, so the terminate path
+    /// can warn before drafts are discarded.
+    @discardableResult
+    func flushAutosaveAndWait(force: Bool = false) async -> Bool {
         flushAutosave(force: force)
-        await autosaveTask?.value
+        guard let autosaveTask else {
+            return true
+        }
+
+        return await autosaveTask.value
     }
 
     /// Window move/resize only changes the frames stored alongside the
@@ -357,22 +390,7 @@ final class MarkwasniceAppState: ObservableObject {
             activate(session)
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             scheduleAutosave()
-            if let tabTarget,
-               tabTarget.tabbingIdentifier == EditorWindowTabbing.identifier
-            {
-                tabAttachTargets[session.id] = WeakWindowBox(window: tabTarget)
-                if tabTarget.styleMask.contains(.fullScreen) {
-                    FullScreenTabWindowFactory.open(
-                        session: session,
-                        appState: self,
-                        attachedTo: tabTarget
-                    )
-                    return
-                }
-            }
-            if queuesWindow {
-                pendingWindowIDs.append(session.id)
-            }
+            placeSession(session, tabTarget: tabTarget, queuesWindow: queuesWindow)
         } catch {
             NSAlert(error: error).runModal()
         }
@@ -422,18 +440,38 @@ final class MarkwasniceAppState: ObservableObject {
         return session
     }
 
-    private func restoredSessions(from drafts: [AutosavedDraft]) async
-        -> [EditorDocumentSession]
-    {
-        var restoredSessions: [EditorDocumentSession] = []
-        for draft in drafts {
-            let isEdited = await isDraftEdited(draft)
-            restoredSessions.append(makeSession(
+    /// Sessions are created immediately with a provisional edited flag so
+    /// the first window never waits on file reads; drafts backed by a file
+    /// get the exact flag refined asynchronously.
+    private func restoredSessions(
+        from drafts: [AutosavedDraft]
+    ) -> [EditorDocumentSession] {
+        drafts.map { draft in
+            let session = makeSession(
                 from: draft,
-                isEdited: isEdited
-            ))
+                isEdited: draft.fileURL == nil && !draft.text.isEmpty
+            )
+            refineRestoredEditedState(of: session, from: draft)
+            return session
         }
-        return restoredSessions
+    }
+
+    private func refineRestoredEditedState(
+        of session: EditorDocumentSession,
+        from draft: AutosavedDraft
+    ) {
+        // Without a backing file the provisional flag is already exact.
+        guard let fileURL = draft.fileURL, !draft.text.isEmpty else {
+            return
+        }
+
+        Task { [weak session] in
+            let isEdited = await FileIO.hasDifferentUTF8Contents(
+                at: fileURL,
+                from: draft.text
+            )
+            session?.applyRestoredEditedState(isEdited, expectedText: draft.text)
+        }
     }
 
     private func applySettings(_ settings: EditorSettings) {
@@ -457,18 +495,6 @@ final class MarkwasniceAppState: ObservableObject {
         }
         autosaveWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: workItem)
-    }
-
-    private func isDraftEdited(_ draft: AutosavedDraft) async -> Bool {
-        guard !draft.text.isEmpty else {
-            return false
-        }
-
-        guard let fileURL = draft.fileURL else {
-            return true
-        }
-
-        return await FileIO.hasDifferentUTF8Contents(at: fileURL, from: draft.text)
     }
 }
 

@@ -279,6 +279,36 @@ struct MarkdownMarkupCommandTests {
     }
 
     @Test
+    func caretLinkLookupDoesNotCrossLines() {
+        // The "[" of the checkbox above and the "](b)" of the link below must
+        // not combine into one link around the caret in "text".
+        let edit = MarkdownMarkupCommand.link.edit(
+            in: "- [ ] todo\ntext\n[a](b)",
+            selectedRange: NSRange(location: 13, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 11, length: 4),
+            replacementString: "[text]()",
+            selectedRange: NSRange(location: 18, length: 0)
+        ))
+    }
+
+    @Test
+    func unwrapsCaretLinkOnLaterLine() {
+        let edit = MarkdownMarkupCommand.link.edit(
+            in: "- [ ] todo\n[a](b)",
+            selectedRange: NSRange(location: 15, length: 0)
+        )
+
+        #expect(edit == MarkdownMarkupEdit(
+            replacementRange: NSRange(location: 11, length: 6),
+            replacementString: "a",
+            selectedRange: NSRange(location: 12, length: 0)
+        ))
+    }
+
+    @Test
     func insertsEmptyCodeBlockWithCursorInside() {
         let edit = MarkdownMarkupCommand.codeBlock.edit(
             in: "", selectedRange: NSRange(location: 0, length: 0)

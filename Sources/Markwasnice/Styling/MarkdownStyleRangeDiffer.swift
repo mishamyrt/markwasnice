@@ -68,7 +68,11 @@ enum MarkdownStyleRangeDiffer {
         for lineIndex in interestingLines {
             let previous = previousSignatures[lineIndex, default: []]
             let current = currentSignatures[lineIndex, default: []]
-            if previous != current {
+            // Both sides emit signatures in span-array order, so unchanged
+            // lines compare equal as plain arrays; only reordered lines pay
+            // for the order- and duplicate-insensitive Set comparison that
+            // decides equality.
+            if previous != current, Set(previous) != Set(current) {
                 dirtyRanges.append(lineRanges[lineIndex])
             }
         }
@@ -195,9 +199,9 @@ enum MarkdownStyleRangeDiffer {
         _ spans: [ResolvedMarkdownStyleSpan],
         lineRanges: [NSRange],
         source: String
-    ) -> [Int: Set<SpanSignature>] {
+    ) -> [Int: [SpanSignature]] {
         let string = source as NSString
-        var result: [Int: Set<SpanSignature>] = [:]
+        var result: [Int: [SpanSignature]] = [:]
 
         for span in spans {
             guard span.range.length > 0 else {
@@ -230,7 +234,7 @@ enum MarkdownStyleRangeDiffer {
                     continue
                 }
 
-                result[lineIndex, default: []].insert(SpanSignature(
+                result[lineIndex, default: []].append(SpanSignature(
                     kind: span.kind,
                     relativeRange: NSRange(
                         location: intersection.location - lineRange.location,

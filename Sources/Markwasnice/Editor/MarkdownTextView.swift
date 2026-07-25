@@ -678,33 +678,18 @@ final class MarkdownTextView: NSTextView {
         super.cursorUpdate(with: event)
     }
 
+    /// Only Cmd-F is handled at the raw-event level. Return/Tab/Backtab are
+    /// intercepted by the editor view's textView(_:doCommandBy:) instead:
+    /// the event must reach the input context first, so IME composition
+    /// keeps Return/Tab for itself and keypad Enter (a different character,
+    /// the same insertNewline command) gets markdown continuation too.
     override func keyDown(with event: NSEvent) {
         if isFindShortcut(event) {
             commandDelegate?.markdownTextViewShowFind(self)
             return
         }
 
-        guard event.modifierFlags.isDisjoint(with: [.command, .control]) else {
-            super.keyDown(with: event)
-            return
-        }
-
-        switch event.charactersIgnoringModifiers {
-        case "\t":
-            if event.modifierFlags.contains(.shift) {
-                commandDelegate?.markdownTextViewInsertBacktab(self)
-            } else {
-                commandDelegate?.markdownTextViewInsertTab(self)
-            }
-        case "\u{19}": // Shift+Tab arrives as a backtab character.
-            commandDelegate?.markdownTextViewInsertBacktab(self)
-        case "\r", "\n":
-            if commandDelegate?.markdownTextViewContinueMarkdownPrefix(self) != true {
-                super.keyDown(with: event)
-            }
-        default:
-            super.keyDown(with: event)
-        }
+        super.keyDown(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -924,17 +909,23 @@ final class MarkdownTextView: NSTextView {
         return true
     }
 
-    /// The line-fragment rect (in view coordinates) of the moving end of the
-    /// given range — the end the caret is at during keyboard navigation.
-    private func caretLineScrollRect(for range: NSRange) -> NSRect? {
+    /// The line-fragment rect (in view coordinates, container origin
+    /// included) of the caret end of the given range — the upstream or
+    /// downstream end per `affinity`, matching where the caret sits during
+    /// keyboard navigation. Shared by the keyboard caret scroll here and by
+    /// the editor view's focus-mode centering.
+    func caretLineRect(
+        for range: NSRange,
+        affinity: NSSelectionAffinity
+    ) -> NSRect? {
         guard let layoutManager, let textContainer, let textStorage else {
             return nil
         }
 
-        let origin = textContainerOrigin
+        layoutManager.ensureLayout(for: textContainer)
         let length = textStorage.length
         let location = min(
-            selectionAffinity == .upstream ? range.location : NSMaxRange(range),
+            affinity == .upstream ? range.location : NSMaxRange(range),
             length
         )
 
@@ -959,9 +950,19 @@ final class MarkdownTextView: NSTextView {
             return nil
         }
 
+        let origin = textContainerOrigin
+        return rect.offsetBy(dx: origin.x, dy: origin.y)
+    }
+
+    /// The caret line rect prepared for the minimal keyboard scroll.
+    private func caretLineScrollRect(for range: NSRange) -> NSRect? {
+        guard var rect = caretLineRect(for: range, affinity: selectionAffinity)
+        else {
+            return nil
+        }
+
         // Only vertical visibility matters for the caret line; pinning x to
         // the current viewport avoids any horizontal jump.
-        rect = rect.offsetBy(dx: origin.x, dy: origin.y)
         rect.origin.x = visibleRect.origin.x
         rect.size.width = 1
         return rect

@@ -5,7 +5,6 @@ import Markdown
 final class MarkdownParseService {
     var onParse: ((MarkdownParseResult) -> Void)?
 
-    private var nextVersion = 0
     private var latestScheduledVersion = 0
     private var parseTask: Task<Void, Never>?
     private var previousResult: MarkdownParseResult?
@@ -14,9 +13,10 @@ final class MarkdownParseService {
         parseTask?.cancel()
     }
 
-    func scheduleParse(text: String) {
-        nextVersion += 1
-        let version = nextVersion
+    /// `version` is the caller's monotonically increasing text version; it is
+    /// echoed in the delivered result so the caller can match a result to
+    /// the text it scheduled without comparing whole strings.
+    func scheduleParse(text: String, version: Int) {
         latestScheduledVersion = version
 
         let previous = previousResult
@@ -89,14 +89,10 @@ final class MarkdownParseService {
             return nil
         }
 
-        let resolvedSpans: [ResolvedMarkdownStyleSpan] = collector.spans
-            .compactMap { span in
-                guard let range = sourceMap.nsRange(for: span.range) else {
-                    return nil
-                }
-
-                return ResolvedMarkdownStyleSpan(range: range, kind: span.kind)
-            }
+        let resolvedSpans = sourceMap.resolvedSpans(
+            from: collector.spans,
+            droppingZeroLength: false
+        )
 
         // Before link resolution so links inside re-parsed shifted text get
         // their punctuation/destination sub-spans like everywhere else.

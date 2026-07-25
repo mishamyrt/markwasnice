@@ -18,12 +18,45 @@ final class FullScreenToolbarController: NSObject {
     private var strayToolbarCheckWorkItem: DispatchWorkItem?
     private var pendingKickWorkItem: DispatchWorkItem?
 
-    private var isKickingToolbarAppearance = false
-    private var didKickToolbarForFullScreenSession = false
-    private var isToolbarKickPending = false
-    private var kickReleaseWorkItem: DispatchWorkItem?
-    private weak var kickedChromeView: NSView?
-    private var kickFiredAt: CFTimeInterval = 0
+    /// The appearance-kick lifecycle for one fullscreen session. The kick
+    /// is a one-shot: `done` survives toolbar-window detaches and handoffs
+    /// so it never refires mid session, and only leaving fullscreen for
+    /// real resets it to `idle`.
+    private enum ToolbarKickState {
+        /// No kick armed and none performed this fullscreen session.
+        case idle
+        /// Armed, waiting for the toolbar window to be genuinely parked.
+        case pending
+        /// The corrective flip is being held on `view`; `release` restores
+        /// it after the hold.
+        case kicking(
+            view: WeakViewBox,
+            firedAt: CFTimeInterval,
+            release: DispatchWorkItem
+        )
+        /// The one-shot kick has run for this fullscreen session.
+        case done
+    }
+
+    /// Enum associated values hold strong references; the kicked chrome
+    /// view belongs to AppKit's toolbar window and must not be retained
+    /// past its teardown, so the kicking state carries it through this box.
+    private final class WeakViewBox {
+        private(set) weak var view: NSView?
+
+        init(_ view: NSView) {
+            self.view = view
+        }
+    }
+
+    private var kickState: ToolbarKickState = .idle
+
+    private var isKickingToolbarAppearance: Bool {
+        if case .kicking = kickState {
+            return true
+        }
+        return false
+    }
 
     /// When the tab bar appears inside a fullscreen window (manually or by
     /// adding a tab), AppKit's auto-hide can retract the NSToolbarFullScreenWindow
@@ -38,8 +71,7 @@ final class FullScreenToolbarController: NSObject {
         guard let window = editorWindow,
               window.styleMask.contains(.fullScreen)
         else {
-            didKickToolbarForFullScreenSession = false
-            isToolbarKickPending = false
+            resetKick()
             // Leaving fullscreen for real (not an ownership handoff):
             // AppKit dismantles the toolbar window, hand it back pristine.
             observedToolbarWindow?.alphaValue = 1
@@ -69,8 +101,13 @@ final class FullScreenToolbarController: NSObject {
             // itself repaints the whole band in the opposite theme, so it
             // must wait until the toolbar window is parked off-screen —
             // kicking here, mid reveal animation, flashes on every entry.
-            if !didKickToolbarForFullScreenSession {
-                isToolbarKickPending = true
+            // (stopObserving above settled any in-flight hold, so the
+            // state here is never .kicking.)
+            switch kickState {
+            case .idle, .pending:
+                kickState = .pending
+            case .kicking, .done:
+                break
             }
             for name in [
                 NSWindow.didMoveNotification,
@@ -147,6 +184,16 @@ final class FullScreenToolbarController: NSObject {
         strayToolbarCheckWorkItem = nil
         pendingKickWorkItem?.cancel()
         pendingKickWorkItem = nil
+        // A hold still in flight belongs to a toolbar window this
+        // controller is letting go of; left alone, the kicking state would
+        // keep suppressing syncAppearance until the stale release item
+        // fires. Settle it now — the one-shot already fired, so the
+        // session stays done. (Armed/done states survive on purpose: the
+        // auto-hide detaches the toolbar window between reveals and the
+        // kick must not refire per reattach.)
+        if case .kicking = kickState {
+            releaseToolbarAppearanceKick()
+        }
         toolbarAppearanceObservation = nil
         toolbarEffectiveAppearanceObservation = nil
         separatorView?.removeFromSuperview()
@@ -178,7 +225,7 @@ final class FullScreenToolbarController: NSObject {
     /// once the window has stopped moving — genuinely parked — never mid
     /// animation.
     private func schedulePendingToolbarKick() {
-        guard isToolbarKickPending else {
+        guard case .pending = kickState else {
             return
         }
 
@@ -194,7 +241,7 @@ final class FullScreenToolbarController: NSObject {
         // Parked short of fully hidden (reserved menu bar band displays)
         // still counts: the window is faded out there, so the corrective
         // repaint cannot flash.
-        guard isToolbarKickPending,
+        guard case .pending = kickState,
               let window = editorWindow,
               let toolbarWindow = observedToolbarWindow,
               toolbarWindow.frame.minY >= window.frame.maxY - 0.5
@@ -203,8 +250,10 @@ final class FullScreenToolbarController: NSObject {
             return
         }
 
-        isToolbarKickPending = false
-        didKickToolbarForFullScreenSession = true
+        // The one-shot is spent even if the kick below cannot fire (no
+        // content view yet): matching the flag pair this replaced, which
+        // marked the session done before attempting the flip.
+        kickState = .done
         performToolbarAppearanceKick()
     }
 
@@ -229,23 +278,38 @@ final class FullScreenToolbarController: NSObject {
             correct.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 ? .aqua
                 : .darkAqua
-        isKickingToolbarAppearance = true
-        kickedChromeView = chromeView
-        kickFiredAt = CACurrentMediaTime()
-        chromeView.appearance = NSAppearance(named: oppositeName)
         let workItem = DispatchWorkItem { [weak self] in
             self?.releaseToolbarAppearanceKick()
         }
-        kickReleaseWorkItem = workItem
+        kickState = .kicking(
+            view: WeakViewBox(chromeView),
+            firedAt: CACurrentMediaTime(),
+            release: workItem
+        )
+        chromeView.appearance = NSAppearance(named: oppositeName)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
     }
 
     private func releaseToolbarAppearanceKick() {
-        kickReleaseWorkItem?.cancel()
-        kickReleaseWorkItem = nil
-        isKickingToolbarAppearance = false
-        kickedChromeView?.appearance = nil
-        kickedChromeView = nil
+        guard case .kicking(let view, _, let release) = kickState else {
+            return
+        }
+
+        release.cancel()
+        view.view?.appearance = nil
+        kickState = .done
+    }
+
+    /// The single teardown for the kick lifecycle, used when leaving
+    /// fullscreen for real: cancels an in-flight release item, restores
+    /// the flipped appearance immediately, and disarms the one-shot so
+    /// the next fullscreen session starts fresh.
+    private func resetKick() {
+        if case .kicking(let view, _, let release) = kickState {
+            release.cancel()
+            view.view?.appearance = nil
+        }
+        kickState = .idle
     }
 
     /// A reveal can begin inside the kick's 0.35s hold: the hover both
@@ -257,7 +321,7 @@ final class FullScreenToolbarController: NSObject {
     /// held for less than one render pass is re-armed so a later parked
     /// period can redo it.
     private func abortKickIfToolbarOnScreen() {
-        guard isKickingToolbarAppearance,
+        guard case .kicking(_, let firedAt, _) = kickState,
               let window = editorWindow,
               let toolbarWindow = observedToolbarWindow,
               toolbarWindow.frame.minY < window.frame.maxY - 0.5
@@ -265,10 +329,11 @@ final class FullScreenToolbarController: NSObject {
             return
         }
 
-        if CACurrentMediaTime() - kickFiredAt < 0.05 {
-            isToolbarKickPending = true
-        }
+        let rearm = CACurrentMediaTime() - firedAt < 0.05
         releaseToolbarAppearanceKick()
+        if rearm {
+            kickState = .pending
+        }
     }
 
     /// The fullscreen toolbar slides down over the text without any band

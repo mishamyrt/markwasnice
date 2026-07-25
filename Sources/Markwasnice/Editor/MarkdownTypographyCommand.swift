@@ -202,16 +202,33 @@ enum MarkdownTypographyCommand {
         other.location >= range.location && NSMaxRange(other) <= NSMaxRange(range)
     }
 
+    /// Expects `excludedRanges` sorted by location; a single sweep merges
+    /// overlaps and emits the gaps between them clipped to `range`.
     private static func subtracting(
         _ excludedRanges: [NSRange],
         from range: NSRange
     ) -> [NSRange] {
-        var segments = [range]
+        var segments: [NSRange] = []
+        var cursor = range.location
+        let upperBound = NSMaxRange(range)
         for excludedRange in excludedRanges {
-            segments = segments.flatMap {
-                MarkdownStylingEngine.subtract(excludedRange, from: $0)
+            if excludedRange.location >= upperBound {
+                break
             }
+            if NSMaxRange(excludedRange) <= cursor {
+                continue
+            }
+            if excludedRange.location > cursor {
+                segments.append(NSRange(
+                    location: cursor,
+                    length: excludedRange.location - cursor
+                ))
+            }
+            cursor = NSMaxRange(excludedRange)
         }
-        return segments.filter { $0.length > 0 }
+        if cursor < upperBound {
+            segments.append(NSRange(location: cursor, length: upperBound - cursor))
+        }
+        return segments
     }
 }

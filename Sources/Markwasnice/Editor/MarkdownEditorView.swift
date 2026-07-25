@@ -1,5 +1,4 @@
 @preconcurrency import AppKit
-import UniformTypeIdentifiers
 
 protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
@@ -61,7 +60,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     @preconcurrency MarkdownTextViewCommandDelegate
 {
     weak var delegate: MarkdownEditorViewDelegate?
-    var documentURL: URL?
+    /// Base for relativizing dropped image paths; the file-drop controller
+    /// is the consumer, so the value lives there.
+    var documentURL: URL? {
+        get { fileDropController.documentURL }
+        set { fileDropController.documentURL = newValue }
+    }
     /// Fired when the preview asks to leave (Escape); the owning session
     /// flips the shell state, which calls back into setPreviewActive(false).
     var onPreviewExitRequested: (() -> Void)?
@@ -98,15 +102,29 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var searchMatchRanges: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
     private var previousSelectionRange = NSRange(location: 0, length: 0)
+
+    // MARK: Styling/edit reentrancy flags
+    //
+    // The three flags below mark self-inflicted text-storage mutations so
+    // the storage and selection hooks can tell them from user edits. Each is
+    // only ever set around a contiguous block through its with…() scoped
+    // helper (withStyleApplication, withProgrammaticTextSetting,
+    // withEditedTextNormalization), so a flag can never leak set.
     private var isApplyingStyles = false
     private var isSettingTextProgrammatically = false
     private var isNormalizingEditedText = false
+    // Asymmetric set-here-consume-there protocol, deliberately not scoped:
+    // hasRecentLargeEdit is raised by the large-edit path in
+    // textStorage(_:didProcessEditing:…) and consumed by the next
+    // applyParsedStyles, which answers with a full restyle instead of a
+    // dirty-range delta and lowers it.
+    private var hasRecentLargeEdit = false
+
     private var deferredStyleTask: Task<Void, Never>?
     private var styleGeneration = 0
-    private var hasRecentLargeEdit = false
     private var pendingFullStyleRanges: [NSRange] = []
-    private var isFocusModeEnabled = false
-    private var focusMode: EditorFocusMode = .focus
+    private lazy var focusModeController = makeFocusModeController()
+    private let fileDropController = EditorFileDropController()
     private lazy var previewPresenter = makePreviewPresenter()
     private lazy var proofreadingPresenter = ProofreadingPresenter(
         textView: textView
@@ -115,14 +133,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     private var previewHorizontalInset: CGFloat = 6
-    private var isFocusTemporarilySuppressed = false
-    private var activeFocusParagraphRange: NSRange?
-    private var focusScrollAdjustmentCount = 0
-    private let focusScrollAnimator = CaretScrollAnimator()
-
-    private var isAdjustingFocusScroll: Bool {
-        focusScrollAdjustmentCount > 0 || focusScrollAnimator.isAnimating
-    }
 
     private static let immediateStyleThreshold = 20000
     private static let visibleStyleBuffer = 6000
@@ -149,6 +159,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         configureTextView()
         configureScrollView()
         configureCursorGeometry()
+        configureFileDropController()
         registerForDraggedTypes([.fileURL])
 
         addSubview(scrollView)
@@ -176,7 +187,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
         if newWindow == nil {
-            focusScrollAnimator.cancel()
+            focusModeController.cancelScrollAnimation()
         }
     }
 
@@ -192,9 +203,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     func setString(_ string: String, clearsUndo: Bool) {
         proofreadingPresenter.clearIssues()
         let selectedRange = textView.selectedRange()
-        isSettingTextProgrammatically = true
-        textView.string = string
-        isSettingTextProgrammatically = false
+        withProgrammaticTextSetting {
+            textView.string = string
+        }
 
         if clearsUndo {
             textView.undoManager?.removeAllActions()
@@ -345,42 +356,32 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     func setFocusModeEnabled(_ isEnabled: Bool) {
-        guard isFocusModeEnabled != isEnabled else {
-            return
-        }
-
-        isFocusModeEnabled = isEnabled
-        isFocusTemporarilySuppressed = false
-        activeFocusParagraphRange = isEnabled ? activeParagraphRangeAtSelection() : nil
-        updateCaretScrollOwnership()
-        _ = updateTextContainerInset()
-        restyleAllText()
-        if isEnabled {
-            centerCaretLineInVisibleArea(animated: true)
-        }
-    }
-
-    /// While focus centering recenters on every caret move it owns the
-    /// scroll position, and the text view's own keyboard caret scrolling
-    /// must stand down; when centering is suspended for a user scroll the
-    /// text view takes over again.
-    private func updateCaretScrollOwnership() {
-        textView.skipsKeyboardCaretScrolling =
-            isFocusModeEnabled && !isFocusTemporarilySuppressed
+        focusModeController.setEnabled(isEnabled)
     }
 
     func setFocusMode(_ mode: EditorFocusMode) {
-        guard focusMode != mode else {
-            return
-        }
+        focusModeController.setMode(mode)
+    }
 
-        focusMode = mode
-        isFocusTemporarilySuppressed = false
-        activeFocusParagraphRange = activeParagraphRangeAtSelection()
-        restyleAllText()
-        if isFocusModeEnabled {
-            centerCaretLineInVisibleArea(animated: true)
+    private func makeFocusModeController() -> EditorFocusModeController {
+        let controller = EditorFocusModeController(
+            textView: textView,
+            scrollView: scrollView,
+            clipView: clipView
+        )
+        controller.restyleAllText = { [weak self] in
+            self?.restyleAllText()
         }
+        controller.restyleLineRange = { [weak self] range in
+            self?.restyleLineNormalizedRange(range)
+        }
+        controller.visibleBufferedRange = { [weak self] in
+            self?.visibleBufferedCharacterRange()
+        }
+        controller.updateContainerInset = { [weak self] in
+            _ = self?.updateTextContainerInset()
+        }
+        return controller
     }
 
     // MARK: Preview
@@ -452,10 +453,74 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
+        let previousSelectedRange = selectedSearchMatchRange
         searchMatchRanges = ranges
         selectedSearchMatchIndex = selectedIndex
         updateSearchMatchDecorations()
-        restyleAllText()
+        // Only the selected match carries an attribute change (the dark
+        // foreground over the yellow fill — see applySearchHighlights); the
+        // fill and the borders are drawn decorations. Restyling just the
+        // lines that lost and gained that color keeps find-field keystrokes
+        // and next/previous steps from rewriting the whole document's
+        // attributes. The old line is restyled even when the match no longer
+        // exists in the new set — that is what clears the stale color,
+        // including on the search-closed transition.
+        restyleSelectedSearchMatchDelta(
+            from: previousSelectedRange,
+            to: selectedSearchMatchRange
+        )
+    }
+
+    private var selectedSearchMatchRange: NSRange? {
+        guard let selectedSearchMatchIndex,
+              searchMatchRanges.indices.contains(selectedSearchMatchIndex)
+        else {
+            return nil
+        }
+
+        return searchMatchRanges[selectedSearchMatchIndex]
+    }
+
+    /// Same shape as the focus controller's paragraph delta: only the line
+    /// ranges whose selected-match membership changed are restyled. An
+    /// out-of-bounds previous range (the match set was recomputed for shorter
+    /// text) collapses to empty in lineNormalized and is skipped — the text
+    /// it colored is gone.
+    private func restyleSelectedSearchMatchDelta(
+        from previousRange: NSRange?,
+        to activeRange: NSRange?
+    ) {
+        var deltaRanges: [NSRange] = []
+        if let previousRange {
+            deltaRanges.append(previousRange)
+        }
+        if let activeRange, activeRange != previousRange {
+            deltaRanges.append(activeRange)
+        }
+
+        for deltaRange in deltaRanges {
+            restyleLineNormalizedRange(deltaRange)
+        }
+    }
+
+    /// Restyles one range widened to whole lines with the current spans;
+    /// out-of-bounds or empty ranges are skipped. Shared by the search-match
+    /// delta above and the focus controller's restyle callback.
+    private func restyleLineNormalizedRange(_ range: NSRange) {
+        let string = (textView.textStorage?.string ?? "") as NSString
+        guard let range = boundedRange(
+            MarkdownStylingEngine.lineNormalized(range, in: string)
+        ), range.length > 0 else {
+            return
+        }
+
+        applyStyles(
+            in: range,
+            spans: MarkdownStylingEngine.spansForRange(
+                range,
+                from: currentStyleSpans
+            )
+        )
     }
 
     func selectSearchMatch(_ range: NSRange) {
@@ -495,31 +560,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         let matchMidY = textView.textContainerOrigin.y + matchRect.midY
         let visibleCenterY = (textTopPadding + clipHeight) / 2
-        let insets = scrollView.contentInsets
-        let minimumOffsetY = -insets.top
-        let maximumOffsetY = max(
-            minimumOffsetY,
-            textView.frame.height - clipHeight + insets.bottom
-        )
-        let targetOffsetY = min(
-            max(minimumOffsetY, matchMidY - visibleCenterY),
-            maximumOffsetY
+        let targetOffsetY = focusModeController.clampedScrollOffsetY(
+            matchMidY - visibleCenterY
         )
         guard abs(clipView.bounds.origin.y - targetOffsetY) > 0.5 else {
             return
         }
 
-        // The jump must not read as user scrolling (it would hide the
-        // chrome and suppress focus mode), and any in-flight caret
-        // centering would fight the new offset.
-        focusScrollAnimator.cancel()
+        // Any in-flight caret centering would fight the new offset.
         textView.cancelKeyboardCaretScroll()
-        focusScrollAdjustmentCount += 1
-        clipView.setBoundsOrigin(
-            NSPoint(x: clipView.bounds.origin.x, y: targetOffsetY)
-        )
-        scrollView.reflectScrolledClipView(clipView)
-        focusScrollAdjustmentCount -= 1
+        focusModeController.performSuppressedScroll(toOffsetY: targetOffsetY)
     }
 
     @discardableResult
@@ -542,22 +592,38 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let validRanges = ranges
             .filter { boundedRange($0) != nil }
             .sorted { $0.location < $1.location }
-        guard !validRanges.isEmpty,
+        performBatchReplacements(validRanges.map { ($0, replacement) })
+    }
+
+    /// One undo-coalesced text change for several non-overlapping ranges:
+    /// a single shouldChangeText gate over all of them, then the edits
+    /// applied back-to-front inside one begin/endEditing so earlier ranges
+    /// keep their offsets. Returns false when the change was refused (or
+    /// there was nothing to do).
+    @discardableResult
+    private func performBatchReplacements(
+        _ replacements: [(range: NSRange, replacement: String)]
+    ) -> Bool {
+        guard !replacements.isEmpty,
               let textStorage = textView.textStorage,
               textView.shouldChangeText(
-                  inRanges: validRanges.map { NSValue(range: $0) },
-                  replacementStrings: validRanges.map { _ in replacement }
+                  inRanges: replacements.map { NSValue(range: $0.range) },
+                  replacementStrings: replacements.map(\.replacement)
               )
         else {
-            return
+            return false
         }
 
         textStorage.beginEditing()
-        for range in validRanges.reversed() {
-            textStorage.replaceCharacters(in: range, with: replacement)
+        for replacement in replacements.reversed() {
+            textStorage.replaceCharacters(
+                in: replacement.range,
+                with: replacement.replacement
+            )
         }
         textStorage.endEditing()
         textView.didChangeText()
+        return true
     }
 
     func pasteAsLink() {
@@ -566,12 +632,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
               let selectedText = (textView.string as NSString)
               .substring(with: selectedRange)
               .nilIfEmpty,
-              let urlString = pasteboardURLString()
+              let urlString = fileDropController.pasteboardURLString()
         else {
             return
         }
 
-        replaceSelectedText(with: "[\(escapeLinkText(selectedText))](\(urlString))")
+        let linkText = EditorFileDropController.escapeLinkText(selectedText)
+        replaceSelectedText(with: "[\(linkText)](\(urlString))")
     }
 
     func applyMarkup(_ command: MarkdownMarkupCommand) {
@@ -618,25 +685,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             selectedRange: selectedRange,
             locale: settings.typographyLocale
         )
-        guard !replacements.isEmpty,
-              let textStorage = textView.textStorage,
-              textView.shouldChangeText(
-                  inRanges: replacements.map { NSValue(range: $0.range) },
-                  replacementStrings: replacements.map(\.replacement)
-              )
-        else {
+        guard performBatchReplacements(
+            replacements.map { ($0.range, $0.replacement) }
+        ) else {
             return
         }
 
-        textStorage.beginEditing()
-        for replacement in replacements.reversed() {
-            textStorage.replaceCharacters(
-                in: replacement.range,
-                with: replacement.replacement
-            )
-        }
-        textStorage.endEditing()
-        textView.didChangeText()
         textView.setSelectedRange(MarkdownTypographyCommand.adjustedSelection(
             selectedRange,
             after: replacements
@@ -714,54 +768,58 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     func markdownTextViewDraggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        dragOperation(for: sender)
+        fileDropController.dragOperation(for: sender)
     }
 
     func markdownTextViewPerformDragOperation(
         _ sender: NSDraggingInfo,
         in textView: NSTextView
     ) -> Bool {
-        performFileDrop(sender, insertionView: textView)
+        fileDropController.performFileDrop(sender, insertionView: textView)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        dragOperation(for: sender)
+        fileDropController.dragOperation(for: sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        performFileDrop(sender, insertionView: textView)
+        fileDropController.performFileDrop(sender, insertionView: textView)
     }
 
-    /// A drop of markdown/text files opens them as documents; a dropped image
-    /// is inserted as a Markdown image link at the drop point. Opening takes
-    /// precedence so dragging a `.md` file never pastes its path into the text.
-    private func dragOperation(for sender: NSDraggingInfo) -> NSDragOperation {
-        let pasteboard = sender.draggingPasteboard
-        guard openableFileURLs(from: pasteboard).isEmpty else {
-            return .copy
+    private func configureFileDropController() {
+        fileDropController.openFileURLs = { [weak self] urls in
+            guard let self else {
+                return
+            }
+
+            delegate?.markdownEditorView(self, requestOpenFileURLs: urls)
         }
-
-        return imageFileURL(from: pasteboard) == nil ? [] : .copy
+        fileDropController.insertMarkupAtSelection = { [weak self] markup in
+            self?.replaceSelectedText(with: markup)
+        }
     }
 
-    private func performFileDrop(
-        _ sender: NSDraggingInfo,
-        insertionView: NSTextView
+    /// Return/Tab/Shift-Tab are intercepted here, on the input-context
+    /// command path, rather than in keyDown: raw character dispatch stole
+    /// these keys from IME composition and missed keypad Enter (which
+    /// arrives as a different character but the same insertNewline command).
+    /// Returning false hands the command back to AppKit's default handling.
+    func textView(
+        _ textView: NSTextView,
+        doCommandBy commandSelector: Selector
     ) -> Bool {
-        let pasteboard = sender.draggingPasteboard
-        let openableURLs = openableFileURLs(from: pasteboard)
-        guard openableURLs.isEmpty else {
-            delegate?.markdownEditorView(self, requestOpenFileURLs: openableURLs)
+        switch commandSelector {
+        case #selector(NSResponder.insertNewline(_:)):
+            return markdownTextViewContinueMarkdownPrefix(textView)
+        case #selector(NSResponder.insertTab(_:)):
+            markdownTextViewInsertTab(textView)
             return true
-        }
-
-        guard let url = imageFileURL(from: pasteboard) else {
+        case #selector(NSResponder.insertBacktab(_:)):
+            markdownTextViewInsertBacktab(textView)
+            return true
+        default:
             return false
         }
-
-        let point = insertionView.convert(sender.draggingLocation, from: nil)
-        insertMarkdownImage(for: url, at: point)
-        return true
     }
 
     func textDidChange(_: Notification) {
@@ -769,7 +827,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        updateFocusForSelection()
+        focusModeController.updateForSelection()
         delegate?.markdownEditorViewDidChangeText(self)
     }
 
@@ -799,6 +857,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 + "textLength=\(textStorage.length) large=\(isLargeEdit)"
         )
         cancelDeferredStyling()
+        // The edit shifts character offsets; the focus controller resets its
+        // suppression-episode memo (which would otherwise claim shifted lines
+        // were already undimmed) and keeps the active focus paragraph glued
+        // to the text — the dimming applied below (and the paragraph-delta
+        // restyle on the next selection change) subtract that range, and a
+        // stale one would dim part of the paragraph being typed in.
+        focusModeController.handleTextEdit(
+            editedRange: editedRange,
+            changeInLength: changeInLength,
+            sourceLength: textStorage.length
+        )
 
         // Keep span positions valid across the edit so that any restyle
         // running before the next parse result (search updates, appearance or
@@ -826,20 +895,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             sourceLength: textStorage.length
         )
 
-        // Keep the active focus paragraph glued to the text the same way:
-        // the dimming applied below (and the paragraph-delta restyle on the
-        // next selection change) subtract this range, and a stale one would
-        // dim part of the paragraph being typed in.
-        if let activeRange = activeFocusParagraphRange {
-            activeFocusParagraphRange = MarkdownStylingEngine.editAdjustedRange(
-                activeRange,
-                editLocation: editedRange.location,
-                changeInLength: changeInLength,
-                editedLength: editedRange.length,
-                sourceLength: textStorage.length
-            )
-        }
-
         let dirtyRange = MarkdownStylingEngine.editDirtyRange(
             editedRange: editedRange,
             in: textStorage.string as NSString
@@ -854,18 +909,18 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             updateCodeBackgroundRanges()
             pendingFullStyleRanges = []
             hasRecentLargeEdit = true
-            isNormalizingEditedText = true
-            textStorage.setAttributes(baseAttributes(), range: range)
-            isNormalizingEditedText = false
+            withEditedTextNormalization {
+                textStorage.setAttributes(baseAttributes(), range: range)
+            }
             scheduleVisibleLocalStyling()
             return
         }
 
-        isNormalizingEditedText = true
-        let localSpans = localStyleSpans(in: range)
-        reconcileInlineCodeDrawRanges(in: range, with: localSpans)
-        applyStyles(in: range, spans: localSpans)
-        isNormalizingEditedText = false
+        withEditedTextNormalization {
+            let localSpans = localStyleSpans(in: range)
+            reconcileInlineCodeDrawRanges(in: range, with: localSpans)
+            applyStyles(in: range, spans: localSpans)
+        }
     }
 
     func textViewDidChangeSelection(_: Notification) {
@@ -881,11 +936,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.typingAttributes = baseAttributes()
         // A caret move from the keyboard (arrow keys, typing) ends a
         // scroll-induced focus suppression the same way a mouse click does;
-        // updateFocusForSelection alone would leave the suppression in place.
-        if isFocusTemporarilySuppressed, NSApp.currentEvent?.type == .keyDown {
-            restoreFocusAfterEditorInteraction()
+        // updateForSelection alone would leave the suppression in place.
+        if focusModeController.isTemporarilySuppressed,
+           NSApp.currentEvent?.type == .keyDown
+        {
+            focusModeController.restoreAfterEditorInteraction()
         } else {
-            updateFocusForSelection()
+            focusModeController.updateForSelection()
         }
         proofreadingPresenter.handleSelectionChange(selectedRange)
         if didClearSelection {
@@ -905,10 +962,19 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.delegate = self
         textView.commandDelegate = self
         textView.onMouseDown = { [weak self] in
-            self?.restoreFocusAfterEditorInteraction()
+            self?.focusModeController.restoreAfterEditorInteraction()
         }
         textView.onScrollWheel = { [weak self] event in
-            self?.temporarilySuppressFocusForUserScroll(event: event)
+            guard let self else {
+                return
+            }
+
+            MarkdownEditorDiagnostics.log(
+                "scrollWheel deltaY=\(event.scrollingDeltaY) precise=\(event.hasPreciseScrollingDeltas) "
+                    + "phase=\(event.phase.rawValue) momentum=\(event.momentumPhase.rawValue) "
+                    + "clipY=\(clipView.bounds.origin.y) height=\(textView.frame.height)"
+            )
+            focusModeController.suppressForUserScroll()
         }
         textView.registerForDraggedTypes([.fileURL])
         // The editor renders one fixed font; without this, every
@@ -1013,7 +1079,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     /// lines of the document — without it the centering scroll clamps to the
     /// content edges and the caret stays off-center there.
     private var focusOverscrollPadding: CGFloat {
-        guard isFocusModeEnabled else {
+        guard focusModeController.isEnabled else {
             return 0
         }
 
@@ -1090,7 +1156,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // Bounds changes produced by our own centering animation must not
         // count as user scrolling (they would hide the chrome and suppress
         // focus mode).
-        guard !isAdjustingFocusScroll else {
+        guard !focusModeController.isAdjustingScroll else {
             return
         }
 
@@ -1103,11 +1169,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // at suppression start runs chunked in the background there. Restyle
         // just the viewport; short documents were already fully restyled
         // synchronously when the suppression began.
-        if isFocusModeEnabled, isFocusTemporarilySuppressed, focusMode == .focus,
+        if focusModeController.isEnabled,
+           focusModeController.isTemporarilySuppressed,
+           focusModeController.mode == .focus,
            let textStorage = textView.textStorage,
            textStorage.length > Self.immediateStyleThreshold
         {
-            applyVisibleStyles(spans: currentStyleSpans)
+            focusModeController.restyleSuppressedViewportIfNeeded()
         }
 
         // A user scroll moves only the bounds origin; window resizes (zoom,
@@ -1433,51 +1501,84 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        isApplyingStyles = true
-        textView.undoManager?.disableUndoRegistration()
-        let startTime = Date().timeIntervalSince1970
-        let heightBefore = textView.frame.height
-        let clipYBefore = clipView.bounds.origin.y
-        textStorage.beginEditing()
-        textStorage.setAttributes(baseAttributes(), range: targetRange)
+        withStyleApplication {
+            textView.undoManager?.disableUndoRegistration()
+            // This runs on every keystroke; the disabled-diagnostics path must
+            // pay nothing for timestamps, geometry reads, or log formatting.
+            let diagnosticsEnabled = MarkdownEditorDiagnostics.isEnabled
+            let startTime = diagnosticsEnabled ? Date().timeIntervalSince1970 : 0
+            let heightBefore = diagnosticsEnabled ? textView.frame.height : 0
+            let clipYBefore = diagnosticsEnabled ? clipView.bounds.origin.y : 0
+            textStorage.beginEditing()
+            textStorage.setAttributes(baseAttributes(), range: targetRange)
 
-        for span in spans {
-            let range = NSIntersectionRange(span.range, targetRange)
-            guard range.length > 0 else {
-                continue
+            for span in spans {
+                let range = NSIntersectionRange(span.range, targetRange)
+                guard range.length > 0 else {
+                    continue
+                }
+
+                applyStyle(span.kind, range: range)
             }
 
-            applyStyle(span.kind, range: range)
-        }
+            applyNonbreakingSpaceStyle(range: targetRange)
+            // Dimming first: the selected match's dark text must survive focus
+            // mode's foreground override.
+            applyFocusDimming(in: targetRange)
+            applySearchHighlights(intersecting: [targetRange])
 
-        applyNonbreakingSpaceStyle(range: targetRange)
-        // Dimming first: the selected match's dark text must survive focus
-        // mode's foreground override.
-        applyFocusDimming(in: targetRange)
-        applySearchHighlights(intersecting: [targetRange])
-
-        textStorage.endEditing()
-        textView.undoManager?.enableUndoRegistration()
-        // Not while normalizing a just-processed edit: setTypingAttributes
-        // triggers AppKit's font-panel update, which enumerates attributes
-        // over the not-yet-updated selection. When typing replaced a selection
-        // with shorter text, that stale range lies beyond the new length — the
-        // NSRangeException unwinds through processEditing and permanently
-        // wedges the text view (dead input, IMK mach port errors). The
-        // selection-change hook restores typing attributes right after.
-        if !isNormalizingEditedText {
-            textView.typingAttributes = baseAttributes()
+            textStorage.endEditing()
+            textView.undoManager?.enableUndoRegistration()
+            // Not while normalizing a just-processed edit: setTypingAttributes
+            // triggers AppKit's font-panel update, which enumerates attributes
+            // over the not-yet-updated selection. When typing replaced a selection
+            // with shorter text, that stale range lies beyond the new length — the
+            // NSRangeException unwinds through processEditing and permanently
+            // wedges the text view (dead input, IMK mach port errors). The
+            // selection-change hook restores typing attributes right after.
+            if !isNormalizingEditedText {
+                textView.typingAttributes = baseAttributes()
+            }
+            if diagnosticsEnabled {
+                let duration = Self.milliseconds(since: startTime)
+                let rangeDescription = "\(targetRange.location)..\(NSMaxRange(targetRange))"
+                let heightDescription = "\(heightBefore)->\(textView.frame.height)"
+                let clipDescription = "\(clipYBefore)->\(clipView.bounds.origin.y)"
+                MarkdownEditorDiagnostics.log(
+                    "applyStyles range=\(rangeDescription) length=\(targetRange.length) "
+                        + "spans=\(spans.count) durationMs=\(duration) "
+                        + "height \(heightDescription) clipY \(clipDescription)"
+                )
+            }
         }
-        isApplyingStyles = false
-        let duration = Self.milliseconds(since: startTime)
-        let rangeDescription = "\(targetRange.location)..\(NSMaxRange(targetRange))"
-        let heightDescription = "\(heightBefore)->\(textView.frame.height)"
-        let clipDescription = "\(clipYBefore)->\(clipView.bounds.origin.y)"
-        MarkdownEditorDiagnostics.log(
-            "applyStyles range=\(rangeDescription) length=\(targetRange.length) "
-                + "spans=\(spans.count) durationMs=\(duration) "
-                + "height \(heightDescription) clipY \(clipDescription)"
-        )
+    }
+
+    // MARK: Scoped flag helpers
+
+    /// Marks a contiguous attribute-application block so the text-storage
+    /// and selection hooks ignore the self-inflicted mutations.
+    private func withStyleApplication(_ body: () -> Void) {
+        isApplyingStyles = true
+        defer { isApplyingStyles = false }
+        body()
+    }
+
+    /// Marks a programmatic full-text replacement (setString) so it does not
+    /// read as a user edit.
+    private func withProgrammaticTextSetting(_ body: () -> Void) {
+        isSettingTextProgrammatically = true
+        defer { isSettingTextProgrammatically = false }
+        body()
+    }
+
+    /// Marks the local re-normalization pass that runs inside
+    /// textStorage(_:didProcessEditing:…) — applyStyles reads this to skip
+    /// setTypingAttributes while the selection is stale (see the comment
+    /// there), and the storage hook uses it to avoid recursing.
+    private func withEditedTextNormalization(_ body: () -> Void) {
+        isNormalizingEditedText = true
+        defer { isNormalizingEditedText = false }
+        body()
     }
 
     private func localStyleSpans(in range: NSRange) -> [ResolvedMarkdownStyleSpan] {
@@ -1814,20 +1915,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     private func applyFocusDimming(in range: NSRange) {
-        guard let textStorage = textView.textStorage,
-              isFocusModeEnabled,
-              !isFocusTemporarilySuppressed,
-              focusMode == .focus,
-              let activeRange = activeFocusParagraphRange
-        else {
+        guard let textStorage = textView.textStorage else {
             return
         }
 
-        for dimmedRange in MarkdownStylingEngine.subtract(activeRange, from: range) {
-            guard dimmedRange.length > 0 else {
-                continue
-            }
-
+        for dimmedRange in focusModeController.dimmedRanges(in: range) {
             textStorage.addAttribute(
                 .foregroundColor,
                 value: colors.foreground
@@ -1904,111 +1996,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 length: (selectedText as NSString).length
             )
         )
-    }
-
-    private func pasteboardURLString() -> String? {
-        let pasteboard = NSPasteboard.general
-        if let url = NSURL(from: pasteboard) as URL? {
-            return url.absoluteString
-        }
-
-        guard let string = pasteboard.string(forType: .string)?.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        ),
-            let url = URL(string: string),
-            url.scheme != nil
-        else {
-            return nil
-        }
-
-        return url.absoluteString
-    }
-
-    /// File URLs on the pasteboard that the editor can open as documents:
-    /// Markdown and plain-text files (Markdown conforms to `public.plain-text`).
-    private func openableFileURLs(from pasteboard: NSPasteboard) -> [URL] {
-        guard let urls = pasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: nil
-        ) as? [URL]
-        else {
-            return []
-        }
-
-        return urls.filter { url in
-            guard url.isFileURL,
-                  let type = UTType(filenameExtension: url.pathExtension)
-            else {
-                return false
-            }
-
-            return type.conforms(to: .plainText)
-        }
-    }
-
-    private func imageFileURL(from pasteboard: NSPasteboard) -> URL? {
-        guard let urls = pasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: nil
-        ) as? [URL]
-        else {
-            return nil
-        }
-
-        return urls.first { url in
-            guard url.isFileURL,
-                  let type = UTType(filenameExtension: url.pathExtension)
-            else {
-                return false
-            }
-
-            return type.conforms(to: .image)
-        }
-    }
-
-    private func insertMarkdownImage(for url: URL, at point: NSPoint) {
-        let characterIndex = textView.characterIndexForInsertion(at: point)
-        textView.setSelectedRange(NSRange(location: characterIndex, length: 0))
-
-        let path = markdownRelativePath(for: url)
-        let name = url.deletingPathExtension().lastPathComponent.nilIfEmpty ?? "image"
-        replaceSelectedText(with: "![\(escapeLinkText(name))](\(path))")
-    }
-
-    private func markdownRelativePath(for url: URL) -> String {
-        guard let documentURL else {
-            return url.lastPathComponent
-        }
-
-        return relativePath(from: documentURL.deletingLastPathComponent(), to: url)
-    }
-
-    private func relativePath(from baseDirectory: URL, to targetURL: URL) -> String {
-        let baseComponents = baseDirectory.standardizedFileURL.pathComponents
-        let targetComponents = targetURL.standardizedFileURL.pathComponents
-        var sharedPrefixCount = 0
-
-        while sharedPrefixCount < baseComponents.count,
-              sharedPrefixCount < targetComponents.count,
-              baseComponents[sharedPrefixCount] == targetComponents[sharedPrefixCount]
-        {
-            sharedPrefixCount += 1
-        }
-
-        guard sharedPrefixCount > 0 else {
-            return targetURL.lastPathComponent
-        }
-
-        let upComponents = Array(
-            repeating: "..",
-            count: baseComponents.count - sharedPrefixCount
-        )
-        let downComponents = targetComponents.dropFirst(sharedPrefixCount)
-        return (upComponents + downComponents).joined(separator: "/")
-    }
-
-    private func escapeLinkText(_ text: String) -> String {
-        text.replacingOccurrences(of: "]", with: "\\]")
     }
 
     private func applyEditorColors() {
@@ -2161,207 +2148,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         return chromeRect.contains(pointInContentView)
     }
 
-    private func activeParagraphRangeAtSelection() -> NSRange? {
-        guard let textStorage = textView.textStorage,
-              textStorage.length > 0
-        else {
-            return nil
-        }
-
-        let string = textStorage.string as NSString
-        let location = min(textView.selectedRange().location, string.length)
-        return string.paragraphRange(for: NSRange(location: location, length: 0))
-    }
-
-    private func updateFocusForSelection() {
-        guard isFocusModeEnabled else {
-            return
-        }
-
-        let previousRange = activeFocusParagraphRange
-        activeFocusParagraphRange = activeParagraphRangeAtSelection()
-        // Dimming only differs in the paragraph that lost the caret and the
-        // one that gained it; everything else keeps its state. Restyling the
-        // whole document here would rewrite all attributes on every Enter
-        // press and cross-paragraph caret move.
-        if focusMode == .focus,
-           !isFocusTemporarilySuppressed,
-           previousRange?.location != activeFocusParagraphRange?.location
-        {
-            restyleFocusDelta(from: previousRange, to: activeFocusParagraphRange)
-        }
-
-        if !isFocusTemporarilySuppressed {
-            centerCaretLineInVisibleArea(animated: true)
-        }
-    }
-
-    private func restyleFocusDelta(
-        from previousRange: NSRange?,
-        to activeRange: NSRange?
-    ) {
-        var deltaRanges: [NSRange] = []
-        if let previousRange {
-            deltaRanges.append(previousRange)
-        }
-        if let activeRange, activeRange != previousRange {
-            deltaRanges.append(activeRange)
-        }
-
-        let string = (textView.textStorage?.string ?? "") as NSString
-        for deltaRange in deltaRanges {
-            guard let range = boundedRange(
-                MarkdownStylingEngine.lineNormalized(deltaRange, in: string)
-            ), range.length > 0 else {
-                continue
-            }
-
-            applyStyles(
-                in: range,
-                spans: MarkdownStylingEngine.spansForRange(
-                    range,
-                    from: currentStyleSpans
-                )
-            )
-        }
-    }
-
-    /// Keeps the caret line vertically centered in focus/typewriter mode.
-    /// Animated so that line transitions (Enter, arrow keys) glide instead of
-    /// jumping. Driven by the same retargetable display-link animator as
-    /// keyboard caret scrolling — the system animated scroll stacks a new
-    /// animation per key repeat and the overlap visibly bounces.
-    private func centerCaretLineInVisibleArea(animated: Bool) {
-        // Centering takes over from any in-flight keyboard caret scroll.
-        textView.cancelKeyboardCaretScroll()
-        guard let lineRect = caretLineRectAtSelection() else {
-            return
-        }
-
-        let clipHeight = clipView.bounds.height
-        guard clipHeight > 0 else {
-            return
-        }
-
-        let insets = scrollView.contentInsets
-        let lineMidY = textView.textContainerOrigin.y + lineRect.midY
-        let minimumOffsetY = -insets.top
-        let maximumOffsetY = max(
-            minimumOffsetY,
-            textView.frame.height - clipHeight + insets.bottom
-        )
-        let targetOffsetY = min(
-            max(minimumOffsetY, lineMidY - clipHeight / 2),
-            maximumOffsetY
-        )
-        let currentOffsetY = focusScrollAnimator.isAnimating
-            ? focusScrollAnimator.targetOffsetY
-            : clipView.bounds.origin.y
-        guard abs(currentOffsetY - targetOffsetY) > 0.5 else {
-            return
-        }
-
-        guard animated else {
-            focusScrollAnimator.cancel()
-            focusScrollAdjustmentCount += 1
-            clipView.setBoundsOrigin(
-                NSPoint(x: clipView.bounds.origin.x, y: targetOffsetY)
-            )
-            scrollView.reflectScrolledClipView(clipView)
-            focusScrollAdjustmentCount -= 1
-            return
-        }
-
-        focusScrollAnimator.scroll(scrollView, toOffsetY: targetOffsetY)
-    }
-
-    private func caretLineRectAtSelection() -> NSRect? {
-        guard let textStorage = textView.textStorage else {
-            return nil
-        }
-
-        editorLayoutManager.ensureLayout(for: textContainer)
-
-        guard textStorage.length > 0 else {
-            return emptyCaretLineRect()
-        }
-
-        let location = min(textView.selectedRange().location, textStorage.length)
-        if location == textStorage.length,
-           editorLayoutManager.extraLineFragmentTextContainer === textContainer
-        {
-            return editorLayoutManager.extraLineFragmentRect
-        }
-
-        let characterIndex = min(location, textStorage.length - 1)
-        let glyphIndex = editorLayoutManager.glyphIndexForCharacter(at: characterIndex)
-        guard glyphIndex < editorLayoutManager.numberOfGlyphs else {
-            return emptyCaretLineRect()
-        }
-
-        return editorLayoutManager.lineFragmentRect(
-            forGlyphAt: glyphIndex,
-            effectiveRange: nil,
-            withoutAdditionalLayout: true
-        )
-    }
-
-    private func emptyCaretLineRect() -> NSRect {
-        let extraLineRect = editorLayoutManager.extraLineFragmentRect
-        guard extraLineRect.height > 0 else {
-            return NSRect(
-                x: 0,
-                y: 0,
-                width: textContainer.size.width,
-                height: lineHeight
-            )
-        }
-
-        return extraLineRect
-    }
-
-    private func restoreFocusAfterEditorInteraction() {
-        guard isFocusModeEnabled else {
-            return
-        }
-
-        guard isFocusTemporarilySuppressed else {
-            updateFocusForSelection()
-            return
-        }
-
-        isFocusTemporarilySuppressed = false
-        activeFocusParagraphRange = activeParagraphRangeAtSelection()
-        updateCaretScrollOwnership()
-        // Lifting the scroll suppression must re-dim the whole document —
-        // the paragraph-delta restyle in updateFocusForSelection cannot know
-        // how much of it the suppression undimmed.
-        if focusMode == .focus {
-            restyleAllText()
-        }
-        centerCaretLineInVisibleArea(animated: true)
-    }
-
-    private func temporarilySuppressFocusForUserScroll(event: NSEvent) {
-        MarkdownEditorDiagnostics.log(
-            "scrollWheel deltaY=\(event.scrollingDeltaY) precise=\(event.hasPreciseScrollingDeltas) "
-                + "phase=\(event.phase.rawValue) momentum=\(event.momentumPhase.rawValue) "
-                + "clipY=\(clipView.bounds.origin.y) height=\(textView.frame.height)"
-        )
-
-        guard isFocusModeEnabled, !isFocusTemporarilySuppressed else {
-            return
-        }
-
-        // The manual scroll takes over from an in-flight centering glide.
-        focusScrollAnimator.cancel()
-        isFocusTemporarilySuppressed = true
-        updateCaretScrollOwnership()
-        // Only focus mode dims text; typewriter mode has nothing to undim.
-        if focusMode == .focus {
-            restyleAllText()
-        }
-    }
 }
 
 extension String {

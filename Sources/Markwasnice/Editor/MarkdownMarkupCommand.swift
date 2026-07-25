@@ -172,7 +172,7 @@ enum MarkdownMarkupCommand: Int {
 
         var restStart = hashCount
         while restStart < nsContent.length,
-              isHorizontalWhitespace(in: nsContent, at: restStart)
+              isHorizontalWhitespace(nsContent, at: restStart)
         {
             restStart += 1
         }
@@ -328,22 +328,9 @@ enum MarkdownMarkupCommand: Int {
             )
         }
 
-        let selectedText = nsString.substring(with: range)
-        let selectedNSString = selectedText as NSString
-        let relativeContentRange = NSRange(
-            location: contentRange.location - range.location,
-            length: contentRange.length
+        let (leadingText, content, trailingText) = trimmedSelectionParts(
+            in: nsString, range: range, contentRange: contentRange
         )
-        let leadingText = selectedNSString.substring(
-            with: NSRange(location: 0, length: relativeContentRange.location)
-        )
-        let trailingText = selectedNSString.substring(
-            with: NSRange(
-                location: NSMaxRange(relativeContentRange),
-                length: selectedNSString.length - NSMaxRange(relativeContentRange)
-            )
-        )
-        let content = selectedNSString.substring(with: relativeContentRange)
 
         if hasInternalPair(content, opening: opening, closing: closing) {
             let unwrappedContent = (content as NSString).substring(with: NSRange(
@@ -379,10 +366,22 @@ enum MarkdownMarkupCommand: Int {
         opening: String,
         closing: String
     ) -> MarkdownMarkupEdit {
-        let selectedNSString = nsString.substring(with: range) as NSString
-        let lineParts = markupLineParts(in: selectedNSString)
-        let nonEmptyLineParts = lineParts.filter { !$0.content.isEmpty }
-        guard !nonEmptyLineParts.isEmpty else {
+        guard let (replacement, _) = multilineReplacement(
+            in: nsString, range: range,
+            lineUnwraps: { hasInternalPair($0, opening: opening, closing: closing) },
+            transform: { content, unwraps in
+                guard unwraps else {
+                    return (opening + content + closing, nil)
+                }
+
+                let nsContent = content as NSString
+                return (nsContent.substring(with: NSRange(
+                    location: (opening as NSString).length,
+                    length: nsContent.length - (opening as NSString)
+                        .length - (closing as NSString).length
+                )), nil)
+            }
+        ) else {
             return pairEdit(
                 for: MarkupTarget(
                     range: NSRange(location: range.location, length: 0),
@@ -390,34 +389,6 @@ enum MarkdownMarkupCommand: Int {
                 ),
                 in: nsString, opening: opening, closing: closing
             )
-        }
-
-        let unwraps = nonEmptyLineParts.allSatisfy {
-            hasInternalPair($0.content, opening: opening, closing: closing)
-        }
-        var replacement = ""
-        for linePart in lineParts {
-            if linePart.content.isEmpty {
-                replacement += linePart.original
-                continue
-            }
-
-            if unwraps {
-                let content = linePart.content as NSString
-                replacement += linePart.leading
-                replacement += content.substring(with: NSRange(
-                    location: (opening as NSString).length,
-                    length: content.length - (opening as NSString)
-                        .length - (closing as NSString).length
-                ))
-                replacement += linePart.trailing
-                replacement += linePart.newline
-            } else {
-                replacement += linePart.leading
-                replacement += opening + linePart.content + closing
-                replacement += linePart.trailing
-                replacement += linePart.newline
-            }
         }
 
         return MarkdownMarkupEdit(
@@ -503,22 +474,9 @@ enum MarkdownMarkupCommand: Int {
             )
         }
 
-        let selectedText = nsString.substring(with: range)
-        let selectedNSString = selectedText as NSString
-        let relativeContentRange = NSRange(
-            location: contentRange.location - range.location,
-            length: contentRange.length
+        let (leadingText, content, trailingText) = trimmedSelectionParts(
+            in: nsString, range: range, contentRange: contentRange
         )
-        let leadingText = selectedNSString.substring(
-            with: NSRange(location: 0, length: relativeContentRange.location)
-        )
-        let trailingText = selectedNSString.substring(
-            with: NSRange(
-                location: NSMaxRange(relativeContentRange),
-                length: selectedNSString.length - NSMaxRange(relativeContentRange)
-            )
-        )
-        let content = selectedNSString.substring(with: relativeContentRange)
         if let link = internalLink(in: content, isImage: isImage) {
             let label = (content as NSString).substring(with: link.labelRange)
             let replacement = leadingText + label + trailingText
@@ -551,42 +509,25 @@ enum MarkdownMarkupCommand: Int {
         range: NSRange,
         isImage: Bool
     ) -> MarkdownMarkupEdit {
-        let selectedNSString = nsString.substring(with: range) as NSString
-        let lineParts = markupLineParts(in: selectedNSString)
-        let nonEmptyLineParts = lineParts.filter { !$0.content.isEmpty }
-        guard !nonEmptyLineParts.isEmpty else {
+        let prefix = isImage ? "![" : "["
+        guard let (replacement, firstURLLocation) = multilineReplacement(
+            in: nsString, range: range,
+            lineUnwraps: { internalLink(in: $0, isImage: isImage) != nil },
+            transform: { content, unwraps in
+                if unwraps, let link = internalLink(in: content, isImage: isImage) {
+                    return ((content as NSString).substring(with: link.labelRange), nil)
+                }
+
+                let body = prefix + escapeLinkLabel(content) + "]()"
+                // The cursor lands between the URL parentheses.
+                return (body, body.utf16.count - 1)
+            }
+        ) else {
             return linkEdit(
                 in: nsString,
                 selectedRange: NSRange(location: range.location, length: 0),
                 isImage: isImage
             )
-        }
-
-        let unwraps = nonEmptyLineParts.allSatisfy {
-            internalLink(in: $0.content, isImage: isImage) != nil
-        }
-        let prefix = isImage ? "![" : "["
-        var replacement = ""
-        var firstURLLocation: Int?
-        for linePart in lineParts {
-            if linePart.content.isEmpty {
-                replacement += linePart.original
-                continue
-            }
-
-            if unwraps, let link = internalLink(in: linePart.content, isImage: isImage) {
-                let label = (linePart.content as NSString)
-                    .substring(with: link.labelRange)
-                replacement += linePart.leading + label + linePart.trailing + linePart
-                    .newline
-            } else {
-                let label = escapeLinkLabel(linePart.content)
-                replacement += linePart.leading + prefix + label + "]()"
-                if firstURLLocation == nil {
-                    firstURLLocation = range.location + replacement.utf16.count - 1
-                }
-                replacement += linePart.trailing + linePart.newline
-            }
         }
 
         return MarkdownMarkupEdit(
@@ -597,6 +538,47 @@ enum MarkdownMarkupCommand: Int {
                 length: 0
             )
         )
+    }
+
+    /// Shared skeleton of the multiline pair and link edits: walks the
+    /// selected lines, keeps blank lines untouched, and rebuilds every other
+    /// line via `transform`. All non-empty lines unwrap together or wrap
+    /// together, decided by `lineUnwraps`. The transform may report a cursor
+    /// offset within the produced body; the first reported offset comes back
+    /// as an absolute location. Returns nil when every line is blank.
+    private static func multilineReplacement(
+        in nsString: NSString,
+        range: NSRange,
+        lineUnwraps: (String) -> Bool,
+        transform: (_ content: String, _ unwraps: Bool)
+            -> (body: String, cursorOffset: Int?)
+    ) -> (replacement: String, cursorLocation: Int?)? {
+        let selectedNSString = nsString.substring(with: range) as NSString
+        let lineParts = markupLineParts(in: selectedNSString)
+        let nonEmptyLineParts = lineParts.filter { !$0.content.isEmpty }
+        guard !nonEmptyLineParts.isEmpty else {
+            return nil
+        }
+
+        let unwraps = nonEmptyLineParts.allSatisfy { lineUnwraps($0.content) }
+        var replacement = ""
+        var cursorLocation: Int?
+        for linePart in lineParts {
+            if linePart.content.isEmpty {
+                replacement += linePart.original
+                continue
+            }
+
+            let (body, cursorOffset) = transform(linePart.content, unwraps)
+            replacement += linePart.leading
+            if cursorLocation == nil, let cursorOffset {
+                cursorLocation = range.location + replacement.utf16.count
+                    + cursorOffset
+            }
+            replacement += body + linePart.trailing + linePart.newline
+        }
+
+        return (replacement, cursorLocation)
     }
 
     private static func targetRange(
@@ -633,8 +615,34 @@ enum MarkdownMarkupCommand: Int {
     }
 
     private static func isLetter(in nsString: NSString, at location: Int) -> Bool {
-        nsString.substring(with: NSRange(location: location, length: 1))
-            .rangeOfCharacter(from: .letters) != nil
+        // A lone surrogate half is not a letter by itself.
+        guard let scalar = UnicodeScalar(nsString.character(at: location)) else {
+            return false
+        }
+        return CharacterSet.letters.contains(scalar)
+    }
+
+    /// Splits the selected range into the text before, inside, and after the
+    /// whitespace-trimmed content range.
+    private static func trimmedSelectionParts(
+        in nsString: NSString,
+        range: NSRange,
+        contentRange: NSRange
+    ) -> (leading: String, content: String, trailing: String) {
+        let selectedNSString = nsString.substring(with: range) as NSString
+        let relativeContentRange = NSRange(
+            location: contentRange.location - range.location,
+            length: contentRange.length
+        )
+        return (
+            leading: selectedNSString.substring(
+                with: NSRange(location: 0, length: relativeContentRange.location)
+            ),
+            content: selectedNSString.substring(with: relativeContentRange),
+            trailing: selectedNSString.substring(
+                from: NSMaxRange(relativeContentRange)
+            )
+        )
     }
 
     private static func horizontallyTrimmedRange(
@@ -642,24 +650,17 @@ enum MarkdownMarkupCommand: Int {
     ) -> NSRange {
         var location = range.location
         var endLocation = NSMaxRange(range)
-        while location < endLocation, isHorizontalWhitespace(in: nsString, at: location) {
+        while location < endLocation, isHorizontalWhitespace(nsString, at: location) {
             location += 1
         }
 
         while endLocation > location,
-              isHorizontalWhitespace(in: nsString, at: endLocation - 1)
+              isHorizontalWhitespace(nsString, at: endLocation - 1)
         {
             endLocation -= 1
         }
 
         return NSRange(location: location, length: endLocation - location)
-    }
-
-    private static func isHorizontalWhitespace(
-        in nsString: NSString, at location: Int
-    ) -> Bool {
-        let character = nsString.substring(with: NSRange(location: location, length: 1))
-        return character == " " || character == "\t"
     }
 
     private static func hasWrappedRange(
@@ -806,7 +807,7 @@ enum MarkdownMarkupCommand: Int {
 
         let urlStart = NSMaxRange(labelRange) + 2
         guard let closingLocation = closingParenLocation(
-            in: nsString, startingAt: urlStart
+            in: nsString, startingAt: urlStart, upTo: nsString.length
         ) else {
             return nil
         }
@@ -826,12 +827,22 @@ enum MarkdownMarkupCommand: Int {
         isImage: Bool
     ) -> ExistingLink? {
         let prefix = isImage ? "![" : "["
+        // Markdown links never span lines, so the scan stays within the
+        // caret's line; an unbounded scan made every "[ ]" checkbox above
+        // the caret a candidate for a link ending on a later line.
+        let lineRange = nsString.lineRange(
+            for: NSRange(location: min(location, nsString.length), length: 0)
+        )
+        let lineEnd = NSMaxRange(lineRange)
         var searchLength = min(location, nsString.length)
-        while searchLength >= prefix.utf16.count {
+        while searchLength - lineRange.location >= prefix.utf16.count {
             let prefixRange = nsString.range(
                 of: prefix,
                 options: .backwards,
-                range: NSRange(location: 0, length: searchLength)
+                range: NSRange(
+                    location: lineRange.location,
+                    length: searchLength - lineRange.location
+                )
             )
             guard prefixRange.location != NSNotFound else {
                 return nil
@@ -847,7 +858,8 @@ enum MarkdownMarkupCommand: Int {
             }
 
             if let link = linkStarting(
-                at: prefixRange.location, in: nsString, isImage: isImage
+                at: prefixRange.location, in: nsString, isImage: isImage,
+                upTo: lineEnd
             ),
                 location >= link.labelRange.location,
                 location <= NSMaxRange(link.fullRange)
@@ -864,11 +876,12 @@ enum MarkdownMarkupCommand: Int {
     private static func linkStarting(
         at prefixLocation: Int,
         in nsString: NSString,
-        isImage: Bool
+        isImage: Bool,
+        upTo limit: Int
     ) -> ExistingLink? {
         let prefixLength = isImage ? 2 : 1
         let labelStart = prefixLocation + prefixLength
-        guard labelStart <= nsString.length else {
+        guard labelStart <= limit else {
             return nil
         }
 
@@ -876,7 +889,7 @@ enum MarkdownMarkupCommand: Int {
             of: "](",
             range: NSRange(
                 location: labelStart,
-                length: nsString.length - labelStart
+                length: limit - labelStart
             )
         )
         guard separatorRange.location != NSNotFound else {
@@ -885,7 +898,7 @@ enum MarkdownMarkupCommand: Int {
 
         let urlStart = NSMaxRange(separatorRange)
         guard let closingLocation = closingParenLocation(
-            in: nsString, startingAt: urlStart
+            in: nsString, startingAt: urlStart, upTo: limit
         ) else {
             return nil
         }
@@ -903,8 +916,11 @@ enum MarkdownMarkupCommand: Int {
     }
 
     private static func internalLink(in string: String, isImage: Bool) -> ExistingLink? {
-        guard let link = linkStarting(at: 0, in: string as NSString, isImage: isImage),
-              link.fullRange.length == (string as NSString).length
+        let nsString = string as NSString
+        guard let link = linkStarting(
+            at: 0, in: nsString, isImage: isImage, upTo: nsString.length
+        ),
+            link.fullRange.length == nsString.length
         else {
             return nil
         }
@@ -913,11 +929,11 @@ enum MarkdownMarkupCommand: Int {
     }
 
     private static func closingParenLocation(
-        in nsString: NSString, startingAt urlStart: Int
+        in nsString: NSString, startingAt urlStart: Int, upTo limit: Int
     ) -> Int? {
         let range = nsString.range(
             of: ")",
-            range: NSRange(location: urlStart, length: nsString.length - urlStart)
+            range: NSRange(location: urlStart, length: limit - urlStart)
         )
         guard range.location != NSNotFound else {
             return nil
@@ -1007,8 +1023,8 @@ private func markupLinePart(from line: String) -> MarkupLinePart {
 }
 
 private func isHorizontalWhitespace(_ nsString: NSString, at location: Int) -> Bool {
-    let character = nsString.substring(with: NSRange(location: location, length: 1))
-    return character == " " || character == "\t"
+    let character = nsString.character(at: location)
+    return character == 0x20 || character == 0x09 // ' ' or '\t'
 }
 
 private struct MarkupTarget {

@@ -71,10 +71,28 @@ enum MarkdownShiftedContentReparser {
         // Replacements go after the surviving spans: styling applies spans in
         // array order on top of reset base attributes, so container spans
         // (lists, quotes) that enclose a region keep running first.
+        //
+        // The walker visits blocks in document order and the region-producing
+        // blocks (indented code blocks, paragraphs) never contain each other,
+        // so dropRanges are ascending and non-overlapping; only the last
+        // region starting at or before a span can absorb it.
+        let regions = scanner.regions
         var result = spans.filter { span in
-            !scanner.regions.contains { region in
-                NSIntersectionRange(span.range, region.dropRange) == span.range
+            // NSIntersectionRange yields {0,0} against any region when the
+            // span is {0,0}, so the old exhaustive scan always dropped that
+            // span once a region existed; keep doing so.
+            guard span.range.location > 0 || span.range.length > 0 else {
+                return false
             }
+
+            guard let region = lastRegion(
+                startingAtOrBefore: span.range.location,
+                in: regions
+            ) else {
+                return true
+            }
+
+            return NSIntersectionRange(span.range, region.dropRange) != span.range
         }
         for region in scanner.regions {
             result.append(contentsOf: reparsedSpans(
@@ -85,6 +103,30 @@ enum MarkdownShiftedContentReparser {
         }
 
         return result
+    }
+
+    /// The region with the greatest dropRange.location at or before the
+    /// given location; regions are sorted ascending by dropRange.location.
+    private static func lastRegion(
+        startingAtOrBefore location: Int,
+        in regions: [Region]
+    ) -> Region? {
+        var low = 0
+        var high = regions.count
+        while low < high {
+            let middle = (low + high) / 2
+            if regions[middle].dropRange.location <= location {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+
+        guard low > 0 else {
+            return nil
+        }
+
+        return regions[low - 1]
     }
 
     /// The region's dedented lines parsed as their own document, with the
@@ -110,14 +152,12 @@ enum MarkdownShiftedContentReparser {
         var collector = MarkdownStyleSpanCollector()
         collector.visit(document)
         let sourceMap = SourceMap(text: subSource)
-        let subSpans: [ResolvedMarkdownStyleSpan] = collector.spans
-            .compactMap { span in
-                guard let range = sourceMap.nsRange(for: span.range) else {
-                    return nil
-                }
-
-                return ResolvedMarkdownStyleSpan(range: range, kind: span.kind)
-            }
+        // Zero-length spans survive resolution (the mapping below drops
+        // them), matching the top-level parse pipeline.
+        let subSpans = sourceMap.resolvedSpans(
+            from: collector.spans,
+            droppingZeroLength: false
+        )
 
         // Dedenting can leave deeper lines indented far enough to form an
         // indented code block again, and a dedented paragraph can still carry

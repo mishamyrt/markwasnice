@@ -59,10 +59,23 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Task {
-            await appState.flushAutosaveAndWait(force: true)
-            NSApplication.shared.reply(toApplicationShouldTerminate: true)
+            let didFlush = await appState.flushAutosaveAndWait(force: true)
+            let shouldTerminate = didFlush || Self.confirmTerminateAfterFailedFlush()
+            NSApplication.shared.reply(toApplicationShouldTerminate: shouldTerminate)
         }
         return .terminateLater
+    }
+
+    private static func confirmTerminateAfterFailedFlush() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Unsaved drafts could not be saved."
+        alert.informativeText =
+            "Autosaving your open documents failed. If you quit now, "
+                + "recent changes in unsaved documents will be lost."
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func application(_: NSApplication, openFile filename: String) -> Bool {

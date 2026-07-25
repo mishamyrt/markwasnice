@@ -189,6 +189,37 @@ struct MarkdownStyleRangeDifferTests {
     }
 
     @Test
+    func reorderedEqualSpansHaveNoDirtyRanges() {
+        let source = "**a** and *b*\n"
+        let strong = span(in: source, matching: "**a**", kind: .strong)
+        let emphasis = span(in: source, matching: "*b*", kind: .emphasis)
+
+        let dirtyRanges = MarkdownStyleRangeDiffer.dirtyRanges(
+            from: [strong, emphasis],
+            to: [emphasis, strong],
+            source: source,
+            lineRanges: SourceMap(text: source).lineRanges()
+        )
+
+        #expect(dirtyRanges.isEmpty)
+    }
+
+    @Test
+    func duplicatedSpanIsEquivalentToSingleSpan() {
+        let source = "**a** text\n"
+        let strong = span(in: source, matching: "**a**", kind: .strong)
+
+        let dirtyRanges = MarkdownStyleRangeDiffer.dirtyRanges(
+            from: [strong, strong],
+            to: [strong],
+            source: source,
+            lineRanges: SourceMap(text: source).lineRanges()
+        )
+
+        #expect(dirtyRanges.isEmpty)
+    }
+
+    @Test
     func changingBlockKindDirtiesAffectedLine() {
         let source = "# Heading\n\nParagraph\n"
         let previousSpans = [

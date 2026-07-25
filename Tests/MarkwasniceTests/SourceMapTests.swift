@@ -46,6 +46,40 @@ struct SourceMapTests {
     }
 
     @Test
+    func cyrillicRunInteriorBoundariesResolve() {
+        let map = SourceMap(text: "код и **текст** тут\n")
+        // Boundaries inside long same-width runs, at run seams, and after
+        // ASCII interludes between non-ASCII runs.
+        #expect(map.nsRange(for: range(line: 1, column: 1, toLine: 1, column: 7)) == NSRange(location: 0, length: 3))
+        #expect(map.nsRange(for: range(line: 1, column: 8, toLine: 1, column: 10)) == NSRange(location: 4, length: 1))
+        #expect(map.nsRange(for: range(line: 1, column: 11, toLine: 1, column: 25)) == NSRange(location: 6, length: 9))
+        #expect(map.nsRange(for: range(line: 1, column: 26, toLine: 1, column: 32)) == NSRange(location: 16, length: 3))
+    }
+
+    @Test
+    func offsetInsideMultibyteScalarReturnsNil() {
+        let map = SourceMap(text: "aб\n")
+        // Column 3 lands in the middle of "б" (2 UTF-8 bytes at offset 1).
+        #expect(map.nsRange(for: range(line: 1, column: 1, toLine: 1, column: 3)) == nil)
+        #expect(map.nsRange(for: range(line: 1, column: 1, toLine: 1, column: 4)) == NSRange(location: 0, length: 2))
+    }
+
+    @Test
+    func offsetPastNonASCIILineEndReturnsNil() {
+        let map = SourceMap(text: "бв\n")
+        #expect(map.nsRange(for: range(line: 1, column: 1, toLine: 1, column: 6)) == nil)
+        #expect(map.nsRange(for: range(line: 1, column: 1, toLine: 1, column: 7)) == nil)
+    }
+
+    @Test
+    func adjacentEmojiFormSurrogateRun() {
+        let map = SourceMap(text: "😀😀a\n")
+        #expect(map.nsRange(for: range(line: 1, column: 1, toLine: 1, column: 5)) == NSRange(location: 0, length: 2))
+        #expect(map.nsRange(for: range(line: 1, column: 5, toLine: 1, column: 9)) == NSRange(location: 2, length: 2))
+        #expect(map.nsRange(for: range(line: 1, column: 9, toLine: 1, column: 10)) == NSRange(location: 4, length: 1))
+    }
+
+    @Test
     func invalidLocationsReturnNil() {
         let map = SourceMap(text: "abc\n")
         #expect(map.nsRange(for: range(line: 0, column: 1, toLine: 1, column: 2)) == nil)
