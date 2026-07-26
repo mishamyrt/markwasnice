@@ -462,6 +462,10 @@ private final class WindowLifecycleView: NSView {
 
                 window.title = title
                 window.isDocumentEdited = isEdited
+                window.tab.title = EditorWindowTabTitle.make(
+                    title: title,
+                    isEdited: isEdited
+                )
             }
     }
 
