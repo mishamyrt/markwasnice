@@ -1,53 +1,37 @@
 import AppKit
-import CoreText
 
+/// The editor's monospaced family, bundled as an upright and an italic
+/// variable font (`Lilex[wght]` / `Lilex-Italic[wght]`).
 @MainActor
 enum LilexFontProvider {
-    private static var didRegisterFonts = false
+    private static let family = BundledFontFamily(
+        resourceNames: ["Lilex[wght]", "Lilex-Italic[wght]"],
+        regularFontName: "Lilex",
+        italicFontName: "Lilex Italic",
+        systemFallback: .monospaced
+    )
 
     static func registerFonts() {
-        guard !didRegisterFonts else {
-            return
-        }
-
-        didRegisterFonts = true
-        for name in ["Lilex[wght]", "Lilex-Italic[wght]"] {
-            guard let url = Bundle.module.url(
-                forResource: name, withExtension: "ttf", subdirectory: "Fonts"
-            )
-            else {
-                continue
-            }
-
-            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        }
+        family.registerFonts()
     }
 
     static func regular(size: CGFloat) -> NSFont {
-        NSFont(name: "Lilex", size: size) ?? .monospacedSystemFont(
-            ofSize: size,
-            weight: .regular
-        )
+        family.regular(size: size)
     }
 
     static func italic(size: CGFloat) -> NSFont {
-        NSFont(name: "Lilex Italic", size: size) ?? font(
-            size: size,
-            traits: .italicFontMask
-        )
+        family.italic(size: size)
     }
 
     static func bold(size: CGFloat) -> NSFont {
-        font(size: size, traits: .boldFontMask)
+        family.bold(size: size)
     }
 
     static func boldItalic(size: CGFloat) -> NSFont {
-        font(size: size, traits: [.boldFontMask, .italicFontMask])
+        family.boldItalic(size: size)
     }
 
     static func font(size: CGFloat, traits: NSFontTraitMask) -> NSFont {
-        let regularFont = regular(size: size)
-        let convertedFont = NSFontManager.shared.convert(regularFont, toHaveTrait: traits)
-        return NSFontManager.shared.convert(convertedFont, toSize: size)
+        family.font(size: size, traits: traits)
     }
 }

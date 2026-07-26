@@ -18,6 +18,14 @@ final class FullScreenToolbarController: NSObject {
     private var separatorVisibilityCancellable: AnyCancellable?
     private var isSeparatorVisible = false
     private weak var backdropView: NSView?
+    /// The chrome views the backdrop is stacked against, kept between
+    /// notifications: `installBackdrop` runs on every move of the reveal
+    /// animation, and finding them means walking the toolbar window's
+    /// hierarchy. Weak, because they belong to AppKit's toolbar window and
+    /// their disappearance is itself the signal to look again.
+    private weak var cachedTitlebarView: NSView?
+    private weak var backdropAnchorView: NSView?
+    private var backdropAnchorSiblingCount = 0
     private var strayToolbarCheckWorkItem: DispatchWorkItem?
     private var pendingKickWorkItem: DispatchWorkItem?
 
@@ -92,7 +100,7 @@ final class FullScreenToolbarController: NSObject {
         }
 
         guard let toolbarWindow = window.childWindows?.first(where: {
-            String(describing: type(of: $0)) == "NSToolbarFullScreenWindow"
+            $0.hasExactClass(PrivateChromeClass.toolbarFullScreenWindow)
         })
         else {
             // The auto-hide detaches the toolbar window between reveals;
@@ -210,6 +218,9 @@ final class FullScreenToolbarController: NSObject {
         separatorView = nil
         backdropView?.removeFromSuperview()
         backdropView = nil
+        cachedTitlebarView = nil
+        backdropAnchorView = nil
+        backdropAnchorSiblingCount = 0
         guard let observedToolbarWindow else {
             return
         }
@@ -442,31 +453,39 @@ final class FullScreenToolbarController: NSObject {
     /// above every system background layer and directly below the toolbar
     /// items, so whatever flashes underneath is simply never visible.
     private func installBackdrop(in toolbarWindow: NSWindow) {
-        guard let contentView = toolbarWindow.contentView,
-              let titlebarView = findSubview(
-                  named: "NSTitlebarView",
-                  in: contentView
-              )
-        else {
+        guard let titlebarView = resolvedTitlebarView(in: toolbarWindow) else {
             return
         }
 
-        // The tab bar rides along as a titlebar accessory, wrapped in an
-        // anonymous NSView sibling of NSToolbarView. The opaque backdrop has
-        // to slot in below whichever of the two sits lowest, or it paints
-        // over the tab bar: invisible tabs that still receive mouse events
-        // through the backdrop's nil hitTest.
-        let anchorView = titlebarView.subviews.first { subview in
-            subview !== backdropView && isBackdropAnchor(subview)
-        }
+        let siblings = titlebarView.subviews
 
         if let backdrop = backdropView, backdrop.superview === titlebarView {
+            guard let backdropIndex = siblings.firstIndex(of: backdrop) else {
+                return
+            }
+
+            // The anchor scan walks subtrees and this runs on every move of
+            // the reveal animation, so its result is kept: the cached anchor
+            // still describes the stacking as long as it is a sibling, the
+            // backdrop is still below it, and the sibling list has neither
+            // grown nor shrunk — the tab bar accessory arriving or leaving
+            // changes that count, which is precisely when the anchor has to
+            // be found again.
+            if let anchorView = backdropAnchorView,
+               anchorView.superview === titlebarView,
+               siblings.count == backdropAnchorSiblingCount,
+               let anchorIndex = siblings.firstIndex(of: anchorView),
+               backdropIndex < anchorIndex
+            {
+                return
+            }
+
             // A tab bar accessory that appears after the install (second
             // tab opened while already fullscreen) lands below the backdrop
             // and would be painted over; re-anchor when that happens.
+            let anchorView = findBackdropAnchor(among: siblings)
             if let anchorView,
-               let backdropIndex = titlebarView.subviews.firstIndex(of: backdrop),
-               let anchorIndex = titlebarView.subviews.firstIndex(of: anchorView),
+               let anchorIndex = siblings.firstIndex(of: anchorView),
                backdropIndex > anchorIndex
             {
                 backdrop.removeFromSuperview()
@@ -476,10 +495,12 @@ final class FullScreenToolbarController: NSObject {
                     relativeTo: anchorView
                 )
             }
+            cacheBackdropAnchor(anchorView, in: titlebarView)
             return
         }
 
         backdropView?.removeFromSuperview()
+        let anchorView = findBackdropAnchor(among: siblings)
         let backdrop = FullScreenToolbarBackdropView(frame: titlebarView.bounds)
         backdrop.autoresizingMask = [.width, .height]
         if let anchorView {
@@ -492,74 +513,90 @@ final class FullScreenToolbarController: NSObject {
             titlebarView.addSubview(backdrop)
         }
         backdropView = backdrop
+        cacheBackdropAnchor(anchorView, in: titlebarView)
     }
 
-    /// Everything the backdrop must stay below, matched on the view itself or
-    /// on a descendant. The accessory wrapper has no class of its own, so it
-    /// is recognized by what it carries — and by more than one marker on
-    /// purpose: the private container/clip classes come and go between
-    /// releases (NSTitlebarAccessoryClipView is gone as of macOS 27), and a
-    /// marker that stops matching silently puts the opaque backdrop on top of
-    /// the tab bar.
-    private static let backdropAnchorMarkers = [
-        "NSToolbarView",
-        "NSTitlebarAccessoryContainerView",
-        "NSTitlebarAccessoryClipView",
-        "NSTabBar",
-    ]
-
-    private func isBackdropAnchor(_ view: NSView) -> Bool {
-        Self.backdropAnchorMarkers.contains { marker in
-            String(describing: type(of: view)) == marker
-                || findSubview(named: marker, in: view) != nil
+    /// The tab bar rides along as a titlebar accessory, wrapped in an
+    /// anonymous NSView sibling of NSToolbarView. The opaque backdrop has
+    /// to slot in below whichever of the two sits lowest, or it paints
+    /// over the tab bar: invisible tabs that still receive mouse events
+    /// through the backdrop's nil hitTest.
+    private func findBackdropAnchor(among siblings: [NSView]) -> NSView? {
+        siblings.first { subview in
+            subview !== backdropView
+                && subview.containsView(
+                    ofAnyClass: PrivateChromeClass.backdropAnchors
+                )
         }
     }
 
-    private func findSubview(named className: String, in view: NSView) -> NSView? {
-        for subview in view.subviews {
-            if String(describing: type(of: subview)) == className {
-                return subview
-            }
-            if let match = findSubview(named: className, in: subview) {
-                return match
-            }
+    /// Recorded after the stacking has been mutated, so the sibling count
+    /// includes the backdrop itself and the next pass compares like with
+    /// like.
+    private func cacheBackdropAnchor(_ anchorView: NSView?, in titlebarView: NSView) {
+        backdropAnchorView = anchorView
+        backdropAnchorSiblingCount = titlebarView.subviews.count
+    }
+
+    /// NSTitlebarView is found once and kept: AppKit only swaps it out by
+    /// tearing the chrome down, which detaches the cached one first and so
+    /// invalidates it here.
+    private func resolvedTitlebarView(in toolbarWindow: NSWindow) -> NSView? {
+        if let cachedTitlebarView,
+           cachedTitlebarView.window === toolbarWindow,
+           cachedTitlebarView.superview != nil
+        {
+            return cachedTitlebarView
         }
-        return nil
+
+        guard let contentView = toolbarWindow.contentView else {
+            cachedTitlebarView = nil
+            return nil
+        }
+
+        let titlebarView = contentView.firstDescendant(
+            ofClass: PrivateChromeClass.titlebarView
+        )
+        cachedTitlebarView = titlebarView
+        return titlebarView
     }
 
     private func hideBackdropLayerViews(in view: NSView) {
-        for subview in view.subviews {
+        view.forEachDescendant { subview in
             // The tab bar accessory draws its tabs with backdrop-backed
             // glass of its own; hiding those layers erases the tabs while
-            // AppKit keeps reserving their row.
+            // AppKit keeps reserving their row. Matched on a fragment of the
+            // class name rather than a fixed list: the accessory and tab bar
+            // classes are renamed between releases, and skipping one row too
+            // many is recoverable where erasing the tabs is not.
             let className = String(describing: type(of: subview))
             if className.contains("Accessory") || className.contains("TabBar") {
-                continue
+                return false
             }
-            if !(subview is FullScreenToolbarBackdropView),
-               let layer = subview.layer
+            guard !(subview is FullScreenToolbarBackdropView),
+                  let layer = subview.layer
+            else {
+                return true
+            }
+
+            // Backdrop layers carry the stale glass recipe; portal
+            // layers can replay hidden sources during the reveal
+            // animation frames.
+            if layer.hasExactClass(anyOf: PrivateChromeClass.staleGlassLayers),
+               !subview.isHidden
             {
-                let layerClass = String(describing: type(of: layer))
-                // Backdrop layers carry the stale glass recipe; portal
-                // layers can replay hidden sources during the reveal
-                // animation frames.
-                if layerClass == "CABackdropLayer" || layerClass == "CAPortalLayer",
-                   !subview.isHidden
-                {
-                    subview.isHidden = true
-                }
-                // NSTitlebarBackgroundView keeps an opaque white backing
-                // color even in dark mode; it flashes through during the
-                // reveal animation when the glass band above it is gone.
-                if String(describing: type(of: subview))
-                    == "NSTitlebarBackgroundView",
-                    layer.backgroundColor != nil
-                {
-                    layer.backgroundColor = nil
-                    subview.isHidden = true
-                }
+                subview.isHidden = true
             }
-            hideBackdropLayerViews(in: subview)
+            // NSTitlebarBackgroundView keeps an opaque white backing
+            // color even in dark mode; it flashes through during the
+            // reveal animation when the glass band above it is gone.
+            if subview.hasExactClass(PrivateChromeClass.titlebarBackgroundView),
+               layer.backgroundColor != nil
+            {
+                layer.backgroundColor = nil
+                subview.isHidden = true
+            }
+            return true
         }
     }
 

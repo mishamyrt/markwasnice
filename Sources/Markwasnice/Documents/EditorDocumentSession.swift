@@ -270,7 +270,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        editorView.fixTypography()
+        editorView.fixTypography(spans: stylingController.freshStyleSpans)
     }
 
     func showSearch() {
@@ -303,13 +303,28 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         save(to: url)
     }
 
+    /// The app's only gate against losing unsaved work, so every state that
+    /// is not provably safe answers "don't close".
     func windowShouldClose(_ window: NSWindow, onApprovedClose: @escaping () -> Void)
         -> Bool
     {
-        guard !isCloseApproved,
-              !isPromptVisible,
-              hasUnsavedFileChanges
-        else {
+        // The user already answered the prompt for this close; letting it
+        // through is the whole point of the re-entrant path.
+        guard !isCloseApproved else {
+            return true
+        }
+
+        // The prompt owns the window until it is answered — including the
+        // gap after "Save" where the sheet is gone but the write is still in
+        // flight and nothing at the AppKit level blocks a second Cmd+W.
+        // Unsaved changes are guaranteed here, so the close is refused and
+        // the pending question brought back in front of the user.
+        guard !isPromptVisible else {
+            window.makeKeyAndOrderFront(nil)
+            return false
+        }
+
+        guard hasUnsavedFileChanges else {
             return true
         }
 
@@ -375,6 +390,16 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         let previousSaveTask = saveTask
         previousSaveTask?.cancel()
         saveTask = Task { [weak self, savedText, url] in
+            // Every exit has to answer, or a caller waiting on the outcome
+            // waits forever: the close prompt keeps its window hostage that
+            // way, since an unanswered prompt refuses to close.
+            var didReportOutcome = false
+            defer {
+                if !didReportOutcome {
+                    onCompletion?(false)
+                }
+            }
+
             // The superseded save's detached write cannot be interrupted;
             // wait for it so two quick saves to the same URL cannot land
             // with the older content last.
@@ -390,6 +415,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 }
 
                 NSAlert(error: error).runModal()
+                didReportOutcome = true
                 onCompletion?(false)
                 return
             }
@@ -408,6 +434,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             hasUnsavedFileChanges = !didSaveCurrentText
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             onAutosaveNeeded()
+            didReportOutcome = true
             onCompletion?(didSaveCurrentText)
         }
     }

@@ -6,7 +6,7 @@ struct MarkdownContinuationCommandTests {
     @Test func continuesUnorderedList() throws {
         let text = "- first"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -18,7 +18,7 @@ struct MarkdownContinuationCommandTests {
     @Test func continuesOrderedListIncrementingMarker() throws {
         let text = "1. first\n2. second"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -28,7 +28,7 @@ struct MarkdownContinuationCommandTests {
     @Test func continuesParenthesizedOrderedMarker() throws {
         let text = "3) item"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -38,7 +38,7 @@ struct MarkdownContinuationCommandTests {
     @Test func preservesIndentation() throws {
         let text = "  - nested"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -48,7 +48,7 @@ struct MarkdownContinuationCommandTests {
     @Test func continuesListCheckboxAsUnchecked() throws {
         let text = "- [x] done"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -58,7 +58,7 @@ struct MarkdownContinuationCommandTests {
     @Test func continuesOrderedListCheckbox() throws {
         let text = "  1. [ ] first"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -68,7 +68,7 @@ struct MarkdownContinuationCommandTests {
     @Test func continuesCheckboxWithoutListMarker() throws {
         let text = "  [X] standalone task"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -79,7 +79,7 @@ struct MarkdownContinuationCommandTests {
         // "[ok]" is not a checkbox, so the line continues as a plain list item.
         let text = "- [ok] link-ish"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -89,7 +89,7 @@ struct MarkdownContinuationCommandTests {
     @Test func exitsEmptyCheckboxItem() throws {
         let text = "- [ ] first\n- [ ] "
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -101,7 +101,7 @@ struct MarkdownContinuationCommandTests {
     @Test func exitsEmptyCheckboxWithoutListMarker() throws {
         let text = "[ ] first\n[ ] "
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -112,7 +112,7 @@ struct MarkdownContinuationCommandTests {
     @Test func continuesBlockQuote() throws {
         let text = "> quoted line"
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -122,7 +122,7 @@ struct MarkdownContinuationCommandTests {
     @Test func exitsEmptyListItem() throws {
         let text = "- first\n- "
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -135,7 +135,7 @@ struct MarkdownContinuationCommandTests {
     @Test func exitsEmptyQuoteLine() throws {
         let text = "> quote\n> "
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         ))
 
@@ -146,7 +146,7 @@ struct MarkdownContinuationCommandTests {
         let text = "- \nafter"
         // Caret inside the empty list line, before its newline.
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: 2, length: 0)
         ))
 
@@ -161,7 +161,7 @@ struct MarkdownContinuationCommandTests {
         // location - 1 anchor resolves to the "- item" line, so Enter there
         // continues the list.
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: 7, length: 0)
         ))
 
@@ -171,7 +171,7 @@ struct MarkdownContinuationCommandTests {
     @Test func plainTextProducesNoEdit() {
         let text = "just a paragraph"
         let edit = MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: (text as NSString).length, length: 0)
         )
 
@@ -181,7 +181,7 @@ struct MarkdownContinuationCommandTests {
     @Test func nonEmptySelectionProducesNoEdit() {
         let text = "- first"
         let edit = MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: 0, length: 3)
         )
 
@@ -192,7 +192,7 @@ struct MarkdownContinuationCommandTests {
         // "- " alone must exit, never continue with another "- ".
         let text = "- "
         let edit = try #require(MarkdownContinuationCommand.edit(
-            in: text,
+            in: text as NSString,
             selectedRange: NSRange(location: 2, length: 0)
         ))
 
@@ -201,7 +201,7 @@ struct MarkdownContinuationCommandTests {
 
     @Test func outOfBoundsSelectionProducesNoEdit() {
         let edit = MarkdownContinuationCommand.edit(
-            in: "- item",
+            in: "- item" as NSString,
             selectedRange: NSRange(location: 100, length: 0)
         )
 

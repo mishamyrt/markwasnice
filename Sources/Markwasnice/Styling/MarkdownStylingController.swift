@@ -15,6 +15,24 @@ final class MarkdownStylingController {
     /// document per delivery on the main thread.
     private var textVersion = 0
     private var proofreadScheduledTextVersion = 0
+    private var resolvedStyleSpansVersion = 0
+
+    /// The resolved spans when they still describe the text the editor holds,
+    /// and nil once an edit has landed ahead of the next parse. Callers that
+    /// derive protected ranges from them — typography — must not work from a
+    /// stale set: a code span sitting at a moved offset would let the pass
+    /// rewrite inside code it is supposed to leave alone.
+    var freshStyleSpans: [ResolvedMarkdownStyleSpan]? {
+        guard resolvedStyleSpansVersion == textVersion,
+              resolvedSpansSourceLength == editorTextLength
+        else {
+            return nil
+        }
+
+        return resolvedStyleSpans
+    }
+
+    private var resolvedSpansSourceLength = 0
 
     init(editorView: MarkdownEditorView) {
         self.editorView = editorView
@@ -78,6 +96,8 @@ final class MarkdownStylingController {
         }
 
         resolvedStyleSpans = result.spans
+        resolvedStyleSpansVersion = result.textVersion
+        resolvedSpansSourceLength = result.sourceLength
         editorView.applyParsedStyles(
             resolvedStyleSpans,
             dirtyRanges: result.dirtyRanges

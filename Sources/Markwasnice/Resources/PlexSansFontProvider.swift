@@ -1,62 +1,38 @@
 import AppKit
-import CoreText
 
+/// The preview's proportional family, bundled as an upright and an italic
+/// variable font whose faces are registered under the "IBM Plex Sans Var"
+/// family name.
 @MainActor
 enum PlexSansFontProvider {
-    private static var didRegisterFonts = false
+    private static let family = BundledFontFamily(
+        resourceNames: ["IBM-Plex-Sans", "IBM-Plex-Sans-Italic"],
+        regularFontName: "IBM Plex Sans Var",
+        italicFontName: "IBM Plex Sans Var Italic",
+        systemFallback: .proportional
+    )
 
     static func registerFonts() {
-        guard !didRegisterFonts else {
-            return
-        }
-
-        didRegisterFonts = true
-        for name in ["IBM-Plex-Sans", "IBM-Plex-Sans-Italic"] {
-            guard let url = Bundle.module.url(
-                forResource: name, withExtension: "ttf", subdirectory: "Fonts"
-            )
-            else {
-                continue
-            }
-
-            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        }
+        family.registerFonts()
     }
 
     static func regular(size: CGFloat) -> NSFont {
-        NSFont(name: "IBM Plex Sans Var", size: size) ?? .systemFont(
-            ofSize: size,
-            weight: .regular
-        )
+        family.regular(size: size)
     }
 
     static func italic(size: CGFloat) -> NSFont {
-        NSFont(name: "IBM Plex Sans Var Italic", size: size) ?? font(
-            size: size,
-            traits: .italicFontMask
-        )
+        family.italic(size: size)
     }
 
     static func bold(size: CGFloat) -> NSFont {
-        font(size: size, traits: .boldFontMask)
+        family.bold(size: size)
     }
 
     static func boldItalic(size: CGFloat) -> NSFont {
-        font(size: size, traits: [.boldFontMask, .italicFontMask])
+        family.boldItalic(size: size)
     }
 
     static func font(size: CGFloat, traits: NSFontTraitMask) -> NSFont {
-        let baseFont = traits.contains(.italicFontMask)
-            ? italic(size: size)
-            : regular(size: size)
-        guard traits.contains(.boldFontMask) else {
-            return baseFont
-        }
-
-        let convertedFont = NSFontManager.shared.convert(
-            baseFont,
-            toHaveTrait: .boldFontMask
-        )
-        return NSFontManager.shared.convert(convertedFont, toSize: size)
+        family.font(size: size, traits: traits)
     }
 }

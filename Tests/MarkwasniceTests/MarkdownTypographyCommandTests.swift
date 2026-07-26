@@ -148,4 +148,61 @@ struct MarkdownTypographyCommandTests {
             locale: .russian
         ).isEmpty)
     }
+
+    /// Handing the command the styling pipeline's spans spares it a second
+    /// full parse on the main thread, so the two paths have to agree
+    /// exactly — including which code and structure ranges stay protected.
+    @Test func resolvedSpansMatchTheParsedProtectedRanges() {
+        let text = """
+        ---
+        title: "Он сказал - привет"
+        ---
+
+        Обычный текст - с тире и `кодом - внутри`.
+
+        ```
+        код - остается как есть...
+        ```
+
+        ***
+
+        - пункт - списка
+        """
+        let selection = NSRange(location: 0, length: 0)
+        let spans = MarkdownParseService.parse(
+            text: text,
+            version: 0,
+            previous: nil
+        )?.spans
+
+        #expect(spans != nil)
+        #expect(MarkdownTypographyCommand.replacements(
+            in: text,
+            selectedRange: selection,
+            locale: .russian,
+            spans: spans
+        ) == MarkdownTypographyCommand.replacements(
+            in: text,
+            selectedRange: selection,
+            locale: .russian
+        ))
+    }
+
+    /// Stale spans must never be substituted for a parse: the caller signals
+    /// that with nil, and the command then protects code by parsing itself.
+    @Test func missingSpansStillProtectCode() {
+        let text = "Текст - снаружи и `код - внутри`"
+        let replacements = MarkdownTypographyCommand.replacements(
+            in: text,
+            selectedRange: NSRange(location: 0, length: 0),
+            locale: .russian,
+            spans: nil
+        )
+        let codeRange = (text as NSString).range(of: "`код - внутри`")
+
+        #expect(!replacements.isEmpty)
+        #expect(!replacements.contains {
+            NSIntersectionRange($0.range, codeRange).length > 0
+        })
+    }
 }

@@ -9,7 +9,7 @@ struct MarkdownIndentCommandTests {
     @Test
     func indentsLineRegardlessOfCaretPosition() {
         let edit = MarkdownIndentCommand.indent.edit(
-            in: "hello",
+            in: "hello" as NSString,
             selectedRange: NSRange(location: 3, length: 0),
             indentUnit: unit,
             tabWidth: 4
@@ -25,7 +25,7 @@ struct MarkdownIndentCommandTests {
     @Test
     func outdentsLineRegardlessOfCaretPosition() {
         let edit = MarkdownIndentCommand.outdent.edit(
-            in: "    hello",
+            in: "    hello" as NSString,
             selectedRange: NSRange(location: 7, length: 0),
             indentUnit: unit,
             tabWidth: 4
@@ -41,7 +41,7 @@ struct MarkdownIndentCommandTests {
     @Test
     func outdentRemovesOnlyAvailableSpacesAndClampsCaretToLineStart() {
         let edit = MarkdownIndentCommand.outdent.edit(
-            in: "  hello",
+            in: "  hello" as NSString,
             selectedRange: NSRange(location: 1, length: 0),
             indentUnit: unit,
             tabWidth: 4
@@ -57,7 +57,7 @@ struct MarkdownIndentCommandTests {
     @Test
     func outdentRemovesLeadingTab() {
         let edit = MarkdownIndentCommand.outdent.edit(
-            in: "\thello",
+            in: "\thello" as NSString,
             selectedRange: NSRange(location: 4, length: 0),
             indentUnit: "\t",
             tabWidth: 4
@@ -73,7 +73,7 @@ struct MarkdownIndentCommandTests {
     @Test
     func outdentWithoutIndentDoesNothing() {
         let edit = MarkdownIndentCommand.outdent.edit(
-            in: "hello",
+            in: "hello" as NSString,
             selectedRange: NSRange(location: 2, length: 0),
             indentUnit: unit,
             tabWidth: 4
@@ -85,7 +85,7 @@ struct MarkdownIndentCommandTests {
     @Test
     func indentsEverySelectedLineAndKeepsSelectionCoveringThem() {
         let edit = MarkdownIndentCommand.indent.edit(
-            in: "a\nb",
+            in: "a\nb" as NSString,
             selectedRange: NSRange(location: 0, length: 3),
             indentUnit: unit,
             tabWidth: 4
@@ -101,7 +101,7 @@ struct MarkdownIndentCommandTests {
     @Test
     func indentSkipsBlankLinesInMultilineSelection() {
         let edit = MarkdownIndentCommand.indent.edit(
-            in: "a\n\nb",
+            in: "a\n\nb" as NSString,
             selectedRange: NSRange(location: 0, length: 4),
             indentUnit: unit,
             tabWidth: 4
@@ -117,7 +117,7 @@ struct MarkdownIndentCommandTests {
     @Test
     func indentsEmptyTrailingLine() {
         let edit = MarkdownIndentCommand.indent.edit(
-            in: "a\n",
+            in: "a\n" as NSString,
             selectedRange: NSRange(location: 2, length: 0),
             indentUnit: unit,
             tabWidth: 4

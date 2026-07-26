@@ -4,7 +4,9 @@ import Foundation
 /// replaces the selection or is inserted at the caret. Pads the table with
 /// newlines so it is separated from the surrounding text by a blank line,
 /// and places the caret inside the first header cell. Pure computation over
-/// (text, selection), mirroring MarkdownContinuationCommand.
+/// (text, selection), mirroring MarkdownContinuationCommand — the text
+/// arrives as an NSString so the editor can hand over the text storage's
+/// backing string instead of bridging the whole document.
 enum MarkdownTableCommand {
     static let sizeRange = 1 ... 99
     static let defaultRows = 3
@@ -13,12 +15,11 @@ enum MarkdownTableCommand {
     private static let newline = unichar(0x0A)
 
     static func edit(
-        in text: String,
+        in nsString: NSString,
         selectedRange: NSRange,
         rows: Int,
         columns: Int
     ) -> MarkdownMarkupEdit? {
-        let nsString = text as NSString
         guard selectedRange.location != NSNotFound,
               selectedRange.location <= nsString.length,
               NSMaxRange(selectedRange) <= nsString.length,

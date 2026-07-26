@@ -7,7 +7,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func wrapsExplicitSelectionAndKeepsTextSelected() {
         let edit = MarkdownMarkupCommand.bold.edit(
-            in: "hello", selectedRange: NSRange(location: 0, length: 5)
+            in: "hello" as NSString, selectedRange: NSRange(location: 0, length: 5)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -20,7 +20,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func unwrapsExplicitSelectionInsideDelimiters() {
         let edit = MarkdownMarkupCommand.bold.edit(
-            in: "**hello**", selectedRange: NSRange(location: 2, length: 5)
+            in: "**hello**" as NSString, selectedRange: NSRange(location: 2, length: 5)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -33,7 +33,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func wrapsExplicitSelectionInsideSurroundingSpaces() {
         let edit = MarkdownMarkupCommand.bold.edit(
-            in: " hello ", selectedRange: NSRange(location: 0, length: 7)
+            in: " hello " as NSString, selectedRange: NSRange(location: 0, length: 7)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -46,7 +46,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func unwrapsExplicitSelectionInsideSurroundingSpaces() {
         let edit = MarkdownMarkupCommand.bold.edit(
-            in: " **hello** ", selectedRange: NSRange(location: 0, length: 11)
+            in: " **hello** " as NSString, selectedRange: NSRange(location: 0, length: 11)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -59,7 +59,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func wrapsEachSelectedLineSeparately() {
         let edit = MarkdownMarkupCommand.bold.edit(
-            in: " one\ntwo ", selectedRange: NSRange(location: 0, length: 9)
+            in: " one\ntwo " as NSString, selectedRange: NSRange(location: 0, length: 9)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -72,7 +72,10 @@ struct MarkdownMarkupCommandTests {
     @Test
     func unwrapsEachSelectedLineSeparately() {
         let edit = MarkdownMarkupCommand.bold.edit(
-            in: " **one**\n**two** ", selectedRange: NSRange(location: 0, length: 17)
+            in: " **one**\n**two** " as NSString, selectedRange: NSRange(
+                location: 0,
+                length: 17
+            )
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -85,7 +88,10 @@ struct MarkdownMarkupCommandTests {
     @Test
     func multilineWrapLeavesBlankLinesUnchanged() {
         let edit = MarkdownMarkupCommand.highlight.edit(
-            in: "one\n   \ntwo", selectedRange: NSRange(location: 0, length: 11)
+            in: "one\n   \ntwo" as NSString, selectedRange: NSRange(
+                location: 0,
+                length: 11
+            )
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -98,7 +104,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func wrapsPreviousLetterWordWithoutPunctuation() {
         let edit = MarkdownMarkupCommand.italic.edit(
-            in: "hello,", selectedRange: NSRange(location: 6, length: 0)
+            in: "hello," as NSString, selectedRange: NSRange(location: 6, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -111,7 +117,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func wrapsPreviousLetterWordAtCursor() {
         let edit = MarkdownMarkupCommand.italic.edit(
-            in: "hello", selectedRange: NSRange(location: 5, length: 0)
+            in: "hello" as NSString, selectedRange: NSRange(location: 5, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -124,7 +130,10 @@ struct MarkdownMarkupCommandTests {
     @Test
     func wrapsWholeWordWithCursorInside() {
         let edit = MarkdownMarkupCommand.italic.edit(
-            in: "say hello now", selectedRange: NSRange(location: 6, length: 0)
+            in: "say hello now" as NSString, selectedRange: NSRange(
+                location: 6,
+                length: 0
+            )
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -137,7 +146,10 @@ struct MarkdownMarkupCommandTests {
     @Test
     func unwrapsWholeWordWithCursorInside() {
         let edit = MarkdownMarkupCommand.italic.edit(
-            in: "say *hello* now", selectedRange: NSRange(location: 7, length: 0)
+            in: "say *hello* now" as NSString, selectedRange: NSRange(
+                location: 7,
+                length: 0
+            )
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -150,7 +162,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func insertsEmptyPairAfterWhitespace() {
         let edit = MarkdownMarkupCommand.highlight.edit(
-            in: "hello ", selectedRange: NSRange(location: 6, length: 0)
+            in: "hello " as NSString, selectedRange: NSRange(location: 6, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -163,7 +175,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func removesEmptyPairAtCursor() {
         let edit = MarkdownMarkupCommand.highlight.edit(
-            in: "====",
+            in: "====" as NSString,
             selectedRange: NSRange(location: 2, length: 0)
         )
 
@@ -177,7 +189,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func linkWithSelectionMovesCursorToDestination() {
         let edit = MarkdownMarkupCommand.link.edit(
-            in: "hello", selectedRange: NSRange(location: 0, length: 5)
+            in: "hello" as NSString, selectedRange: NSRange(location: 0, length: 5)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -190,7 +202,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func linkWithSelectionKeepsSurroundingSpacesOutsideLabel() {
         let edit = MarkdownMarkupCommand.link.edit(
-            in: " hello ", selectedRange: NSRange(location: 0, length: 7)
+            in: " hello " as NSString, selectedRange: NSRange(location: 0, length: 7)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -203,7 +215,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func imageLinkWithSelectionKeepsSurroundingSpacesOutsideAltText() {
         let edit = MarkdownMarkupCommand.imageLink.edit(
-            in: " alt ", selectedRange: NSRange(location: 0, length: 5)
+            in: " alt " as NSString, selectedRange: NSRange(location: 0, length: 5)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -216,7 +228,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func multilineLinkWrapsEachLineSeparately() {
         let edit = MarkdownMarkupCommand.link.edit(
-            in: " one\ntwo ", selectedRange: NSRange(location: 0, length: 9)
+            in: " one\ntwo " as NSString, selectedRange: NSRange(location: 0, length: 9)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -229,7 +241,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func emptyLinkMovesCursorToText() {
         let edit = MarkdownMarkupCommand.link.edit(
-            in: "", selectedRange: NSRange(location: 0, length: 0)
+            in: "" as NSString, selectedRange: NSRange(location: 0, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -242,7 +254,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func emptyImageLinkMovesCursorToAltText() {
         let edit = MarkdownMarkupCommand.imageLink.edit(
-            in: "", selectedRange: NSRange(location: 0, length: 0)
+            in: "" as NSString, selectedRange: NSRange(location: 0, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -255,7 +267,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func removesEmptyLinkAtTextCursor() {
         let edit = MarkdownMarkupCommand.link.edit(
-            in: "[]()", selectedRange: NSRange(location: 1, length: 0)
+            in: "[]()" as NSString, selectedRange: NSRange(location: 1, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -268,7 +280,10 @@ struct MarkdownMarkupCommandTests {
     @Test
     func unwrapsLinkWhenCursorIsInDestination() {
         let edit = MarkdownMarkupCommand.link.edit(
-            in: "[hello](url)", selectedRange: NSRange(location: 11, length: 0)
+            in: "[hello](url)" as NSString, selectedRange: NSRange(
+                location: 11,
+                length: 0
+            )
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -283,7 +298,7 @@ struct MarkdownMarkupCommandTests {
         // The "[" of the checkbox above and the "](b)" of the link below must
         // not combine into one link around the caret in "text".
         let edit = MarkdownMarkupCommand.link.edit(
-            in: "- [ ] todo\ntext\n[a](b)",
+            in: "- [ ] todo\ntext\n[a](b)" as NSString,
             selectedRange: NSRange(location: 13, length: 0)
         )
 
@@ -297,7 +312,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func unwrapsCaretLinkOnLaterLine() {
         let edit = MarkdownMarkupCommand.link.edit(
-            in: "- [ ] todo\n[a](b)",
+            in: "- [ ] todo\n[a](b)" as NSString,
             selectedRange: NSRange(location: 15, length: 0)
         )
 
@@ -311,7 +326,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func insertsEmptyCodeBlockWithCursorInside() {
         let edit = MarkdownMarkupCommand.codeBlock.edit(
-            in: "", selectedRange: NSRange(location: 0, length: 0)
+            in: "" as NSString, selectedRange: NSRange(location: 0, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -324,7 +339,7 @@ struct MarkdownMarkupCommandTests {
     @Test
     func codeBlockWrapsMultilineSelectionAsSingleBlock() {
         let edit = MarkdownMarkupCommand.codeBlock.edit(
-            in: "one\ntwo", selectedRange: NSRange(location: 0, length: 7)
+            in: "one\ntwo" as NSString, selectedRange: NSRange(location: 0, length: 7)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -340,7 +355,7 @@ struct MarkdownHeadingCommandTests {
     @Test
     func addsHeadingMarkerAtCaret() {
         let edit = MarkdownMarkupCommand.heading2.edit(
-            in: "title", selectedRange: NSRange(location: 2, length: 0)
+            in: "title" as NSString, selectedRange: NSRange(location: 2, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -353,7 +368,7 @@ struct MarkdownHeadingCommandTests {
     @Test
     func replacesExistingHeadingLevel() {
         let edit = MarkdownMarkupCommand.heading3.edit(
-            in: "# title", selectedRange: NSRange(location: 4, length: 0)
+            in: "# title" as NSString, selectedRange: NSRange(location: 4, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -366,7 +381,7 @@ struct MarkdownHeadingCommandTests {
     @Test
     func togglesOffSameHeadingLevel() {
         let edit = MarkdownMarkupCommand.heading2.edit(
-            in: "## title", selectedRange: NSRange(location: 4, length: 0)
+            in: "## title" as NSString, selectedRange: NSRange(location: 4, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -379,7 +394,7 @@ struct MarkdownHeadingCommandTests {
     @Test
     func caretInsideMarkerLandsAfterNewPrefix() {
         let edit = MarkdownMarkupCommand.heading2.edit(
-            in: "## title", selectedRange: NSRange(location: 1, length: 0)
+            in: "## title" as NSString, selectedRange: NSRange(location: 1, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -392,7 +407,7 @@ struct MarkdownHeadingCommandTests {
     @Test
     func appliesHeadingToEverySelectedLine() {
         let edit = MarkdownMarkupCommand.heading1.edit(
-            in: "a\nb\n", selectedRange: NSRange(location: 0, length: 4)
+            in: "a\nb\n" as NSString, selectedRange: NSRange(location: 0, length: 4)
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -405,7 +420,10 @@ struct MarkdownHeadingCommandTests {
     @Test
     func headingAffectsWholeLineFromAnyCaretColumn() {
         let edit = MarkdownMarkupCommand.heading1.edit(
-            in: "first\nsecond", selectedRange: NSRange(location: 9, length: 0)
+            in: "first\nsecond" as NSString, selectedRange: NSRange(
+                location: 9,
+                length: 0
+            )
         )
 
         #expect(edit == MarkdownMarkupEdit(
@@ -418,7 +436,7 @@ struct MarkdownHeadingCommandTests {
     @Test
     func headingOnBlankCaretLineInsertsMarker() {
         let edit = MarkdownMarkupCommand.heading4.edit(
-            in: "", selectedRange: NSRange(location: 0, length: 0)
+            in: "" as NSString, selectedRange: NSRange(location: 0, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(

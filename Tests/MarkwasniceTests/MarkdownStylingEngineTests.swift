@@ -296,4 +296,112 @@ struct MarkdownStylingEngineTests {
 
         #expect(filtered == [spans[0]])
     }
+
+    /// The scan stops at the range end, so a span starting exactly there is
+    /// already out — it shares no characters with the range.
+    @Test
+    func spansForRangeExcludesSpanStartingAtRangeEnd() {
+        let spans = [
+            ResolvedMarkdownStyleSpan(
+                range: NSRange(location: 0, length: 5),
+                kind: .heading
+            ),
+            ResolvedMarkdownStyleSpan(
+                range: NSRange(location: 5, length: 5),
+                kind: .strong
+            ),
+        ]
+
+        let filtered = MarkdownStylingEngine.spansForRange(
+            NSRange(location: 0, length: 5),
+            from: spans
+        )
+
+        #expect(filtered == [spans[0]])
+    }
+
+    /// Container spans start well before their contents, so the early exit
+    /// must key off where a span starts, never off where the previous one
+    /// ended — an enclosing code block would otherwise be dropped.
+    @Test
+    func spansForRangeKeepsEnclosingContainerSpan() {
+        let spans = [
+            ResolvedMarkdownStyleSpan(
+                range: NSRange(location: 0, length: 500),
+                kind: .codeBlock
+            ),
+            ResolvedMarkdownStyleSpan(
+                range: NSRange(location: 2, length: 3),
+                kind: .strong
+            ),
+            ResolvedMarkdownStyleSpan(
+                range: NSRange(location: 600, length: 4),
+                kind: .emphasis
+            ),
+        ]
+
+        let filtered = MarkdownStylingEngine.spansForRange(
+            NSRange(location: 400, length: 10),
+            from: spans
+        )
+
+        #expect(filtered == [spans[0]])
+    }
+
+    @Test
+    func spansForRangeOnEmptySpansReturnsNothing() {
+        #expect(MarkdownStylingEngine.spansForRange(
+            NSRange(location: 0, length: 10),
+            from: []
+        ).isEmpty)
+    }
+
+    // MARK: - documentOrdered
+
+    @Test
+    func documentOrderedSortsSpansByStart() {
+        let checkbox = ResolvedMarkdownStyleSpan(
+            range: NSRange(location: 2, length: 3),
+            kind: .taskCheckbox
+        )
+        let list = ResolvedMarkdownStyleSpan(
+            range: NSRange(location: 0, length: 20),
+            kind: .unorderedList
+        )
+        let emphasis = ResolvedMarkdownStyleSpan(
+            range: NSRange(location: 10, length: 4),
+            kind: .emphasis
+        )
+
+        let ordered = MarkdownStylingEngine.documentOrdered([
+            list, emphasis, checkbox,
+        ])
+
+        #expect(ordered == [list, checkbox, emphasis])
+    }
+
+    /// Spans starting together keep their incoming order: attribute
+    /// application lets the later one win, so reordering them would change
+    /// which style is visible.
+    @Test
+    func documentOrderedKeepsOrderOfSpansStartingTogether() {
+        let first = ResolvedMarkdownStyleSpan(
+            range: NSRange(location: 4, length: 6),
+            kind: .strong
+        )
+        let second = ResolvedMarkdownStyleSpan(
+            range: NSRange(location: 4, length: 2),
+            kind: .inlineCode
+        )
+        let earlier = ResolvedMarkdownStyleSpan(
+            range: NSRange(location: 0, length: 2),
+            kind: .heading
+        )
+
+        let ordered = MarkdownStylingEngine.documentOrdered([
+            first, second, earlier,
+        ])
+
+        #expect(ordered == [earlier, first, second])
+    }
 }

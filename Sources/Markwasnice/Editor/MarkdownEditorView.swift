@@ -15,7 +15,11 @@ protocol MarkdownEditorViewDelegate: AnyObject {
     )
 }
 
-private enum MarkdownEditorDiagnostics {
+/// Environment-driven kill switches for the styling pipeline, used to bisect
+/// a misbehaving document down to the attribute that causes it. Shared with
+/// MarkdownStyleApplier, which owns the attribute application the last four
+/// flags disable.
+enum MarkdownEditorDiagnostics {
     private static let environment = ProcessInfo.processInfo.environment
 
     static let isEnabled = flag("MARKWASNICE_EDITOR_DIAGNOSTICS")
@@ -93,7 +97,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var settings: EditorSettings
     private var themeColors = EditorThemeColors.default
     private var windowWidthFontScale: CGFloat = 1
-    private var paragraphGutter: CGFloat = 0
     private var textTopPadding: CGFloat = 0
     private var textBottomPadding: CGFloat = 160
     private var protectedTopPadding: CGFloat = 0
@@ -130,6 +133,23 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var deferredStyleTask: Task<Void, Never>?
     private var styleGeneration = 0
     private var pendingFullStyleRanges: [NSRange] = []
+    /// Owns attribute application and the font/layout metrics behind it. The
+    /// metrics are read back through it (base attributes, point size, letter
+    /// spacing, character width, paragraph gutter) rather than recomputed
+    /// here, so the applier cannot disagree with the view about them.
+    private lazy var styleApplier = MarkdownStyleApplier(
+        textStorage: editorTextStorage,
+        // Read back through the view on every use rather than handed over
+        // once: the variant follows the effective appearance, and only the
+        // view can resolve that. The fallback is unreachable while the view
+        // that owns the applier is alive, which is the applier's whole life.
+        colors: { [weak self] in
+            self?.colors
+                ?? EditorThemeColors.default.variant(for: .currentDrawing())
+        },
+        settings: settings,
+        windowWidthFontScale: windowWidthFontScale
+    )
     private lazy var focusModeController = makeFocusModeController()
     private let fileDropController = EditorFileDropController()
     private lazy var previewPresenter = makePreviewPresenter()
@@ -148,6 +168,15 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     var string: String {
         get { textView.string }
         set { setString(newValue, clearsUndo: false) }
+    }
+
+    /// The text storage's backing string. Reading `textView.string` bridges
+    /// the whole document into a fresh Swift String on every access (Swift
+    /// copies a mutable NSString to keep value semantics), while this is a
+    /// proxy over the same storage — so the UTF-16 range math the styling and
+    /// command paths do costs nothing to set up. Only ever read from here.
+    private var sourceCharacters: NSString {
+        textView.textStorage?.mutableString ?? ""
     }
 
     init(settings: EditorSettings, frame frameRect: NSRect = .zero) {
@@ -249,7 +278,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         dirtyRanges: [NSRange]?
     ) {
         MarkdownEditorDiagnostics.log(
-            "applyParsedStyles spans=\(spans.count) textLength=\((textView.string as NSString).length) "
+            "applyParsedStyles spans=\(spans.count) textLength=\(textView.textStorage?.length ?? 0) "
                 + "dirty=\(dirtyRanges.map { "\($0.count)" } ?? "nil") "
                 + "recentLargeEdit=\(hasRecentLargeEdit)"
         )
@@ -260,7 +289,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        currentStyleSpans = spans
+        setStyleSpans(spans)
         updateCodeBackgroundRanges()
         guard !textView.hasMarkedText() else {
             return
@@ -277,14 +306,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        applyDirtyStyles(dirtyRanges, spans: spans)
+        applyDirtyStyles(dirtyRanges, spans: currentStyleSpans)
+    }
+
+    /// The single place fresh spans are stored: MarkdownStylingEngine's
+    /// range slicing relies on document order, which the parse pipeline does
+    /// not guarantee (see documentOrdered).
+    private func setStyleSpans(_ spans: [ResolvedMarkdownStyleSpan]) {
+        currentStyleSpans = MarkdownStylingEngine.documentOrdered(spans)
     }
 
     private func applyDirtyStyles(
         _ dirtyRanges: [NSRange],
         spans: [ResolvedMarkdownStyleSpan]
     ) {
-        let string = (textView.textStorage?.string ?? "") as NSString
+        let string = sourceCharacters
         let ranges = MarkdownStylingEngine.mergedLineRanges(dirtyRanges, in: string)
         let totalLength = ranges.reduce(0) { $0 + $1.length }
 
@@ -312,7 +348,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     func applySettings(_ settings: EditorSettings, spans: [ResolvedMarkdownStyleSpan]) {
         self.settings = settings
-        currentStyleSpans = spans
+        // Before the inset pass below: it measures the gutter with the new
+        // font metrics.
+        syncStyleApplierMetrics()
+        setStyleSpans(spans)
         _ = updateTextContainerInset()
         restyleAllText()
         previewPresenter.refreshIfActive()
@@ -325,10 +364,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let newScale = Self.windowWidthFontScale(for: windowWidth)
         let didChangeScale = newScale != windowWidthFontScale
         windowWidthFontScale = newScale
+        syncStyleApplierMetrics()
 
         let didChangeGutter = updateTextContainerInset()
         if didChangeScale || didChangeGutter {
-            currentStyleSpans = spans
+            setStyleSpans(spans)
             restyleAllText()
         }
         if didChangeScale {
@@ -430,7 +470,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     private func renderPreviewContent(into preview: MarkdownPreviewView) {
         let renderer = MarkdownPreviewRenderer(theme: .init(
-            baseFontSize: basePointSize,
+            baseFontSize: styleApplier.basePointSize,
             colors: colors
         ))
         preview.setContent(renderer.render(textView.string), colors: colors)
@@ -518,7 +558,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     /// out-of-bounds or empty ranges are skipped. Shared by the search-match
     /// delta above and the focus controller's restyle callback.
     private func restyleLineNormalizedRange(_ range: NSRange) {
-        let string = (textView.textStorage?.string ?? "") as NSString
+        let string = sourceCharacters
         guard let range = boundedRange(
             MarkdownStylingEngine.lineNormalized(range, in: string)
         ), range.length > 0 else {
@@ -640,7 +680,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     func pasteAsLink() {
         let selectedRange = textView.selectedRange()
         guard selectedRange.length > 0,
-              let selectedText = (textView.string as NSString)
+              let selectedText = sourceCharacters
               .substring(with: selectedRange)
               .nilIfEmpty,
               let urlString = fileDropController.pasteboardURLString()
@@ -654,7 +694,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     func applyMarkup(_ command: MarkdownMarkupCommand) {
         guard let edit = command.edit(
-            in: textView.string,
+            in: sourceCharacters,
             selectedRange: textView.selectedRange()
         ) else {
             return
@@ -669,7 +709,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     func insertTable(rows: Int, columns: Int) {
         guard let edit = MarkdownTableCommand.edit(
-            in: textView.string,
+            in: sourceCharacters,
             selectedRange: textView.selectedRange(),
             rows: rows,
             columns: columns
@@ -689,12 +729,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         _ = wrapSelection(opening: opening, closing: closing)
     }
 
-    func fixTypography() {
+    func fixTypography(spans: [ResolvedMarkdownStyleSpan]?) {
         let selectedRange = textView.selectedRange()
         let replacements = MarkdownTypographyCommand.replacements(
             in: textView.string,
             selectedRange: selectedRange,
-            locale: settings.typographyLocale
+            locale: settings.typographyLocale,
+            spans: spans
         )
         guard performBatchReplacements(
             replacements.map { ($0.range, $0.replacement) }
@@ -740,7 +781,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         guard let edit = command.edit(
-            in: textView.string,
+            in: sourceCharacters,
             selectedRange: textView.selectedRange(),
             indentUnit: indentUnit,
             tabWidth: settings.tabWidth
@@ -757,7 +798,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool {
         guard let edit = MarkdownContinuationCommand.edit(
-            in: textView.string,
+            in: textView.textStorage?.mutableString ?? "",
             selectedRange: textView.selectedRange()
         ) else {
             return false
@@ -884,7 +925,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // running before the next parse result (search updates, appearance or
         // gutter changes, …) applies attributes at the right offsets. Spans
         // overlapping the edit are dropped; the local styling below re-derives
-        // the edited line.
+        // the edited line. The translation moves every start monotonically, so
+        // the document order setStyleSpans established survives it — no
+        // re-sorting per keystroke.
         currentStyleSpans = MarkdownStyleRangeDiffer.translatedSpansAfterSourceChange(
             currentStyleSpans,
             editRange: editedRange,
@@ -906,9 +949,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             sourceLength: textStorage.length
         )
 
+        // One acquisition of the backing string for the whole pass: every
+        // helper below used to reach for textView.string itself, and each of
+        // those reads copies the document.
+        let characters = textStorage.mutableString
         let dirtyRange = MarkdownStylingEngine.editDirtyRange(
             editedRange: editedRange,
-            in: textStorage.string as NSString
+            in: characters
         )
         guard let range = boundedRange(dirtyRange), range.length > 0 else {
             return
@@ -921,15 +968,19 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             pendingFullStyleRanges = []
             hasRecentLargeEdit = true
             withEditedTextNormalization {
-                textStorage.setAttributes(baseAttributes(), range: range)
+                textStorage.setAttributes(styleApplier.baseAttributes(), range: range)
             }
             scheduleVisibleLocalStyling()
             return
         }
 
         withEditedTextNormalization {
-            let localSpans = localStyleSpans(in: range)
-            reconcileInlineCodeDrawRanges(in: range, with: localSpans)
+            let localSpans = localStyleSpans(in: range, string: characters)
+            reconcileInlineCodeDrawRanges(
+                in: range,
+                with: localSpans,
+                string: characters
+            )
             applyStyles(in: range, spans: localSpans)
         }
     }
@@ -944,7 +995,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
-        textView.typingAttributes = baseAttributes()
+        textView.typingAttributes = styleApplier.baseAttributes()
         // A caret move from the keyboard (arrow keys, typing) ends a
         // scroll-induced focus suppression the same way a mouse click does;
         // updateForSelection alone would leave the suppression in place.
@@ -1019,8 +1070,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.textStorage?.delegate = self
         _ = updateTextContainerInset()
         applyEditorColors()
-        textView.font = baseFont
-        textView.typingAttributes = baseAttributes()
+        textView.font = styleApplier.baseFont
+        textView.typingAttributes = styleApplier.baseAttributes()
     }
 
     private func configureScrollView() {
@@ -1094,28 +1145,29 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return 0
         }
 
-        return max(0, (clipView.bounds.height - lineHeight) / 2)
+        return max(0, (clipView.bounds.height - styleApplier.lineHeight) / 2)
     }
 
     private func updateTextContainerInset() -> Bool {
         let availableWidth = scrollView.contentView.bounds.width > 0
             ? scrollView.contentView.bounds.width
             : bounds.width
-        let minimumHorizontalInset = characterWidth()
+        let characterWidth = styleApplier.characterWidth()
+        let minimumHorizontalInset = characterWidth
             * Self.minimumHorizontalPaddingCharacters(for: availableWidth)
-        let targetWidth = characterWidth() * CGFloat(settings.maxTextColumns)
+        let targetWidth = characterWidth * CGFloat(settings.maxTextColumns)
         let horizontalInset = max(
             minimumHorizontalInset,
             floor((availableWidth - targetWidth) / 2)
         )
         // Sized for the widest heading marker, "###### " — 7 glyphs each
         // advanced by the letter-spacing kern, matching how markerWidth is
-        // measured in applyHeadingStyle. Without the kern term the H6 marker
-        // overflows the gutter and its text is pushed right.
-        let markerGutter = (characterWidth() + baseLetterSpacing) * 7
+        // measured in MarkdownStyleApplier.applyHeadingStyle. Without the kern
+        // term the H6 marker overflows the gutter and its text is pushed right.
+        let markerGutter = (characterWidth + styleApplier.baseLetterSpacing) * 7
         let containerInset = max(6, horizontalInset - markerGutter)
         let newParagraphGutter = max(0, horizontalInset - containerInset)
-        let didChangeParagraphGutter = newParagraphGutter != paragraphGutter
+        let didChangeParagraphGutter = newParagraphGutter != styleApplier.paragraphGutter
         // The average of the two paddings on both sides; MarkdownTextView
         // shifts the container origin to make the padding asymmetric while
         // remaining part of the (clickable) text view.
@@ -1126,7 +1178,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             height: (topPadding + bottomPadding) / 2
         )
 
-        paragraphGutter = newParagraphGutter
+        styleApplier.paragraphGutter = newParagraphGutter
         textView.topContentPadding = topPadding
         textView.bottomContentPadding = bottomPadding
         if textView.textContainerInset != insetSize {
@@ -1236,7 +1288,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.setCodeBackgroundRanges(
             inline: codeInlineDrawRanges,
             block: codeBlockDrawRanges,
-            gutter: paragraphGutter,
+            gutter: styleApplier.paragraphGutter,
             fillColor: colors.codeBackground
         )
     }
@@ -1277,13 +1329,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     /// lines is correct for them.
     private func reconcileInlineCodeDrawRanges(
         in targetRange: NSRange,
-        with localSpans: [ResolvedMarkdownStyleSpan]
+        with localSpans: [ResolvedMarkdownStyleSpan],
+        string: NSString
     ) {
         guard let targetRange = boundedRange(targetRange) else {
             return
         }
 
-        let string = textView.string as NSString
         let scannedLines = string.lineRange(for: targetRange)
         let derivedRanges = localSpans
             .filter { $0.kind == .inlineCode }
@@ -1307,8 +1359,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
               textStorage.length > 0,
               !textView.hasMarkedText()
         else {
-            textView.font = baseFont
-            textView.typingAttributes = baseAttributes()
+            textView.font = styleApplier.baseFont
+            textView.typingAttributes = styleApplier.baseAttributes()
             return
         }
 
@@ -1346,7 +1398,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
         applyVisibleStyles(spans: spans)
         pendingFullStyleRanges = MarkdownStylingEngine.chunkedStyleRanges(
-            in: textStorage.string as NSString,
+            in: textStorage.mutableString,
             excluding: visibleBufferedCharacterRange()
         )
         startDeferredChunkStyling(spans: spans)
@@ -1397,6 +1449,22 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 return
             }
 
+            // Every exit hands the property back, not just the drained one:
+            // resumeFullStylingIfNeeded reads `deferredStyleTask == nil` as
+            // "nothing in flight", and a finished task left in place stranded
+            // the remaining chunks behind it. The generation guard keeps a
+            // superseded task from clearing the successor that replaced it.
+            defer {
+                if generation == styleGeneration {
+                    deferredStyleTask = nil
+                }
+            }
+
+            // Acquired once for the whole pass rather than per chunk: this is
+            // the live backing string, so it stays correct across the yields
+            // below, and the guards above already abandon the pass whenever
+            // the document changed underneath it.
+            let string = sourceCharacters
             while !pendingFullStyleRanges.isEmpty {
                 guard !Task.isCancelled,
                       generation == styleGeneration,
@@ -1406,7 +1474,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 }
 
                 let chunk = pendingFullStyleRanges.removeFirst()
-                let string = (textView.textStorage?.string ?? "") as NSString
                 guard let range = boundedRange(
                     MarkdownStylingEngine.lineNormalized(chunk, in: string)
                 ), range.length > 0 else {
@@ -1422,8 +1489,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 )
                 await Task.yield()
             }
-
-            deferredStyleTask = nil
         }
     }
 
@@ -1434,14 +1499,27 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
+        // Owns the cancellation itself instead of trusting the caller to have
+        // cancelled: this overwrites deferredStyleTask, and an in-flight
+        // chunk pass left running would keep styling against stale spans.
+        cancelDeferredStyling()
         let generation = styleGeneration
         let sourceLength = textStorage.length
         MarkdownEditorDiagnostics
             .log("scheduleVisibleLocalStyling length=\(sourceLength)")
         deferredStyleTask = Task { @MainActor [weak self] in
             await Task.yield()
-            guard let self,
-                  !Task.isCancelled,
+            guard let self else {
+                return
+            }
+
+            defer {
+                if generation == styleGeneration {
+                    deferredStyleTask = nil
+                }
+            }
+
+            guard !Task.isCancelled,
                   generation == styleGeneration,
                   sourceLength == textView.textStorage?.length,
                   let range = visibleBufferedCharacterRange()
@@ -1457,7 +1535,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             MarkdownEditorDiagnostics.log(
                 "visible local styling range=\(range.location)..\(NSMaxRange(range))"
             )
-            applyStyles(in: range, spans: localStyleSpans(in: range))
+            applyStyles(
+                in: range,
+                spans: localStyleSpans(in: range, string: sourceCharacters)
+            )
         }
     }
 
@@ -1492,19 +1573,19 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let visibleRect = textView.visibleRect
         guard visibleRect.height > 0 else {
             let length = min(textStorage.length, Self.immediateStyleThreshold)
-            return (textStorage.string as NSString).lineRange(
+            return textStorage.mutableString.lineRange(
                 for: NSRange(location: 0, length: length)
             )
         }
 
-        let x = textView.textContainerInset.width + paragraphGutter + 1
+        let x = textView.textContainerInset.width + styleApplier.paragraphGutter + 1
         let start = textView.characterIndexForInsertion(at: NSPoint(
             x: x,
             y: max(0, visibleRect.minY)
         ))
         let end = textView.characterIndexForInsertion(at: NSPoint(
             x: x,
-            y: max(visibleRect.minY + lineHeight, visibleRect.maxY)
+            y: max(visibleRect.minY + styleApplier.lineHeight, visibleRect.maxY)
         ))
         let lowerBound = max(0, min(start, end) - leadingBuffer)
         let upperBound = min(
@@ -1515,7 +1596,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return nil
         }
 
-        return (textStorage.string as NSString).lineRange(
+        return textStorage.mutableString.lineRange(
             for: NSRange(location: lowerBound, length: upperBound - lowerBound)
         )
     }
@@ -1530,6 +1611,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return
         }
 
+        // Acquired once and threaded through the helpers below; each of them
+        // used to take the document's string itself, which copies the whole
+        // backing store per heading, per list and per pass.
+        let string = textStorage.mutableString
         withStyleApplication {
             textView.undoManager?.disableUndoRegistration()
             // This runs on every keystroke; the disabled-diagnostics path must
@@ -1539,7 +1624,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             let heightBefore = diagnosticsEnabled ? textView.frame.height : 0
             let clipYBefore = diagnosticsEnabled ? clipView.bounds.origin.y : 0
             textStorage.beginEditing()
-            textStorage.setAttributes(baseAttributes(), range: targetRange)
+            textStorage.setAttributes(styleApplier.baseAttributes(), range: targetRange)
 
             for span in spans {
                 let range = NSIntersectionRange(span.range, targetRange)
@@ -1547,10 +1632,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                     continue
                 }
 
-                applyStyle(span.kind, range: range)
+                styleApplier.applyStyle(span.kind, range: range, string: string)
             }
 
-            applyNonbreakingSpaceStyle(range: targetRange)
+            styleApplier.applyNonbreakingSpaceStyle(
+                range: targetRange,
+                string: string
+            )
             // Dimming first: the selected match's dark text must survive focus
             // mode's foreground override.
             applyFocusDimming(in: targetRange)
@@ -1566,7 +1654,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             // wedges the text view (dead input, IMK mach port errors). The
             // selection-change hook restores typing attributes right after.
             if !isNormalizingEditedText {
-                textView.typingAttributes = baseAttributes()
+                textView.typingAttributes = styleApplier.baseAttributes()
             }
             if diagnosticsEnabled {
                 let duration = Self.milliseconds(since: startTime)
@@ -1610,10 +1698,16 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         body()
     }
 
-    private func localStyleSpans(in range: NSRange) -> [ResolvedMarkdownStyleSpan] {
-        let source = textView.string
+    private func localStyleSpans(
+        in range: NSRange,
+        string: NSString
+    ) -> [ResolvedMarkdownStyleSpan] {
+        // The block/inline scanners and the link resolver all take a Swift
+        // String, so the backing store is bridged (copied) here — once per
+        // call, which is why the caller passes the NSString it already holds
+        // instead of letting each helper below reach for the text itself.
+        let source = string as String
         var spans: [ResolvedMarkdownStyleSpan] = []
-        let string = source as NSString
         var lineStart = range.location
         let upperBound = min(NSMaxRange(range), string.length)
         let frontmatterRange = MarkdownFrontmatter.range(in: string)
@@ -1679,260 +1773,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // identical to the parsed one and nothing repaints when the parse
         // arrives.
         return MarkdownLinkStyleResolver.resolve(spans: spans, in: source)
-    }
-
-    private func applyStyle(_ kind: MarkdownStyleKind, range: NSRange) {
-        guard let textStorage = textView.textStorage,
-              let range = boundedRange(range),
-              range.length > 0
-        else {
-            return
-        }
-
-        switch kind {
-        case .heading:
-            applyHeadingStyle(range: range)
-        case .strong:
-            addFontTraits(.boldFontMask, range: range)
-        case .emphasis:
-            addFontTraits(.italicFontMask, range: range)
-        case .strikethrough:
-            // Drawn by MarkdownLayoutManager centered on the x-height.
-            textStorage.addAttribute(
-                .strikethroughStyle,
-                value: NSUnderlineStyle.single.rawValue,
-                range: range
-            )
-        case .inlineCode, .codeBlock:
-            // Code backgrounds are drawn as rounded decorations in
-            // MarkdownTextView (see updateCodeBackgroundRanges); the plain
-            // .backgroundColor attribute is intentionally not applied here.
-            textStorage.addAttributes([
-                .font: baseFont,
-                .foregroundColor: colors.foreground,
-            ], range: range)
-        case .linkDestination:
-            textStorage.addAttributes([
-                .foregroundColor: colors.punctuation,
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-                .underlineColor: colors.underline,
-            ], range: range)
-        case .linkSyntaxPunctuation:
-            textStorage.addAttribute(
-                .foregroundColor,
-                value: colors.punctuation,
-                range: range
-            )
-        case .link, .image:
-            break
-        case .blockQuote:
-            applyLineMarkerStyle(
-                Self.blockQuoteMarkerRegex,
-                range: range,
-                markerCaptureGroup: 1
-            )
-        case .orderedList, .unorderedList:
-            applyLineMarkerStyle(Self.listMarkerRegex, range: range)
-        case .taskCheckbox:
-            // Same colour a list marker gets, so "[ ] a" and "- [ ] a" read
-            // alike; the span already covers just the brackets.
-            textStorage.addAttribute(
-                .foregroundColor,
-                value: colors.listMarker,
-                range: range
-            )
-        case .thematicBreak:
-            textStorage.addAttribute(
-                .foregroundColor,
-                value: colors.thematicBreak,
-                range: range
-            )
-        case .frontmatter:
-            textStorage.addAttribute(
-                .foregroundColor,
-                value: colors.frontmatter,
-                range: range
-            )
-        }
-    }
-
-    private static let headingMarkerRegex = try! NSRegularExpression(
-        pattern: #"^[ \t]*(#{1,6}[ \t]+)"#,
-        options: [.anchorsMatchLines]
-    )
-    private static let blockQuoteMarkerRegex = try! NSRegularExpression(
-        pattern: "^\\s*(>)",
-        options: [.anchorsMatchLines]
-    )
-    /// The task checkbox counts as part of the marker, so "- [x] " dims as a
-    /// whole instead of leaving brackets in the body colour.
-    private static let listMarkerRegex = try! NSRegularExpression(
-        pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+(?:\\[[ xX]\\]\\s+)?",
-        options: [.anchorsMatchLines]
-    )
-    private func applyHeadingStyle(range: NSRange) {
-        guard let textStorage = textView.textStorage else {
-            return
-        }
-
-        let source = textStorage.string
-        let headingSearchRange = (source as NSString).lineRange(for: range)
-        Self.headingMarkerRegex
-            .enumerateMatches(
-                in: source,
-                range: headingSearchRange
-            ) { [self] match, _, _ in
-                guard let match,
-                      match.numberOfRanges > 1,
-                      match.range(at: 1).location != NSNotFound
-                else {
-                    return
-                }
-
-                let lineRange = (source as NSString).lineRange(for: match.range)
-                guard let lineRange = boundedRange(lineRange) else {
-                    return
-                }
-
-                addFontTraits(.boldFontMask, range: lineRange)
-
-                let markerRange = match.range(at: 1)
-                let marker = (source as NSString).substring(with: markerRange)
-                let markerWidth = headingMarkerWidth(marker)
-                let paragraphStyle = baseParagraphStyle()
-                if !MarkdownEditorDiagnostics.disableHeadingOutdent,
-                   !MarkdownEditorDiagnostics.disableParagraphStyle
-                {
-                    paragraphStyle.firstLineHeadIndent = paragraphGutter - markerWidth
-                    paragraphStyle.headIndent = paragraphGutter
-                    // The whole line including the trailing newline: TextKit
-                    // conforms paragraph styles to paragraph boundaries, so a
-                    // partial-line style would be re-expanded nondeterministically.
-                    // The caret on the FOLLOWING empty line is protected by the
-                    // extended restyle range in didProcessEditing instead.
-                    textStorage.addAttribute(
-                        .paragraphStyle,
-                        value: paragraphStyle,
-                        range: lineRange
-                    )
-                }
-            }
-    }
-
-    private var headingMarkerWidthCache: [String: CGFloat] = [:]
-    private var headingMarkerWidthCachePointSize: CGFloat = 0
-
-    private func headingMarkerWidth(_ marker: String) -> CGFloat {
-        if headingMarkerWidthCachePointSize != basePointSize {
-            headingMarkerWidthCache.removeAll(keepingCapacity: true)
-            headingMarkerWidthCachePointSize = basePointSize
-        }
-
-        if let cached = headingMarkerWidthCache[marker] {
-            return cached
-        }
-
-        let width = (marker as NSString).size(withAttributes: [
-            .font: boldFont,
-            .kern: baseLetterSpacing,
-        ]).width
-        headingMarkerWidthCache[marker] = width
-        return width
-    }
-
-    private func addFontTraits(_ traits: NSFontTraitMask, range: NSRange) {
-        guard let textStorage = textView.textStorage else {
-            return
-        }
-
-        guard !MarkdownEditorDiagnostics.disableFontTraits else {
-            MarkdownEditorDiagnostics.log(
-                "font traits skipped range=\(range.location)..\(NSMaxRange(range))"
-            )
-            return
-        }
-
-        textStorage.enumerateAttribute(.font, in: range) { value, subrange, _ in
-            let currentFont = value as? NSFont ?? baseFont
-            let existingTraits = NSFontManager.shared.traits(of: currentFont)
-            textStorage.addAttribute(
-                .font,
-                value: LilexFontProvider.font(
-                    size: currentFont.pointSize,
-                    traits: existingTraits.union(traits)
-                ),
-                range: subrange
-            )
-        }
-    }
-
-    private func applyLineMarkerStyle(
-        _ expression: NSRegularExpression,
-        range: NSRange,
-        markerCaptureGroup: Int? = nil
-    ) {
-        guard let textStorage = textView.textStorage else {
-            return
-        }
-
-        let source = textStorage.string
-        expression.enumerateMatches(in: source, range: range) { match, _, _ in
-            guard let match else {
-                return
-            }
-
-            let markerRange: NSRange
-            if let markerCaptureGroup {
-                guard markerCaptureGroup < match.numberOfRanges else {
-                    return
-                }
-                markerRange = match.range(at: markerCaptureGroup)
-            } else {
-                markerRange = match.range
-            }
-
-            guard markerRange.location != NSNotFound,
-                  NSMaxRange(markerRange) <= (source as NSString).length
-            else {
-                return
-            }
-
-            textStorage.addAttribute(
-                .foregroundColor,
-                value: colors.listMarker,
-                range: markerRange
-            )
-        }
-    }
-
-    private func applyNonbreakingSpaceStyle(range: NSRange) {
-        guard let textStorage = textView.textStorage,
-              let range = boundedRange(range),
-              range.length > 0
-        else {
-            return
-        }
-
-        let string = textStorage.string as NSString
-        var searchRange = range
-        let upperBound = NSMaxRange(range)
-        while searchRange.length > 0 {
-            let foundRange = string.range(of: "\u{00A0}", options: [], range: searchRange)
-            guard foundRange.location != NSNotFound else {
-                return
-            }
-
-            textStorage.addAttributes([
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-                .underlineColor: colors.underline,
-            ], range: foundRange)
-
-            let nextLocation = NSMaxRange(foundRange)
-            searchRange = NSRange(
-                location: nextLocation,
-                length: upperBound - nextLocation
-            )
-        }
     }
 
     /// The selected match sits on the opaque yellow fill drawn in the text
@@ -2035,7 +1875,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             return false
         }
 
-        let selectedText = (textView.string as NSString).substring(with: selectedRange)
+        let selectedText = sourceCharacters.substring(with: selectedRange)
         let replacement = opening + selectedText + closing
         let openingLength = (opening as NSString).length
         return replaceText(
@@ -2048,6 +1888,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
+    /// Refreshes what AppKit will not re-read on its own. Text attributes are
+    /// deliberately not among them: the applier resolves the variant per read,
+    /// so a restyle repaints in the current theme even when this never ran.
     private func applyEditorColors() {
         scrollView.backgroundColor = colors.background
         textView.backgroundColor = colors.background
@@ -2055,57 +1898,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.selectedTextAttributes = [.backgroundColor: colors.selection]
     }
 
-    private var baseFont: NSFont {
-        LilexFontProvider.regular(size: basePointSize)
-    }
-
-    private var boldFont: NSFont {
-        LilexFontProvider.bold(size: basePointSize)
-    }
-
-    private var basePointSize: CGFloat {
-        settings.basePointSize * windowWidthFontScale
-    }
-
-    private var baseLetterSpacing: CGFloat {
-        basePointSize * 0.0305
-    }
-
-    private var lineHeight: CGFloat {
-        basePointSize * 1.8
-    }
-
+    /// Only the view can resolve the theme variant — it is the one holding an
+    /// NSAppearance — so this stays here and the applier reads it through the
+    /// closure it was built with.
     private var colors: EditorThemeColors.Variant {
         themeColors.variant(for: effectiveAppearance)
     }
 
-    private func baseAttributes() -> [NSAttributedString.Key: Any] {
-        var attributes: [NSAttributedString.Key: Any] = [
-            .font: baseFont,
-            .foregroundColor: colors.foreground,
-        ]
-        if !MarkdownEditorDiagnostics.disableKern {
-            attributes[.kern] = baseLetterSpacing
-        }
-        if !MarkdownEditorDiagnostics.disableParagraphStyle {
-            attributes[.paragraphStyle] = baseParagraphStyle()
-        }
-        return attributes
-    }
-
-    private func baseParagraphStyle() -> NSMutableParagraphStyle {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.minimumLineHeight = lineHeight
-        paragraphStyle.maximumLineHeight = lineHeight
-        paragraphStyle.firstLineHeadIndent = paragraphGutter
-        paragraphStyle.headIndent = paragraphGutter
-        paragraphStyle.tailIndent = -paragraphGutter
-        return paragraphStyle
-    }
-
-    private func characterWidth() -> CGFloat {
-        let width = ("0" as NSString).size(withAttributes: [.font: baseFont]).width
-        return width > 0 ? width : basePointSize * 0.6
+    /// Both font-metric inputs are pushed together from the view's own values,
+    /// so a settings change and a window-width change cannot leave the applier
+    /// half updated.
+    private func syncStyleApplierMetrics() {
+        styleApplier.updateMetrics(
+            settings: settings,
+            windowWidthFontScale: windowWidthFontScale
+        )
     }
 
     private static func windowWidthFontScale(for windowWidth: CGFloat) -> CGFloat {
@@ -2147,16 +1954,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     private func boundedRange(_ range: NSRange) -> NSRange? {
-        guard let textStorage = textView.textStorage,
-              range.location >= 0,
-              range.length >= 0,
-              range.location <= textStorage.length,
-              NSMaxRange(range) <= textStorage.length
-        else {
+        guard let textStorage = textView.textStorage else {
             return nil
         }
 
-        return range
+        return MarkdownStylingEngine.bounded(range, length: textStorage.length)
     }
 
     private func edgeInsets(_ lhs: NSEdgeInsets, equalTo rhs: NSEdgeInsets) -> Bool {

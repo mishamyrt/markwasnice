@@ -14,6 +14,9 @@ final class MarkwasniceAppState: ObservableObject {
         .ID: EditorDocumentSession] = [:]
     @Published private(set) var pendingWindowIDs: [EditorDocumentSession.ID] = []
     @Published private(set) var settings: EditorSettings
+    /// True while the most recent autosave write failed; cleared by the next
+    /// successful flush.
+    @Published private(set) var isAutosaveFailing = false
 
     private let settingsStore = EditorSettingsStore()
     private let autosaveStore: AutosaveStore
@@ -21,6 +24,10 @@ final class MarkwasniceAppState: ObservableObject {
     /// Resolves to false when the write failed; a cancelled (superseded)
     /// flush counts as success because the newer flush covers it.
     private var autosaveTask: Task<Bool, Never>?
+    /// The failure alert is shown at most once per launch; a session that
+    /// cannot autosave has already been told, and repeating it on every
+    /// later failure would only get in the way of saving files by hand.
+    private var didReportAutosaveFailure = false
     private var preferencesWindowController: PreferencesWindowController?
     private var didCreateInitialSessions = false
     /// Set while the launch-time sessions are being read back from autosave:
@@ -271,7 +278,10 @@ final class MarkwasniceAppState: ObservableObject {
         preferencesWindowController?.window?.makeKeyAndOrderFront(sender)
     }
 
-    func flushAutosave(force: Bool = false) {
+    /// `reportsFailure` is off for callers that await the flush themselves
+    /// and warn about the failure in their own words (the terminate path);
+    /// two alerts about the same failed write would stack up.
+    func flushAutosave(force: Bool = false, reportsFailure: Bool = true) {
         guard force || !sessions.isEmpty else {
             return
         }
@@ -280,7 +290,7 @@ final class MarkwasniceAppState: ObservableObject {
         autosaveWorkItem = nil
         autosaveTask?.cancel()
         let session = AutosavedSession(drafts: autosavedDrafts())
-        autosaveTask = Task.detached(priority: .utility) { [autosaveStore, session] in
+        let task = Task.detached(priority: .utility) { [autosaveStore, session] in
             guard !Task.isCancelled else {
                 return true
             }
@@ -295,6 +305,50 @@ final class MarkwasniceAppState: ObservableObject {
                 return false
             }
         }
+        autosaveTask = task
+
+        guard reportsFailure else {
+            return
+        }
+
+        Task { [weak self] in
+            let didWrite = await task.value
+            // A superseded flush must not report: the newer flush owns the
+            // outcome, and its write may well succeed.
+            guard let self, autosaveTask == task else {
+                return
+            }
+
+            noteAutosaveOutcome(didWrite: didWrite)
+        }
+    }
+
+    /// Autosave failures were only ever visible in the log until the user
+    /// tried to quit — which is no help in the crash and force-quit cases
+    /// autosave exists for. The user is told the first time a write fails,
+    /// and only then: the flush runs every 0.4s, so a full disk would
+    /// otherwise put an alert on screen for as long as the app is open.
+    private func noteAutosaveOutcome(didWrite: Bool) {
+        guard !didWrite else {
+            isAutosaveFailing = false
+            return
+        }
+
+        isAutosaveFailing = true
+        guard !didReportAutosaveFailure else {
+            return
+        }
+
+        didReportAutosaveFailure = true
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Unsaved drafts could not be saved."
+        alert.informativeText =
+            "Autosaving your open documents failed. Save your work to a file: "
+                + "recent changes in unsaved documents will be lost if the app "
+                + "stops unexpectedly."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     /// Drafts ordered window by window (tabs in their on-screen order), with
@@ -374,7 +428,7 @@ final class MarkwasniceAppState: ObservableObject {
     /// can warn before drafts are discarded.
     @discardableResult
     func flushAutosaveAndWait(force: Bool = false) async -> Bool {
-        flushAutosave(force: force)
+        flushAutosave(force: force, reportsFailure: false)
         guard let autosaveTask else {
             return true
         }
@@ -575,8 +629,11 @@ final class MarkwasniceAppState: ObservableObject {
         of session: EditorDocumentSession,
         from draft: AutosavedDraft
     ) {
-        // Without a backing file the provisional flag is already exact.
-        guard let fileURL = draft.fileURL, !draft.text.isEmpty else {
+        // Without a backing file the provisional flag is already exact. An
+        // empty draft still has to be compared: deleting the whole contents
+        // of a saved file is an edit like any other, and skipping the read
+        // would restore it as unedited and lose the deletion on close.
+        guard let fileURL = draft.fileURL else {
             return
         }
 

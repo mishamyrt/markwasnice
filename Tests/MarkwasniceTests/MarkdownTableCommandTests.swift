@@ -7,7 +7,7 @@ struct MarkdownTableCommandTests {
     @Test
     func generatesHeaderDelimiterAndBodyRows() {
         let edit = MarkdownTableCommand.edit(
-            in: "", selectedRange: NSRange(location: 0, length: 0),
+            in: "" as NSString, selectedRange: NSRange(location: 0, length: 0),
             rows: 2, columns: 2
         )
 
@@ -21,7 +21,7 @@ struct MarkdownTableCommandTests {
     @Test
     func placesCaretInFirstHeaderCellAfterPrefix() {
         let edit = MarkdownTableCommand.edit(
-            in: "abc", selectedRange: NSRange(location: 3, length: 0),
+            in: "abc" as NSString, selectedRange: NSRange(location: 3, length: 0),
             rows: 1, columns: 1
         )
 
@@ -35,7 +35,7 @@ struct MarkdownTableCommandTests {
     @Test
     func addsSingleNewlineAfterLineEnd() {
         let edit = MarkdownTableCommand.edit(
-            in: "abc\n", selectedRange: NSRange(location: 4, length: 0),
+            in: "abc\n" as NSString, selectedRange: NSRange(location: 4, length: 0),
             rows: 1, columns: 1
         )
 
@@ -45,7 +45,7 @@ struct MarkdownTableCommandTests {
     @Test
     func addsNoPrefixAfterBlankLine() {
         let edit = MarkdownTableCommand.edit(
-            in: "abc\n\n", selectedRange: NSRange(location: 5, length: 0),
+            in: "abc\n\n" as NSString, selectedRange: NSRange(location: 5, length: 0),
             rows: 1, columns: 1
         )
 
@@ -59,7 +59,7 @@ struct MarkdownTableCommandTests {
     @Test
     func addsNoPrefixWhenOnlyNewlinesPrecede() {
         let edit = MarkdownTableCommand.edit(
-            in: "\n", selectedRange: NSRange(location: 1, length: 0),
+            in: "\n" as NSString, selectedRange: NSRange(location: 1, length: 0),
             rows: 1, columns: 1
         )
 
@@ -69,7 +69,7 @@ struct MarkdownTableCommandTests {
     @Test
     func addsBlankLineBeforeFollowingText() {
         let edit = MarkdownTableCommand.edit(
-            in: "tail", selectedRange: NSRange(location: 0, length: 0),
+            in: "tail" as NSString, selectedRange: NSRange(location: 0, length: 0),
             rows: 1, columns: 1
         )
 
@@ -83,7 +83,7 @@ struct MarkdownTableCommandTests {
     @Test
     func addsSingleNewlineBeforeFollowingNewline() {
         let edit = MarkdownTableCommand.edit(
-            in: "\ntail", selectedRange: NSRange(location: 0, length: 0),
+            in: "\ntail" as NSString, selectedRange: NSRange(location: 0, length: 0),
             rows: 1, columns: 1
         )
 
@@ -93,7 +93,7 @@ struct MarkdownTableCommandTests {
     @Test
     func terminatesLastRowWithoutTrailingBlankLine() {
         let edit = MarkdownTableCommand.edit(
-            in: "abc\n\n", selectedRange: NSRange(location: 5, length: 0),
+            in: "abc\n\n" as NSString, selectedRange: NSRange(location: 5, length: 0),
             rows: 1, columns: 1
         )
 
@@ -104,7 +104,7 @@ struct MarkdownTableCommandTests {
     @Test
     func replacesSelection() {
         let edit = MarkdownTableCommand.edit(
-            in: "before\n\nsel\n\nafter",
+            in: "before\n\nsel\n\nafter" as NSString,
             selectedRange: NSRange(location: 8, length: 3),
             rows: 1, columns: 1
         )
@@ -120,24 +120,27 @@ struct MarkdownTableCommandTests {
     func rejectsInvalidSizes() {
         let range = NSRange(location: 0, length: 0)
         #expect(MarkdownTableCommand.edit(
-            in: "", selectedRange: range, rows: 0, columns: 1
+            in: "" as NSString, selectedRange: range, rows: 0, columns: 1
         ) == nil)
         #expect(MarkdownTableCommand.edit(
-            in: "", selectedRange: range, rows: 1, columns: 0
+            in: "" as NSString, selectedRange: range, rows: 1, columns: 0
         ) == nil)
         #expect(MarkdownTableCommand.edit(
-            in: "", selectedRange: range, rows: 1, columns: 100
+            in: "" as NSString, selectedRange: range, rows: 1, columns: 100
         ) == nil)
     }
 
     @Test
     func rejectsOutOfBoundsRange() {
         #expect(MarkdownTableCommand.edit(
-            in: "abc", selectedRange: NSRange(location: 2, length: 5),
+            in: "abc" as NSString, selectedRange: NSRange(location: 2, length: 5),
             rows: 1, columns: 1
         ) == nil)
         #expect(MarkdownTableCommand.edit(
-            in: "abc", selectedRange: NSRange(location: NSNotFound, length: 0),
+            in: "abc" as NSString, selectedRange: NSRange(
+                location: NSNotFound,
+                length: 0
+            ),
             rows: 1, columns: 1
         ) == nil)
     }

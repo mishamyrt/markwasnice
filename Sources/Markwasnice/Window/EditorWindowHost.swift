@@ -249,6 +249,8 @@ private final class WindowLifecycleView: NSView {
     private var tabGroupObservation: NSKeyValueObservation?
     private var contentLayoutObservation: NSKeyValueObservation?
     private var titleCancellable: AnyCancellable?
+    private var isTabChromeRefreshPending = false
+    private weak var unclippedAccessoryContainer: NSView?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -414,7 +416,7 @@ private final class WindowLifecycleView: NSView {
             options: [.initial, .new]
         ) { [weak self] _, _ in
             DispatchQueue.main.async {
-                self?.refreshTabChrome()
+                self?.scheduleTabChromeRefresh()
             }
         }
         contentLayoutObservation = window.observe(
@@ -422,8 +424,28 @@ private final class WindowLifecycleView: NSView {
             options: [.initial, .new]
         ) { [weak self] _, _ in
             DispatchQueue.main.async {
-                self?.refreshTabChrome()
+                self?.scheduleTabChromeRefresh()
             }
+        }
+    }
+
+    /// contentLayoutRect re-fires for every frame of a live resize, and both
+    /// observations answer the same question, so a refresh already queued for
+    /// this runloop turn absorbs the rest instead of running the whole chrome
+    /// pass once per notification.
+    private func scheduleTabChromeRefresh() {
+        guard !isTabChromeRefreshPending else {
+            return
+        }
+
+        isTabChromeRefreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+
+            isTabChromeRefreshPending = false
+            refreshTabChrome()
         }
     }
 
@@ -484,26 +506,38 @@ private final class WindowLifecycleView: NSView {
     /// enclosing NSTitlebarContainerView still clips the whole band, so the
     /// reveal and fullscreen slides are unaffected.
     private func unclipTitlebarAccessories(in window: NSWindow) {
+        // This is reached from a refresh that also runs per frame of a live
+        // resize, so the theme-frame walk is redone only once the container
+        // it found stops answering for the mask: deallocated, detached, moved
+        // to another window, or handed its mask back by AppKit.
+        if let container = unclippedAccessoryContainer,
+           container.window === window,
+           container.superview != nil,
+           !container.clipsToBounds,
+           container.layer?.masksToBounds != true
+        {
+            return
+        }
+
         guard let themeFrame = window.contentView?.superview else {
             return
         }
 
-        unclipTitlebarAccessories(in: themeFrame)
-    }
+        var container: NSView?
+        themeFrame.forEachDescendant { view in
+            guard view.hasExactClass(
+                PrivateChromeClass.titlebarAccessoryContainer
+            ) else {
+                return true
+            }
 
-    private static let accessoryContainerClassName =
-        "NSTitlebarAccessoryContainerView"
-
-    private func unclipTitlebarAccessories(in view: NSView) {
-        if NSStringFromClass(type(of: view)) == Self.accessoryContainerClassName {
             view.clipsToBounds = false
             view.layer?.masksToBounds = false
-            return
+            container = container ?? view
+            // Nothing below a container is a container in turn.
+            return false
         }
-
-        for subview in view.subviews {
-            unclipTitlebarAccessories(in: subview)
-        }
+        unclippedAccessoryContainer = container
     }
 }
 

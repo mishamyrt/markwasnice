@@ -41,7 +41,7 @@ enum MarkdownLinkStyleResolver {
             return []
         }
 
-        let openParen = labelEnd + 1
+        let openParenIndex = labelEnd + 1
         var result: [ResolvedMarkdownStyleSpan] = []
 
         if isImage {
@@ -64,16 +64,16 @@ enum MarkdownLinkStyleResolver {
         ))
         result.append(style(
             .linkSyntaxPunctuation,
-            location: span.range.location + openParen,
+            location: span.range.location + openParenIndex,
             length: 1
         ))
 
-        let destinationLength = destinationEnd - openParen - 1
+        let destinationLength = destinationEnd - openParenIndex - 1
         if destinationLength > 0 {
             result.append(
                 style(
                     .linkDestination,
-                    location: span.range.location + openParen + 1,
+                    location: span.range.location + openParenIndex + 1,
                     length: destinationLength
                 )
             )
@@ -87,23 +87,27 @@ enum MarkdownLinkStyleResolver {
         return result
     }
 
+    /// Parameters are named `…Index` and every literal is spelled `Self.x`
+    /// on purpose: an index parameter named after a character constant
+    /// shadows it, and heterogeneous `BinaryInteger ==` then silently
+    /// compares the character against the index instead of the literal.
     private static func matchingCloseBracket(
         in string: NSString,
-        after openBracket: Int
+        after openIndex: Int
     ) -> Int? {
         var depth = 1
-        var index = openBracket + 1
+        var index = openIndex + 1
 
         while index < string.length {
             let character = string.character(at: index)
-            if character == backslash {
+            if character == Self.backslash {
                 index += 2
                 continue
             }
 
-            if character == openBracket {
+            if character == Self.openBracket {
                 depth += 1
-            } else if character == closeBracket {
+            } else if character == Self.closeBracket {
                 depth -= 1
                 if depth == 0 {
                     return index
@@ -116,11 +120,11 @@ enum MarkdownLinkStyleResolver {
         return nil
     }
 
-    private static func closingParen(in string: NSString, after openParen: Int) -> Int? {
+    private static func closingParen(in string: NSString, after openIndex: Int) -> Int? {
         var index = string.length - 1
-        while index > openParen {
+        while index > openIndex {
             let character = string.character(at: index)
-            if character == closeParen, !isEscapedCharacter(at: index, in: string) {
+            if character == Self.closeParen, !isEscapedCharacter(at: index, in: string) {
                 return index
             }
 
@@ -134,7 +138,7 @@ enum MarkdownLinkStyleResolver {
         var backslashCount = 0
         var current = index - 1
 
-        while current >= 0, string.character(at: current) == backslash {
+        while current >= 0, string.character(at: current) == Self.backslash {
             backslashCount += 1
             current -= 1
         }

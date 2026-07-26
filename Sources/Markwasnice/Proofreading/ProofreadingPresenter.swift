@@ -16,6 +16,17 @@ final class ProofreadingPresenter {
         let trigger: ActivationTrigger
     }
 
+    /// Draw order plus, per entry, the parts of that issue's range no more
+    /// specific issue already claimed. Both derive from the issue ranges
+    /// alone, so a crossfade frame — which only moves alphas — can reuse
+    /// them instead of re-sorting and re-intersecting every issue at 60 Hz.
+    private struct DecorationLayout {
+        /// Issue indices, most specific first.
+        let order: [Int]
+        /// Parallel to `order`: the underline segments of `order[i]`.
+        let underlineSegments: [[NSRange]]
+    }
+
     private static let hoverDwellSeconds: TimeInterval = 0.15
     private static let lightHighlightAlpha: CGFloat = 0.16
     private static let darkHighlightAlpha: CGFloat = 0.26
@@ -25,7 +36,13 @@ final class ProofreadingPresenter {
     private let textView: MarkdownTextView
     private let severityColor: (ProofreadingSeverity) -> NSColor
 
-    private(set) var issues: [ProofreadingIssue] = []
+    /// Every mutation drops the cached layout, so no caller has to remember
+    /// to invalidate it.
+    private(set) var issues: [ProofreadingIssue] = [] {
+        didSet { decorationLayout = nil }
+    }
+
+    private var decorationLayout: DecorationLayout?
     private var isEnabled = false
     private var activeState: ActiveState?
     private var dwellTimer: Timer?
@@ -284,13 +301,10 @@ final class ProofreadingPresenter {
         let highlightAlpha = isDark
             ? Self.darkHighlightAlpha : Self.lightHighlightAlpha
 
-        // Where issues overlap (a word-level issue inside a sentence-level
-        // one), only the most specific issue draws its wave in the overlap;
-        // broader underlines are clipped around it instead of stacking.
+        let layout = decorationLayout ?? rebuiltDecorationLayout()
         var underlines: [MarkdownTextView.ProofreadingDrawItem] = []
         var highlights: [MarkdownTextView.ProofreadingDrawItem] = []
-        var claimedRanges: [NSRange] = []
-        for index in issues.indices.sorted(by: issueSpecificityOrder) {
+        for (position, index) in layout.order.enumerated() {
             let issue = issues[index]
             let color = severityColor(issue.severity)
             let fade = easedFade(for: issue.ruleID)
@@ -300,34 +314,65 @@ final class ProofreadingPresenter {
                     color: color.withAlphaComponent(highlightAlpha * fade)
                 ))
             }
+            // A fully faded-in issue shows only its highlight; its claim on
+            // the overlap is already baked into the cached segments.
             if fade >= 1 {
-                claimedRanges.append(issue.range)
                 continue
             }
 
-            // Subtract only actually overlapping claims: overlaps are rare,
-            // and unconditional subtraction would allocate O(n²) arrays here
-            // on every push with many issues.
-            var visibleSegments = [issue.range]
-            for claimed in claimedRanges
-                where NSIntersectionRange(claimed, issue.range).length > 0
-            {
-                visibleSegments = visibleSegments.flatMap {
-                    MarkdownStylingEngine.subtract(claimed, from: $0)
-                }
-            }
             let underlineColor = fade > 0
                 ? color.withAlphaComponent(color.alphaComponent * (1 - fade))
                 : color
-            underlines += visibleSegments.map {
+            underlines += layout.underlineSegments[position].map {
                 .init(range: $0, color: underlineColor)
             }
-            claimedRanges.append(issue.range)
         }
         textView.setProofreadingDecorations(
             underlines: underlines,
             highlights: highlights
         )
+    }
+
+    private func rebuiltDecorationLayout() -> DecorationLayout {
+        let order = issues.indices.sorted(by: issueSpecificityOrder)
+        let layout = DecorationLayout(
+            order: order,
+            underlineSegments: Self.underlineSegments(
+                forDrawOrderedRanges: order.map { issues[$0].range }
+            )
+        )
+        decorationLayout = layout
+        return layout
+    }
+
+    /// Where issues overlap (a word-level issue inside a sentence-level
+    /// one), only the most specific issue draws its wave in the overlap;
+    /// broader underlines are clipped around it instead of stacking. Every
+    /// range claims its overlap whatever its fade is, so the result depends
+    /// on the draw-ordered ranges alone and survives a crossfade.
+    static func underlineSegments(
+        forDrawOrderedRanges ranges: [NSRange]
+    ) -> [[NSRange]] {
+        var segments: [[NSRange]] = []
+        segments.reserveCapacity(ranges.count)
+        var claimedRanges: [NSRange] = []
+        for range in ranges {
+            // Subtract only actually overlapping claims: overlaps are rare,
+            // and unconditional subtraction would allocate O(n²) arrays here
+            // on every rebuild with many issues.
+            var visibleSegments = [range]
+            for claimed in claimedRanges
+                where NSIntersectionRange(claimed, range).length > 0
+            {
+                visibleSegments = visibleSegments.flatMap {
+                    MarkdownStylingEngine.subtract(claimed, from: $0)
+                }
+            }
+            segments.append(visibleSegments)
+            claimedRanges.append(range)
+        }
+
+        return segments
     }
 
     // MARK: - Highlight crossfade

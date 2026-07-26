@@ -89,6 +89,14 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
+    // Repainting only the ranges that changed looks tempting here and is
+    // wrong: it assumes an unchanged range still covers the same pixels. Any
+    // edit can reflow the layout, so a decoration that kept its range can
+    // still have moved, and the rect it was painted at is unrecoverable once
+    // layout has run — the old paint stays on screen as a ghost. Making it
+    // correct means diffing painted *rects* against the previous frame's,
+    // not ranges.
+
     private var searchBorderRanges: [NSRange] = []
     private var searchSelectedMatchRange: NSRange?
     private var searchMatchBorderColor: NSColor = .clear
@@ -271,34 +279,45 @@ final class MarkdownTextView: NSTextView {
         origin: NSPoint,
         dirtyRect: NSRect
     ) {
+        // Tested against the band, not against the glyph rects it is derived
+        // from: the band reaches out to the gutter on both sides, and a dirty
+        // rect covering only that margin still has to be filled.
+        guard let blockRect = codeBlockRect(for: range, origin: origin),
+              blockRect.intersects(dirtyRect)
+        else {
+            return
+        }
+
+        NSBezierPath(
+            roundedRect: blockRect,
+            xRadius: Self.codeCornerRadius,
+            yRadius: Self.codeCornerRadius
+        ).fill()
+    }
+
+    /// The filled band of a code block: the glyph rects' union stretched to
+    /// the container width minus the gutter. Shared with the invalidation
+    /// path so a repaint is asked for exactly what gets drawn.
+    private func codeBlockRect(for range: NSRange, origin: NSPoint) -> NSRect? {
         let rects = segmentRects(for: range, origin: origin)
         guard var union = rects.first else {
-            return
+            return nil
         }
 
         for segment in rects.dropFirst() {
             union = union.union(segment)
         }
 
-        guard union.intersects(dirtyRect) else {
-            return
-        }
-
         let containerWidth = textContainer?.size.width ?? bounds.width
         let left = origin.x + codeBackgroundGutter
         let right = origin.x + containerWidth - codeBackgroundGutter
         let width = right > left ? right - left : union.width
-        let blockRect = NSRect(
+        return NSRect(
             x: right > left ? left : union.minX,
             y: union.minY,
             width: width,
             height: union.height
         )
-        NSBezierPath(
-            roundedRect: blockRect,
-            xRadius: Self.codeCornerRadius,
-            yRadius: Self.codeCornerRadius
-        ).fill()
     }
 
     private func drawInlineCodeBackground(

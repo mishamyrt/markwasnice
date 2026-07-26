@@ -11,10 +11,15 @@ enum MarkdownTypographyCommand {
     /// there is no selection. Code spans are left untouched — unless the
     /// selection lies entirely inside one, in which case the user explicitly
     /// asked for that fragment and it is processed as-is.
+    /// - Parameter spans: the styling pipeline's spans when they still match
+    ///   the text, which spares this pass a second full parse of the document
+    ///   on the main thread. Pass nil whenever they may be stale; the
+    ///   protected ranges are then parsed here.
     static func replacements(
         in text: String,
         selectedRange: NSRange,
-        locale: EditorSettings.TypographyLocale
+        locale: EditorSettings.TypographyLocale,
+        spans: [ResolvedMarkdownStyleSpan]? = nil
     ) -> [MarkdownTypographyReplacement] {
         let nsString = text as NSString
         guard nsString.length > 0,
@@ -31,7 +36,7 @@ enum MarkdownTypographyCommand {
             ? selectedRange
             : NSRange(location: 0, length: nsString.length)
 
-        let parsedRanges = parsedProtectedRanges(in: text)
+        let parsedRanges = protectedRanges(in: text, spans: spans)
         var segments: [NSRange]
         if hasSelection,
            parsedRanges.code.contains(where: { contains($0, selectedRange) })
@@ -39,7 +44,7 @@ enum MarkdownTypographyCommand {
             segments = [targetRange]
         } else {
             let protected = (parsedRanges.code + parsedRanges.structure
-                + markerPrefixRanges(in: nsString))
+                + markerPrefixRanges(in: nsString, covering: targetRange))
                 .sorted { $0.location < $1.location }
             segments = subtracting(protected, from: targetRange)
         }
@@ -146,20 +151,30 @@ enum MarkdownTypographyCommand {
         return configuration
     }
 
-    private static func parsedProtectedRanges(
-        in text: String
+    /// Reparsing the document here is the expensive path: it is the same
+    /// pipeline the editor deliberately debounces onto a background task,
+    /// run inline on the main thread while the user waits for the shortcut.
+    /// Resolved spans are therefore used whenever the caller has fresh ones.
+    private static func protectedRanges(
+        in text: String,
+        spans: [ResolvedMarkdownStyleSpan]?
     ) -> (code: [NSRange], structure: [NSRange]) {
-        guard let result = MarkdownParseService.parse(
+        let resolvedSpans: [ResolvedMarkdownStyleSpan]
+        if let spans {
+            resolvedSpans = spans
+        } else if let result = MarkdownParseService.parse(
             text: text,
             version: 0,
             previous: nil
-        ) else {
+        ) {
+            resolvedSpans = result.spans
+        } else {
             return ([], [])
         }
 
         var code: [NSRange] = []
         var structure: [NSRange] = []
-        for span in result.spans {
+        for span in resolvedSpans {
             switch span.kind {
             case .codeBlock, .inlineCode:
                 code.append(span.range)
@@ -185,11 +200,19 @@ enum MarkdownTypographyCommand {
         options: [.anchorsMatchLines]
     )
 
-    private static func markerPrefixRanges(in nsString: NSString) -> [NSRange] {
+    /// Only the lines the target range touches are scanned: everything else
+    /// is subtracted away again, and for a two-word selection in a large
+    /// document a whole-document line sweep is the dominant cost. The search
+    /// widens to whole lines rather than using the target range itself, so a
+    /// marker in front of a selection that starts mid-line is still found.
+    private static func markerPrefixRanges(
+        in nsString: NSString,
+        covering targetRange: NSRange
+    ) -> [NSRange] {
         var ranges: [NSRange] = []
         markerPrefixRegex.enumerateMatches(
             in: nsString as String,
-            range: NSRange(location: 0, length: nsString.length)
+            range: nsString.lineRange(for: targetRange)
         ) { match, _, _ in
             if let range = match?.range, range.length > 0 {
                 ranges.append(range)

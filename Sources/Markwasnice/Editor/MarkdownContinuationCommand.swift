@@ -5,7 +5,9 @@ import Foundation
 /// and Enter on a line holding only an empty prefix exits the list/quote by
 /// clearing it. Pure computation over (text, selection), mirroring
 /// MarkdownIndentCommand; returns nil when a plain newline should be
-/// inserted instead.
+/// inserted instead. The text arrives as an NSString — everything here is
+/// UTF-16 range math, and the editor hands over the text storage's backing
+/// string, which bridging into a Swift String would copy on every Return.
 enum MarkdownContinuationCommand {
     private static let checkboxPattern = "\\[[ xX]\\]"
     private static let emptyCheckbox = "[ ] "
@@ -38,8 +40,10 @@ enum MarkdownContinuationCommand {
         let prefix: String
     }
 
-    static func edit(in text: String, selectedRange: NSRange) -> MarkdownMarkupEdit? {
-        let nsString = text as NSString
+    static func edit(
+        in nsString: NSString,
+        selectedRange: NSRange
+    ) -> MarkdownMarkupEdit? {
         guard selectedRange.length == 0,
               selectedRange.location != NSNotFound,
               selectedRange.location <= nsString.length

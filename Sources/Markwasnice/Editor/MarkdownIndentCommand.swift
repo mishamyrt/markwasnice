@@ -1,18 +1,20 @@
 import Foundation
 
 /// Tab / Shift+Tab: shifts the leading indent of every line covered by the
-/// selection, regardless of where inside the line the caret sits.
+/// selection, regardless of where inside the line the caret sits. The text
+/// arrives as an NSString — the whole command is UTF-16 range math, and the
+/// editor hands over the text storage's backing string, which bridging into a
+/// Swift String would copy on every Tab.
 enum MarkdownIndentCommand {
     case indent
     case outdent
 
     func edit(
-        in text: String,
+        in nsString: NSString,
         selectedRange: NSRange,
         indentUnit: String,
         tabWidth: Int
     ) -> MarkdownMarkupEdit? {
-        let nsString = text as NSString
         guard selectedRange.location != NSNotFound,
               selectedRange.location <= nsString.length,
               NSMaxRange(selectedRange) <= nsString.length

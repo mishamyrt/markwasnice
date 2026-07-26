@@ -22,8 +22,10 @@ enum MarkdownMarkupCommand: Int {
     case heading5
     case heading6
 
-    func edit(in text: String, selectedRange: NSRange) -> MarkdownMarkupEdit? {
-        let nsString = text as NSString
+    /// The text arrives as an NSString: the whole edit is UTF-16 range math,
+    /// and the editor hands over the text storage's backing string instead of
+    /// bridging the document into a Swift String per invocation.
+    func edit(in nsString: NSString, selectedRange: NSRange) -> MarkdownMarkupEdit? {
         guard selectedRange.location != NSNotFound,
               selectedRange.location <= nsString.length,
               NSMaxRange(selectedRange) <= nsString.length

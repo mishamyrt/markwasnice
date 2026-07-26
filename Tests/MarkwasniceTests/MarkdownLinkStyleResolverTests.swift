@@ -57,6 +57,78 @@ struct MarkdownLinkStyleResolverTests {
     }
 
     @Test
+    func nestedLabelBracketsAreBalancedBeforeTheLabelEnds() {
+        let text = "[a [b] c](url)"
+        let spans = MarkdownLinkStyleResolver.resolve(
+            spans: [span(
+                location: 0,
+                length: (text as NSString).length,
+                kind: .link(destination: "url")
+            )],
+            in: text
+        )
+
+        // The label's own `]` closes the pair opened by `[b`, so the label
+        // ends at index 8 and not at the inner `]` at index 5.
+        #expect(simplify(spans) == [
+            SimpleSpan(0, 1, "punctuation"),
+            SimpleSpan(8, 1, "punctuation"),
+            SimpleSpan(9, 1, "punctuation"),
+            SimpleSpan(10, 3, "destination"),
+            SimpleSpan(13, 1, "punctuation"),
+        ])
+    }
+
+    @Test
+    func linkedImageKeepsDestinationSpansInsideTheirOwnParens() {
+        let text = "[![alt](img.png)](url)"
+        let spans = MarkdownLinkStyleResolver.resolve(
+            spans: [
+                span(location: 0, length: 22, kind: .link(destination: "url")),
+                span(location: 1, length: 15, kind: .image(source: "img.png")),
+            ],
+            in: text
+        )
+
+        #expect(simplify(spans) == [
+            // Outer link: label is the whole `![alt](img.png)` image.
+            SimpleSpan(0, 1, "punctuation"),
+            SimpleSpan(16, 1, "punctuation"),
+            SimpleSpan(17, 1, "punctuation"),
+            SimpleSpan(18, 3, "destination"),
+            SimpleSpan(21, 1, "punctuation"),
+            // Inner image, styled independently.
+            SimpleSpan(1, 1, "punctuation"),
+            SimpleSpan(2, 1, "punctuation"),
+            SimpleSpan(6, 1, "punctuation"),
+            SimpleSpan(7, 1, "punctuation"),
+            SimpleSpan(8, 7, "destination"),
+            SimpleSpan(15, 1, "punctuation"),
+        ])
+    }
+
+    @Test
+    func escapedOpenBracketDoesNotStartNesting() {
+        let text = #"[a \[ b](u)"#
+        let spans = MarkdownLinkStyleResolver.resolve(
+            spans: [span(
+                location: 0,
+                length: (text as NSString).length,
+                kind: .link(destination: "u")
+            )],
+            in: text
+        )
+
+        #expect(simplify(spans) == [
+            SimpleSpan(0, 1, "punctuation"),
+            SimpleSpan(7, 1, "punctuation"),
+            SimpleSpan(8, 1, "punctuation"),
+            SimpleSpan(9, 1, "destination"),
+            SimpleSpan(10, 1, "punctuation"),
+        ])
+    }
+
+    @Test
     func nonInlineLinkSyntaxIsNotExpanded() {
         let text = "[text][reference]"
         let spans = MarkdownLinkStyleResolver.resolve(

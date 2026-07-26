@@ -167,11 +167,48 @@ enum MarkdownStylingEngine {
         return ranges
     }
 
+    /// Spans ordered by where they start, keeping the original relative order
+    /// of spans that start together. The parse pipeline emits them in AST
+    /// order, which is only nearly sorted: a link's punctuation sub-spans are
+    /// expanded ahead of the inline children of its label, and bare checkboxes
+    /// are appended after the whole walk. The tie-break on the original index
+    /// matters because attribute application lets a later span win over an
+    /// earlier one on the same characters.
+    static func documentOrdered(
+        _ spans: [ResolvedMarkdownStyleSpan]
+    ) -> [ResolvedMarkdownStyleSpan] {
+        spans.enumerated()
+            .sorted {
+                ($0.element.range.location, $0.offset)
+                    < ($1.element.range.location, $1.offset)
+            }
+            .map(\.element)
+    }
+
+    /// The spans intersecting `range`. Expects `spans` in document order (see
+    /// documentOrdered(_:)) so the scan can stop at the first span starting at
+    /// or after the range end instead of walking the whole document's spans on
+    /// every restyled chunk. The other end cannot be skipped the same way:
+    /// container spans (code blocks, quotes, lists, frontmatter) start well
+    /// before their contents, so span ends are not monotonic and a search over
+    /// them would drop an enclosing span.
     static func spansForRange(
         _ range: NSRange,
         from spans: [ResolvedMarkdownStyleSpan]
     ) -> [ResolvedMarkdownStyleSpan] {
-        spans.filter { NSIntersectionRange($0.range, range).length > 0 }
+        let upperBound = NSMaxRange(range)
+        var result: [ResolvedMarkdownStyleSpan] = []
+        for span in spans {
+            guard span.range.location < upperBound else {
+                break
+            }
+
+            if NSIntersectionRange(span.range, range).length > 0 {
+                result.append(span)
+            }
+        }
+
+        return result
     }
 
     static func subtract(_ excludedRange: NSRange, from range: NSRange) -> [NSRange] {
@@ -200,7 +237,10 @@ enum MarkdownStylingEngine {
         return result
     }
 
-    private static func bounded(_ range: NSRange, length: Int) -> NSRange? {
+    /// The range unchanged when it fits inside a document of `length`, nil
+    /// otherwise — the one bounds check the editor view and the style applier
+    /// both gate their text-storage ranges through.
+    static func bounded(_ range: NSRange, length: Int) -> NSRange? {
         guard range.location >= 0,
               range.length >= 0,
               range.location <= length,
