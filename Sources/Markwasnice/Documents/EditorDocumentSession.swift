@@ -196,7 +196,11 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
     }
 
-    func setTabBarChrome(isVisible: Bool, topInset: CGFloat) {
+    func setTabBarChrome(
+        isVisible: Bool,
+        topInset: CGFloat,
+        rowHeight: CGFloat = EditorShellState.tabBarRowHeightEstimate
+    ) {
         if isVisible {
             isTabBarTemporarilyHidden = false
             hiddenTabBarAccessory = nil
@@ -204,12 +208,14 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
         guard shellState.isTabBarVisible != isVisible
             || shellState.tabBarTopInset != topInset
+            || shellState.tabBarRowHeight != rowHeight
         else {
             return
         }
 
         shellState.isTabBarVisible = isVisible
         shellState.tabBarTopInset = topInset
+        shellState.tabBarRowHeight = rowHeight
         applyChromeInsets(isFullScreen: shellState.isFullScreen)
         if isVisible {
             showChrome()

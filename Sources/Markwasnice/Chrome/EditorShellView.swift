@@ -69,8 +69,24 @@ struct EditorShellView: View {
             if state.isToolbarVisible {
                 BackdropBlurOverlay()
                     .frame(height: state.topChromeBackgroundHeight)
-                    .overlay(alignment: .bottom) { topChromeSeparator }
+                    .overlay(alignment: .bottom) {
+                        topChromeSeparator(
+                            isVisible: state.isTopChromeSeparatorVisible
+                        )
+                    }
                     .allowsHitTesting(false)
+
+                // The tab row between the two bands stays clear on purpose,
+                // so the text scrolls on behind the capsules.
+                if state.isSearchBandDetached {
+                    BackdropBlurOverlay()
+                        .frame(height: state.searchBarHeight)
+                        .overlay(alignment: .bottom) {
+                            topChromeSeparator(isVisible: state.isContentScrolled)
+                        }
+                        .offset(y: state.tabBarTopInset)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -78,18 +94,15 @@ struct EditorShellView: View {
 
     /// Only marks the chrome edge once content has moved under it; at the
     /// top of the document the band and the text share one flat surface.
-    private var topChromeSeparator: some View {
+    private func topChromeSeparator(isVisible: Bool) -> some View {
         Rectangle()
             .fill(
                 Color.primary
                     .opacity(EditorShellState.topChromeSeparatorOpacity)
             )
             .frame(height: EditorShellState.topChromeSeparatorThickness)
-            .opacity(state.isTopChromeSeparatorVisible ? 1 : 0)
-            .animation(
-                .easeInOut(duration: 0.1),
-                value: state.isTopChromeSeparatorVisible
-            )
+            .opacity(isVisible ? 1 : 0)
+            .animation(.easeInOut(duration: 0.1), value: isVisible)
     }
 
     private var toolbarHoverLayer: some View {

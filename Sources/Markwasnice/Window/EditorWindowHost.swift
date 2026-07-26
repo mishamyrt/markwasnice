@@ -501,7 +501,26 @@ private final class WindowLifecycleView: NSView {
         let topInset = isTabBarVisible && !session.shellState.isFullScreen
             ? (window.contentView?.safeAreaInsets.top ?? 0)
             : 0
-        session.setTabBarChrome(isVisible: isTabBarVisible, topInset: topInset)
+        session.setTabBarChrome(
+            isVisible: isTabBarVisible,
+            topInset: topInset,
+            rowHeight: tabBarRowHeight(in: window)
+        )
+    }
+
+    /// The safe area covers the toolbar row and the tab bar row as one; the
+    /// chrome band has to stop where the toolbar row does, so the accessory
+    /// row is measured off the window rather than assumed. Its estimate
+    /// stands in whenever AppKit has not attached the accessory (yet).
+    private func tabBarRowHeight(in window: NSWindow) -> CGFloat {
+        let accessory = window.titlebarAccessoryViewControllers.first {
+            !$0.isHidden
+        }
+        guard let height = accessory?.view.frame.height, height > 0 else {
+            return EditorShellState.tabBarRowHeightEstimate
+        }
+
+        return height
     }
 
     /// The new-tab button scales up while pressed, but the tab bar lives in a

@@ -28,6 +28,7 @@ final class EditorShellState: ObservableObject {
     @Published var isSearchPresented = false
     @Published var isTabBarVisible = false
     @Published var tabBarTopInset: CGFloat = 0
+    @Published var tabBarRowHeight = EditorShellState.tabBarRowHeightEstimate
     @Published var searchQuery = ""
     @Published var searchOptions = EditorSearchOptions()
     @Published var searchMatchCount = 0
@@ -105,23 +106,32 @@ final class EditorShellState: ObservableObject {
     /// chrome itself is 52pt tall, while the hover reveal zone and the text
     /// inset keep the larger `toolbarRevealHeight` band. With tabs or the
     /// search bar the band height is dictated by that chrome instead.
+    ///
+    /// The tab bar row is deliberately left out of the band: AppKit gives the
+    /// tab capsules glass of their own and keeps their row transparent, so the
+    /// band stops where the toolbar row ends and the text keeps showing
+    /// through behind the capsules — the way a native tab bar reads.
     var topChromeBackgroundHeight: CGFloat {
-        guard !isTabBarVisible, !isSearchPresented else {
-            return topChromeInsetHeight
+        guard !isTabBarVisible else {
+            return max(0, tabBarTopInset - tabBarRowHeight)
         }
 
-        return Self.toolbarBackgroundHeight
+        return isSearchPresented
+            ? topChromeInsetHeight
+            : Self.toolbarBackgroundHeight
     }
 
-    /// The band ends tight under the tab capsules there, so a hairline would
-    /// read as a line through the tab bar rather than as the chrome edge;
-    /// the search bar pushes the band clear of the capsules again.
-    var isTopChromeSeparatorVisible: Bool {
-        guard isContentScrolled else {
-            return false
-        }
+    /// With the tab row left transparent the search bar can no longer share
+    /// one band with the toolbar; it gets a band of its own below the tabs.
+    var isSearchBandDetached: Bool {
+        isTabBarVisible && isSearchPresented
+    }
 
-        return !isTabBarVisible || isSearchPresented
+    /// The band ends tight above the tab capsules there, so a hairline would
+    /// read as a line through the tab bar rather than as the chrome edge —
+    /// with the tab bar up the detached search band carries it instead.
+    var isTopChromeSeparatorVisible: Bool {
+        isContentScrolled && !isTabBarVisible
     }
 
     /// Measured height of the auto-hidden fullscreen chrome overlay (the
@@ -133,7 +143,11 @@ final class EditorShellState: ObservableObject {
     /// text does not start under the reveal zone during the transition:
     /// the unified toolbar row and the tab bar accessory row.
     static let fullScreenToolbarOverlayEstimate: CGFloat = 52
-    static let fullScreenTabBarOverlayEstimate: CGFloat = 36
+    static let fullScreenTabBarOverlayEstimate: CGFloat = tabBarRowHeightEstimate
+
+    /// Height of the tab bar accessory row, used until the live one has been
+    /// measured off the window's titlebar accessory.
+    static let tabBarRowHeightEstimate: CGFloat = 36
 
     /// In fullscreen the system chrome slides down over the content on
     /// reveal; unscrolled text has to start below that band (and below the
