@@ -80,8 +80,11 @@ struct EditorShellView: View {
     /// top of the document the band and the text share one flat surface.
     private var topChromeSeparator: some View {
         Rectangle()
-            .fill(Color.primary.opacity(0.05))
-            .frame(height: 0.67)
+            .fill(
+                Color.primary
+                    .opacity(EditorShellState.topChromeSeparatorOpacity)
+            )
+            .frame(height: EditorShellState.topChromeSeparatorThickness)
             .opacity(state.isTopChromeSeparatorVisible ? 1 : 0)
             .animation(
                 .easeInOut(duration: 0.1),

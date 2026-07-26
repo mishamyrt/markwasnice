@@ -9,6 +9,12 @@ final class EditorShellState: ObservableObject {
     static let searchAreaHeight: CGFloat = 40
     static let replaceAreaHeight: CGFloat = 28
 
+    /// The hairline marking the bottom edge of the top chrome. Drawn twice —
+    /// by the in-content band in SwiftUI and by the fullscreen toolbar window
+    /// in AppKit — so the two cannot drift apart.
+    static let topChromeSeparatorThickness: CGFloat = 0.67
+    static let topChromeSeparatorOpacity: CGFloat = 0.05
+
     @Published var title = "Untitled"
     @Published var isEdited = false
     @Published var wordCount = 0

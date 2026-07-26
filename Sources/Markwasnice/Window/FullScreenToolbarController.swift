@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// Owns the fullscreen-toolbar patching for one editor window: watching
 /// AppKit's NSToolbarFullScreenWindow, correcting its appearance, replacing
@@ -14,6 +15,8 @@ final class FullScreenToolbarController: NSObject {
     private var toolbarAppearanceObservation: NSKeyValueObservation?
     private var toolbarEffectiveAppearanceObservation: NSKeyValueObservation?
     private weak var separatorView: NSView?
+    private var separatorVisibilityCancellable: AnyCancellable?
+    private var isSeparatorVisible = false
     private weak var backdropView: NSView?
     private var strayToolbarCheckWorkItem: DispatchWorkItem?
     private var pendingKickWorkItem: DispatchWorkItem?
@@ -65,8 +68,15 @@ final class FullScreenToolbarController: NSObject {
     /// hidden, or fully revealed with the pointer keeping the reveal alive;
     /// once it stops moving anywhere else, clamp it fully off-screen.
     func refresh(editorWindow: NSWindow?, session: EditorDocumentSession?) {
+        let didChangeSession = self.session !== session
         self.editorWindow = editorWindow
         self.session = session
+        if didChangeSession {
+            separatorVisibilityCancellable = nil
+            if let session {
+                observeSeparatorVisibility(of: session)
+            }
+        }
 
         guard let window = editorWindow,
               window.styleMask.contains(.fullScreen)
@@ -349,12 +359,66 @@ final class FullScreenToolbarController: NSObject {
         }
 
         separatorView?.removeFromSuperview()
-        let separator = FullScreenToolbarSeparatorView(
-            frame: NSRect(x: 0, y: 0, width: contentView.bounds.width, height: 1)
-        )
-        separator.autoresizingMask = [.width, .maxYMargin]
+        let separator = FullScreenToolbarSeparatorView(frame: .zero)
+        // The auto-hide detaches the toolbar window between reveals, so this
+        // runs again per reveal: the fresh separator has to start at the
+        // visibility the content is already in, without animating into it.
+        separator.alphaValue = isSeparatorVisible ? 1 : 0
         contentView.addSubview(separator)
         separatorView = separator
+
+        // Pinned by constraints rather than springs on purpose:
+        // NSToolbarFullScreenContentView is flipped, so a spring-held view at
+        // y = 0 with a flexible margin above it sticks to the *top* of the
+        // band — the edge that slides in under the menu bar — while
+        // bottomAnchor means the same edge in either coordinate system.
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            separator.leadingAnchor.constraint(
+                equalTo: contentView.leadingAnchor
+            ),
+            separator.trailingAnchor.constraint(
+                equalTo: contentView.trailingAnchor
+            ),
+            separator.bottomAnchor.constraint(
+                equalTo: contentView.bottomAnchor
+            ),
+            separator.heightAnchor.constraint(
+                equalToConstant: EditorShellState.topChromeSeparatorThickness
+            ),
+        ])
+    }
+
+    /// Mirrors the in-content band's hairline: it only marks the chrome edge
+    /// once content has moved under it, since at the top of the document the
+    /// band and the text share one flat surface. Unlike the windowed rule
+    /// this keeps the hairline while the tab bar is up — the toolbar window
+    /// carries the accessory row's bottom padding, so its edge stays clear of
+    /// the tab capsules instead of cutting through them.
+    private func observeSeparatorVisibility(of session: EditorDocumentSession) {
+        // @Published emits in willSet, so the sunk value is the new one while
+        // the state object still reads stale; drive the update from it.
+        separatorVisibilityCancellable = session.shellState.$isContentScrolled
+            .sink { [weak self] isContentScrolled in
+                self?.setSeparatorVisible(isContentScrolled)
+            }
+    }
+
+    private func setSeparatorVisible(_ isVisible: Bool) {
+        guard isSeparatorVisible != isVisible else {
+            return
+        }
+
+        isSeparatorVisible = isVisible
+        guard let separatorView else {
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.1
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            separatorView.animator().alphaValue = isVisible ? 1 : 0
+        }
     }
 
     /// The Tahoe glass band inside NSToolbarFullScreenWindow renders with
@@ -388,19 +452,12 @@ final class FullScreenToolbarController: NSObject {
         }
 
         // The tab bar rides along as a titlebar accessory, wrapped in an
-        // anonymous NSView sibling of NSToolbarView that sits lower in the
-        // titlebar view. The opaque backdrop has to slot in below whichever
-        // of the two is lowest, or it paints over the tab bar: invisible
-        // tabs that still receive mouse events through the backdrop's nil
-        // hitTest. The accessory container is only recognizable by its
-        // NSTitlebarAccessoryClipView descendant, not by its own class.
+        // anonymous NSView sibling of NSToolbarView. The opaque backdrop has
+        // to slot in below whichever of the two sits lowest, or it paints
+        // over the tab bar: invisible tabs that still receive mouse events
+        // through the backdrop's nil hitTest.
         let anchorView = titlebarView.subviews.first { subview in
-            subview !== backdropView
-                && (String(describing: type(of: subview)) == "NSToolbarView"
-                    || findSubview(
-                        named: "NSTitlebarAccessoryClipView",
-                        in: subview
-                    ) != nil)
+            subview !== backdropView && isBackdropAnchor(subview)
         }
 
         if let backdrop = backdropView, backdrop.superview === titlebarView {
@@ -435,6 +492,27 @@ final class FullScreenToolbarController: NSObject {
             titlebarView.addSubview(backdrop)
         }
         backdropView = backdrop
+    }
+
+    /// Everything the backdrop must stay below, matched on the view itself or
+    /// on a descendant. The accessory wrapper has no class of its own, so it
+    /// is recognized by what it carries — and by more than one marker on
+    /// purpose: the private container/clip classes come and go between
+    /// releases (NSTitlebarAccessoryClipView is gone as of macOS 27), and a
+    /// marker that stops matching silently puts the opaque backdrop on top of
+    /// the tab bar.
+    private static let backdropAnchorMarkers = [
+        "NSToolbarView",
+        "NSTitlebarAccessoryContainerView",
+        "NSTitlebarAccessoryClipView",
+        "NSTabBar",
+    ]
+
+    private func isBackdropAnchor(_ view: NSView) -> Bool {
+        Self.backdropAnchorMarkers.contains { marker in
+            String(describing: type(of: view)) == marker
+                || findSubview(named: marker, in: view) != nil
+        }
     }
 
     private func findSubview(named className: String, in view: NSView) -> NSView? {
@@ -485,28 +563,39 @@ final class FullScreenToolbarController: NSObject {
         }
     }
 
+    /// The part of the auto-hidden menu bar that slides over the fullscreen
+    /// window. On displays that reserve a band for the menu bar (notch) the
+    /// fullscreen window stops below it and the menu bar never overlaps, so
+    /// the overlap is 0 there. Both the chrome overlay height and the
+    /// toolbar window's legitimate reveal offset are measured against it.
+    nonisolated static func menuBarOverlap(
+        menuBarHeight: CGFloat,
+        windowMaxY: CGFloat,
+        screenMaxY: CGFloat
+    ) -> CGFloat {
+        max(0, menuBarHeight - max(0, screenMaxY - windowMaxY))
+    }
+
+    private var menuBarOverlap: CGFloat {
+        guard let window = editorWindow, let screen = window.screen else {
+            return 0
+        }
+
+        return Self.menuBarOverlap(
+            menuBarHeight: NSApp.mainMenu?.menuBarHeight ?? 0,
+            windowMaxY: window.frame.maxY,
+            screenMaxY: screen.frame.maxY
+        )
+    }
+
     /// The editor keeps unscrolled text below the auto-hidden fullscreen
     /// chrome; the overlay is the toolbar window (toolbar + tab bar) plus
-    /// whatever part of the menu bar slides over the content. On displays
-    /// that reserve a band for the menu bar (notch) the fullscreen window
-    /// stops below it and the menu bar never overlaps.
+    /// whatever part of the menu bar slides over the content.
     private func reportChromeOverlayHeight() {
-        guard let session, let window = editorWindow,
-              let toolbarWindow = observedToolbarWindow
-        else {
+        guard let session, let toolbarWindow = observedToolbarWindow else {
             return
         }
 
-        var menuBarOverlap: CGFloat = 0
-        if let screen = window.screen {
-            let reservedAboveWindow = max(
-                0, screen.frame.maxY - window.frame.maxY
-            )
-            menuBarOverlap = max(
-                0,
-                (NSApp.mainMenu?.menuBarHeight ?? 0) - reservedAboveWindow
-            )
-        }
         session.setFullScreenChromeOverlayHeight(
             toolbarWindow.frame.height + menuBarOverlap
         )
@@ -583,7 +672,8 @@ final class FullScreenToolbarController: NSObject {
         let visibleBand = window.frame.maxY - toolbarWindow.frame.minY
         let alpha = Self.fadeAlpha(
             band: visibleBand,
-            height: toolbarWindow.frame.height
+            height: toolbarWindow.frame.height,
+            revealAllowance: menuBarOverlap
         )
         if abs(toolbarWindow.alphaValue - alpha) > 0.001 {
             toolbarWindow.alphaValue = alpha
@@ -597,19 +687,43 @@ final class FullScreenToolbarController: NSObject {
         }
     }
 
+    /// AppKit's parked "hidden" spots leave slivers of varying height on
+    /// screen (12pt and 29pt observed), so anything within this much of a
+    /// resting position counts as being at that position.
+    nonisolated private static let positionSlack: CGFloat = 40
+    /// The points over which the band crosses between invisible and opaque.
+    nonisolated private static let fadeSpan: CGFloat = 32
+
     /// Opaque only inside the legitimate reveal zone at the top of the
-    /// screen. AppKit's parked "hidden" spots leave slivers of varying
-    /// height on screen (12pt and 29pt observed), so anything up to 40pt
-    /// rests invisible; a reveal parked below the slid-in menu bar can
-    /// legitimately exceed the window height by ~30pt, so the plateau
-    /// extends that far before fading back out — a window parked way
+    /// screen. AppKit's parked "hidden" spots leave slivers on screen, so
+    /// anything up to `positionSlack` rests invisible. A reveal slides in
+    /// *under* the auto-hidden menu bar, so it legitimately rests lower
+    /// than the fully revealed spot by exactly the part of the menu bar
+    /// that overlaps the window — `revealAllowance` — and the plateau
+    /// extends that far before fading back out. That overshoot used to be
+    /// hardcoded at ~30pt, which faded (and then clamped away) a real
+    /// reveal on displays with a taller menu bar. A window parked way
     /// outside the zone (AppKit creates new tabs' toolbar windows at the
     /// screen origin, i.e. the bottom edge) stays invisible too.
-    private static func fadeAlpha(band: CGFloat, height: CGFloat) -> CGFloat {
-        let riseStart: CGFloat = 40
-        let riseEnd: CGFloat = 72
-        let dropStart = height + 40
-        let dropEnd = height + 72
+    nonisolated static func fadeAlpha(
+        band: CGFloat,
+        height: CGFloat,
+        revealAllowance: CGFloat
+    ) -> CGFloat {
+        // The rise starts at a fixed offset so parked slivers keep resting
+        // invisible however tall the menu bar is, and ends no later than
+        // the fully revealed position: a toolbar window shorter than the
+        // fade span (52pt with no tab bar, on a display whose menu bar
+        // never overlaps) would otherwise sit mid-ramp — translucent —
+        // exactly when it is all the way out.
+        let fullyRevealed = height + revealAllowance
+        let riseStart = positionSlack
+        let riseEnd = max(
+            riseStart + 1,
+            min(riseStart + fadeSpan, fullyRevealed)
+        )
+        let dropStart = fullyRevealed + positionSlack
+        let dropEnd = fullyRevealed + positionSlack + fadeSpan
 
         if band <= riseStart || band >= dropEnd {
             return 0
@@ -621,6 +735,27 @@ final class FullScreenToolbarController: NSObject {
             return 1
         }
         return (dropEnd - band) / (dropEnd - dropStart)
+    }
+
+    /// How far below the fully revealed spot a legitimate reveal can rest.
+    /// Deliberately the same bound as `fadeAlpha`'s drop-off: everything
+    /// past it has already faded to alpha 0, which is what makes clamping
+    /// it back off screen invisible.
+    nonisolated static func revealFloorOffset(revealAllowance: CGFloat) -> CGFloat {
+        revealAllowance + positionSlack + fadeSpan
+    }
+
+    /// NSEvent.mouseLocation reports the top row of a display as exactly
+    /// screen.frame.maxY, and CGRect.contains is half-open at the top edge
+    /// — so a pointer parked in the slid-in menu bar, the one position that
+    /// keeps a reveal alive, read as "off this screen" and had the reveal
+    /// clamped away under it. One point of slop on every edge covers the
+    /// convention mismatch without reaching a neighbouring display.
+    nonisolated static func pointerBelongsToScreen(
+        pointer: NSPoint,
+        screenFrame: NSRect
+    ) -> Bool {
+        screenFrame.insetBy(dx: -1, dy: -1).contains(pointer)
     }
 
     /// A window mid tab-attach carries .fullScreen in its style mask while
@@ -691,10 +826,14 @@ final class FullScreenToolbarController: NSObject {
         // a reveal the pointer is actively keeping alive (clicking a tab
         // happens with the pointer on the tab bar, inside the reveal zone).
         let pointer = NSEvent.mouseLocation
-        let pointerOnScreen = window.screen.map { $0.frame.contains(pointer) }
-            ?? true
+        let pointerOnScreen = window.screen.map {
+            Self.pointerBelongsToScreen(pointer: pointer, screenFrame: $0.frame)
+        } ?? true
+        let revealFloor = revealedY - Self.revealFloorOffset(
+            revealAllowance: menuBarOverlap
+        )
         if pointerOnScreen,
-           minY >= revealedY - 64, pointer.y >= minY - 250
+           minY >= revealFloor, pointer.y >= minY - 250
         {
             // No move events arrive when the pointer leaves; keep
             // re-checking while the window remains on screen.
@@ -708,7 +847,7 @@ final class FullScreenToolbarController: NSObject {
         // A window parked outside the reveal zone was never legitimately
         // on screen; animating it would drag it visibly across the whole
         // screen, so it snaps into the hidden spot instead.
-        guard minY >= revealedY - 64 else {
+        guard minY >= revealFloor else {
             toolbarWindow.setFrame(frame, display: false)
             return
         }
@@ -724,7 +863,9 @@ final class FullScreenToolbarController: NSObject {
 /// Matches the status bar separator: 1pt of the primary color at 8%.
 private final class FullScreenToolbarSeparatorView: NSView {
     override func draw(_: NSRect) {
-        NSColor.labelColor.withAlphaComponent(0.08).setFill()
+        NSColor.labelColor
+            .withAlphaComponent(EditorShellState.topChromeSeparatorOpacity)
+            .setFill()
         bounds.fill()
     }
 
