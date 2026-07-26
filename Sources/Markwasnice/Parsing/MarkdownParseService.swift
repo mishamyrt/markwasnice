@@ -103,6 +103,14 @@ final class MarkdownParseService {
             sourceMap: sourceMap
         )
         var spans = MarkdownLinkStyleResolver.resolve(spans: dedentedSpans, in: text)
+        // Appended after the AST spans (which hold no trace of a checkbox
+        // outside a list item) and before the frontmatter pass, so checkboxes
+        // written inside the frontmatter block are dropped with everything
+        // else there.
+        spans.append(contentsOf: MarkdownTaskCheckboxScanner.spans(
+            in: text,
+            excluding: spans.filter { $0.kind == .codeBlock }.map(\.range)
+        ))
         if let frontmatterRange = MarkdownFrontmatter.range(in: text) {
             // cmark reads the block as thematic breaks, setext headings and
             // paragraphs; every such span lies inside the block, so whole

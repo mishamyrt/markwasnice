@@ -1,15 +1,27 @@
 import Foundation
 
 /// Enter inside a list or quote: continues the prefix on the new line
-/// (incrementing ordered markers), and Enter on a line holding only an
-/// empty prefix exits the list/quote by clearing it. Pure computation over
-/// (text, selection), mirroring MarkdownIndentCommand; returns nil when a
-/// plain newline should be inserted instead.
+/// (incrementing ordered markers, restarting task checkboxes as unchecked),
+/// and Enter on a line holding only an empty prefix exits the list/quote by
+/// clearing it. Pure computation over (text, selection), mirroring
+/// MarkdownIndentCommand; returns nil when a plain newline should be
+/// inserted instead.
 enum MarkdownContinuationCommand {
-    private static let listContinuationRegex =
-        try! NSRegularExpression(pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(.+)$")
+    private static let checkboxPattern = "\\[[ xX]\\]"
+    private static let emptyCheckbox = "[ ] "
+    private static let listContinuationRegex = try! NSRegularExpression(
+        pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(\(checkboxPattern)\\s+)?(.+)$"
+    )
+    /// A checkbox carrying its own list line, with no bullet or number in
+    /// front of it — continued as its own kind of list.
+    private static let checkboxContinuationRegex = try! NSRegularExpression(
+        pattern: "^([ \\t]*)\(checkboxPattern)\\s+(.+)$"
+    )
     private static let emptyListPrefixRegex =
         try! NSRegularExpression(pattern: "^[ \\t]*(?:[-+*]|\\d+[.)])\\s*$")
+    private static let emptyCheckboxPrefixRegex = try! NSRegularExpression(
+        pattern: "^[ \\t]*(?:(?:[-+*]|\\d+[.)])\\s+)?\(checkboxPattern)\\s*$"
+    )
     private static let emptyQuotePrefixRegex =
         try! NSRegularExpression(pattern: "^[ \\t]*>\\s*$")
     private static let quoteContinuationRegex =
@@ -44,6 +56,7 @@ enum MarkdownContinuationCommand {
         }
 
         guard let continuation = listContinuation(for: context)
+            ?? checkboxContinuation(for: context)
             ?? quoteContinuation(for: context)
         else {
             return nil
@@ -108,7 +121,11 @@ enum MarkdownContinuationCommand {
 
     private static func lineMatchesEmptyPrefix(_ line: String) -> Bool {
         let range = NSRange(location: 0, length: (line as NSString).length)
-        let expressions = [emptyListPrefixRegex, emptyQuotePrefixRegex]
+        let expressions = [
+            emptyListPrefixRegex,
+            emptyCheckboxPrefixRegex,
+            emptyQuotePrefixRegex,
+        ]
         return expressions.contains { expression in
             expression.firstMatch(in: line, range: range) != nil
         }
@@ -120,14 +137,32 @@ enum MarkdownContinuationCommand {
             in: context.prefix,
             range: NSRange(location: 0, length: prefix.length)
         ),
-            match.numberOfRanges == 4
+            match.numberOfRanges == 5
         else {
             return nil
         }
 
         let indentation = prefix.substring(with: match.range(at: 1))
         let marker = prefix.substring(with: match.range(at: 2))
-        return "\n\(indentation)\(nextListMarker(after: marker)) "
+        let checkbox = match.range(at: 3).location != NSNotFound
+            ? emptyCheckbox
+            : ""
+        return "\n\(indentation)\(nextListMarker(after: marker)) \(checkbox)"
+    }
+
+    private static func checkboxContinuation(for context: CaretLineContext) -> String? {
+        let prefix = context.prefix as NSString
+        guard let match = checkboxContinuationRegex.firstMatch(
+            in: context.prefix,
+            range: NSRange(location: 0, length: prefix.length)
+        ),
+            match.numberOfRanges == 3
+        else {
+            return nil
+        }
+
+        let indentation = prefix.substring(with: match.range(at: 1))
+        return "\n\(indentation)\(emptyCheckbox)"
     }
 
     private static func quoteContinuation(for context: CaretLineContext) -> String? {

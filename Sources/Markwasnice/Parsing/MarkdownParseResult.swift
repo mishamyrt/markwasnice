@@ -48,6 +48,8 @@ enum MarkdownStyleKind: Equatable, Hashable {
     case blockQuote
     case orderedList
     case unorderedList
+    /// A checkbox standing on its own line, without a list marker in front.
+    case taskCheckbox
     case thematicBreak
 }
 
@@ -58,7 +60,8 @@ extension MarkdownStyleKind {
              .unorderedList:
             return true
         case .strong, .emphasis, .strikethrough, .inlineCode, .link, .image,
-             .linkSyntaxPunctuation, .linkDestination, .thematicBreak:
+             .linkSyntaxPunctuation, .linkDestination, .taskCheckbox,
+             .thematicBreak:
             return false
         }
     }

@@ -1660,6 +1660,18 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 in: lineRange,
                 source: source
             ))
+            // The inline scanner cannot produce this one: cmark reads a
+            // list-less checkbox as ordinary text (see
+            // MarkdownTaskCheckboxScanner).
+            if let checkboxRange = MarkdownTaskCheckboxScanner.checkboxRange(
+                for: lineRange,
+                source: source
+            ) {
+                spans.append(ResolvedMarkdownStyleSpan(
+                    range: checkboxRange,
+                    kind: .taskCheckbox
+                ))
+            }
         }
 
         // Resolve link/image spans into punctuation/destination sub-spans the
@@ -1721,6 +1733,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             )
         case .orderedList, .unorderedList:
             applyLineMarkerStyle(Self.listMarkerRegex, range: range)
+        case .taskCheckbox:
+            // Same colour a list marker gets, so "[ ] a" and "- [ ] a" read
+            // alike; the span already covers just the brackets.
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: colors.listMarker,
+                range: range
+            )
         case .thematicBreak:
             textStorage.addAttribute(
                 .foregroundColor,
@@ -1744,8 +1764,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         pattern: "^\\s*(>)",
         options: [.anchorsMatchLines]
     )
+    /// The task checkbox counts as part of the marker, so "- [x] " dims as a
+    /// whole instead of leaving brackets in the body colour.
     private static let listMarkerRegex = try! NSRegularExpression(
-        pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+",
+        pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+(?:\\[[ xX]\\]\\s+)?",
         options: [.anchorsMatchLines]
     )
     private func applyHeadingStyle(range: NSRange) {

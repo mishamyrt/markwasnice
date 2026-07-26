@@ -45,6 +45,70 @@ struct MarkdownContinuationCommandTests {
         #expect(edit.replacementString == "\n  - ")
     }
 
+    @Test func continuesListCheckboxAsUnchecked() throws {
+        let text = "- [x] done"
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text,
+            selectedRange: NSRange(location: (text as NSString).length, length: 0)
+        ))
+
+        #expect(edit.replacementString == "\n- [ ] ")
+    }
+
+    @Test func continuesOrderedListCheckbox() throws {
+        let text = "  1. [ ] first"
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text,
+            selectedRange: NSRange(location: (text as NSString).length, length: 0)
+        ))
+
+        #expect(edit.replacementString == "\n  2. [ ] ")
+    }
+
+    @Test func continuesCheckboxWithoutListMarker() throws {
+        let text = "  [X] standalone task"
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text,
+            selectedRange: NSRange(location: (text as NSString).length, length: 0)
+        ))
+
+        #expect(edit.replacementString == "\n  [ ] ")
+    }
+
+    @Test func bracketsWithoutACheckboxStateStayPlainText() throws {
+        // "[ok]" is not a checkbox, so the line continues as a plain list item.
+        let text = "- [ok] link-ish"
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text,
+            selectedRange: NSRange(location: (text as NSString).length, length: 0)
+        ))
+
+        #expect(edit.replacementString == "\n- ")
+    }
+
+    @Test func exitsEmptyCheckboxItem() throws {
+        let text = "- [ ] first\n- [ ] "
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text,
+            selectedRange: NSRange(location: (text as NSString).length, length: 0)
+        ))
+
+        #expect(edit.replacementRange == NSRange(location: 12, length: 6))
+        #expect(edit.replacementString == "\n")
+        #expect(edit.selectedRange == NSRange(location: 13, length: 0))
+    }
+
+    @Test func exitsEmptyCheckboxWithoutListMarker() throws {
+        let text = "[ ] first\n[ ] "
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text,
+            selectedRange: NSRange(location: (text as NSString).length, length: 0)
+        ))
+
+        #expect(edit.replacementString == "\n")
+        #expect(edit.selectedRange == NSRange(location: 11, length: 0))
+    }
+
     @Test func continuesBlockQuote() throws {
         let text = "> quoted line"
         let edit = try #require(MarkdownContinuationCommand.edit(
