@@ -691,7 +691,7 @@ struct MarkwasniceCommands: Commands {
             Button("Show Tab Bar") {
                 NSApp.keyWindow?.toggleTabBar(nil)
             }
-            .keyboardShortcut("t", modifiers: [.command, .option])
+            .keyboardShortcut("t", modifiers: [.command, .shift])
 
             Button("Focus Mode") {
                 appState.toggleFocusMode()
