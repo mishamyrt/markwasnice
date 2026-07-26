@@ -468,10 +468,42 @@ private final class WindowLifecycleView: NSView {
         }
 
         let isTabBarVisible = window.tabGroup?.isTabBarVisible ?? false
+        if isTabBarVisible {
+            unclipTitlebarAccessories(in: window)
+        }
+
         let topInset = isTabBarVisible && !session.shellState.isFullScreen
             ? (window.contentView?.safeAreaInsets.top ?? 0)
             : 0
         session.setTabBarChrome(isVisible: isTabBarVisible, topInset: topInset)
+    }
+
+    /// The new-tab button scales up while pressed, but the tab bar lives in a
+    /// 36pt accessory container that masks to its own bounds, so the grown
+    /// circle is sliced along the row's top edge. The mask is dropped; the
+    /// enclosing NSTitlebarContainerView still clips the whole band, so the
+    /// reveal and fullscreen slides are unaffected.
+    private func unclipTitlebarAccessories(in window: NSWindow) {
+        guard let themeFrame = window.contentView?.superview else {
+            return
+        }
+
+        unclipTitlebarAccessories(in: themeFrame)
+    }
+
+    private static let accessoryContainerClassName =
+        "NSTitlebarAccessoryContainerView"
+
+    private func unclipTitlebarAccessories(in view: NSView) {
+        if NSStringFromClass(type(of: view)) == Self.accessoryContainerClassName {
+            view.clipsToBounds = false
+            view.layer?.masksToBounds = false
+            return
+        }
+
+        for subview in view.subviews {
+            unclipTitlebarAccessories(in: subview)
+        }
     }
 }
 

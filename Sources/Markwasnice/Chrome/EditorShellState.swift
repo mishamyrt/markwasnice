@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 final class EditorShellState: ObservableObject {
     static let toolbarRevealHeight: CGFloat = 60
+    static let toolbarBackgroundHeight: CGFloat = 52
     static let toolbarCursorExclusionHeight: CGFloat = 52
     static let toolbarContentHeight: CGFloat = 50
     static let searchAreaHeight: CGFloat = 40
@@ -29,6 +30,7 @@ final class EditorShellState: ObservableObject {
     @Published var isReplaceEnabled = false
     @Published var replaceQuery = ""
     @Published var isPreviewActive = false
+    @Published var isContentScrolled = false
 
     var onTopHoverChanged: ((Bool) -> Void)?
     var onFocusModeEnabledChanged: ((Bool) -> Void)?
@@ -70,10 +72,6 @@ final class EditorShellState: ObservableObject {
         return "\(Int((Double(minutes) / 60).rounded())) h"
     }
 
-    var usesProminentBackdrop: Bool {
-        isSearchPresented || isTabBarVisible
-    }
-
     var searchBarHeight: CGFloat {
         Self.searchAreaHeight + (isReplaceEnabled ? Self.replaceAreaHeight : 0)
     }
@@ -95,6 +93,29 @@ final class EditorShellState: ObservableObject {
         return isSearchPresented
             ? tabBarTopInset + searchBarHeight
             : max(0, tabBarTopInset - Self.tabBarBottomPadding)
+    }
+
+    /// The toolbar band is shorter than the reveal zone it lives in: the
+    /// chrome itself is 52pt tall, while the hover reveal zone and the text
+    /// inset keep the larger `toolbarRevealHeight` band. With tabs or the
+    /// search bar the band height is dictated by that chrome instead.
+    var topChromeBackgroundHeight: CGFloat {
+        guard !isTabBarVisible, !isSearchPresented else {
+            return topChromeInsetHeight
+        }
+
+        return Self.toolbarBackgroundHeight
+    }
+
+    /// The band ends tight under the tab capsules there, so a hairline would
+    /// read as a line through the tab bar rather than as the chrome edge;
+    /// the search bar pushes the band clear of the capsules again.
+    var isTopChromeSeparatorVisible: Bool {
+        guard isContentScrolled else {
+            return false
+        }
+
+        return !isTabBarVisible || isSearchPresented
     }
 
     /// Measured height of the auto-hidden fullscreen chrome overlay (the

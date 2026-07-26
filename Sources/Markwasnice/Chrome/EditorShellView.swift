@@ -67,12 +67,26 @@ struct EditorShellView: View {
         // was not animated anyway, so conditional mounting looks identical.
         ZStack(alignment: .top) {
             if state.isToolbarVisible {
-                BackdropBlurOverlay(isProminent: state.usesProminentBackdrop)
-                    .frame(height: state.topChromeInsetHeight)
+                BackdropBlurOverlay()
+                    .frame(height: state.topChromeBackgroundHeight)
+                    .overlay(alignment: .bottom) { topChromeSeparator }
                     .allowsHitTesting(false)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Only marks the chrome edge once content has moved under it; at the
+    /// top of the document the band and the text share one flat surface.
+    private var topChromeSeparator: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.05))
+            .frame(height: 0.67)
+            .opacity(state.isTopChromeSeparatorVisible ? 1 : 0)
+            .animation(
+                .easeInOut(duration: 0.1),
+                value: state.isTopChromeSeparatorVisible
+            )
     }
 
     private var toolbarHoverLayer: some View {
@@ -108,7 +122,7 @@ struct EditorShellView: View {
 
     private var fullScreenSearchLayer: some View {
         ZStack(alignment: .top) {
-            BackdropBlurOverlay(isProminent: true)
+            BackdropBlurOverlay()
                 .frame(height: state.searchBarHeight)
                 .allowsHitTesting(false)
 
@@ -373,17 +387,11 @@ extension EditorShellView {
 }
 
 private struct BackdropBlurOverlay: NSViewRepresentable {
-    let isProminent: Bool
-
     func makeNSView(context _: Context) -> BackdropBlurView {
-        let view = BackdropBlurView(frame: .zero)
-        view.isProminent = isProminent
-        return view
+        BackdropBlurView(frame: .zero)
     }
 
-    func updateNSView(_ view: BackdropBlurView, context _: Context) {
-        view.isProminent = isProminent
-    }
+    func updateNSView(_: BackdropBlurView, context _: Context) {}
 }
 
 private struct EditorToolbarButton: View {

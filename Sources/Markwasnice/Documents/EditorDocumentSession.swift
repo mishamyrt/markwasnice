@@ -146,6 +146,17 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         hideChrome()
     }
 
+    func markdownEditorView(
+        _: MarkdownEditorView,
+        didChangeScrolledFromTop isScrolled: Bool
+    ) {
+        guard shellState.isContentScrolled != isScrolled else {
+            return
+        }
+
+        shellState.isContentScrolled = isScrolled
+    }
+
     func markdownEditorViewShowSearch(_: MarkdownEditorView) {
         showSearch()
     }

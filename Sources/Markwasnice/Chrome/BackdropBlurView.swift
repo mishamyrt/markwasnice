@@ -1,33 +1,13 @@
 @preconcurrency import AppKit
-import CoreImage.CIFilterBuiltins
 import ObjectiveC
 
 final class BackdropBlurView: NSView {
+    private static let blurRadius: CGFloat = 5
+    private static let backgroundAlpha: CGFloat = 0.86
+
     private let containerLayer = CALayer()
-    private let backgroundGradientLayer = CAGradientLayer()
+    private let backgroundLayer = CALayer()
     private let backdropLayer: CALayer
-    private var blurFilter: NSObject?
-
-    var blurRadius: CGFloat = 2 {
-        didSet {
-            guard blurRadius != oldValue else { return }
-            withoutImplicitAnimations {
-                updateBlurRadius()
-            }
-        }
-    }
-
-    var isProminent = false {
-        didSet {
-            guard isProminent != oldValue else { return }
-
-            withoutImplicitAnimations {
-                blurRadius = isProminent ? 4 : 2
-                updateBackdropFilter()
-                updateBackgroundGradient()
-            }
-        }
-    }
 
     override init(frame frameRect: NSRect) {
         backdropLayer = Self.makeBackdropLayer()
@@ -40,7 +20,7 @@ final class BackdropBlurView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         containerLayer.frame = bounds
-        backgroundGradientLayer.frame = bounds
+        backgroundLayer.frame = bounds
         backdropLayer.frame = bounds
         CATransaction.commit()
     }
@@ -48,7 +28,7 @@ final class BackdropBlurView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         withoutImplicitAnimations {
-            updateBackgroundGradient()
+            updateBackgroundColor()
         }
     }
 
@@ -68,9 +48,7 @@ final class BackdropBlurView: NSView {
         }
 
         containerLayer.masksToBounds = true
-        backgroundGradientLayer.startPoint = CGPoint(x: 0.5, y: 1)
-        backgroundGradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
-        updateBackgroundGradient()
+        updateBackgroundColor()
 
         backdropLayer.name = "markwasnice-titlebar-backdrop"
         backdropLayer.backgroundColor = NSColor.clear.cgColor
@@ -83,73 +61,38 @@ final class BackdropBlurView: NSView {
         backdropLayer.setValue(0.5, forKey: "scale")
         backdropLayer.setValue(8.0, forKey: "bleedAmount")
 
-        updateBackdropFilter()
+        configureBackdropFilter()
 
-        containerLayer.addSublayer(backgroundGradientLayer)
+        // Tint above the backdrop, not below it: underneath, the blurred
+        // copy of the content paints over the tint at full strength and
+        // fades out along the band's bottom edge, which reads as a gradient
+        // mask instead of one flat 86% wash.
         containerLayer.addSublayer(backdropLayer)
+        containerLayer.addSublayer(backgroundLayer)
         rootLayer.addSublayer(containerLayer)
     }
 
-    /// The mask never changes (constant size and stops), and rendering it
-    /// spins up a CIContext — one of the most expensive Core Image
-    /// operations. Render once and share across all instances.
-    private static let gradientMaskImage: CGImage = makeGradientImage(startOffset: 0)
-
-    private static func makeGradientImage(
-        width: CGFloat = 100,
-        height: CGFloat = 100,
-        startOffset: CGFloat
-    ) -> CGImage {
-        let gradientFilter = CIFilter.smoothLinearGradient()
-        gradientFilter.color0 = CIColor.black
-        gradientFilter.color1 = CIColor.clear
-        gradientFilter.point0 = CGPoint(x: 0, y: height)
-        gradientFilter.point1 = CGPoint(x: 0, y: startOffset * height)
-
-        return CIContext().createCGImage(
-            gradientFilter.outputImage!,
-            from: CGRect(x: 0, y: 0, width: width, height: height)
-        )!
-    }
-
-    private func updateBlurRadius() {
-        blurFilter?.setValue(blurRadius, forKey: "inputRadius")
-    }
-
-    private func updateBackdropFilter() {
-        let filterName = isProminent ? "gaussianBlur" : "variableBlur"
-        guard let blur = Self.makeCAFilter(named: filterName) else {
+    private func configureBackdropFilter() {
+        guard let blur = Self.makeCAFilter(named: "gaussianBlur") else {
             backdropLayer.filters = nil
-            blurFilter = nil
             return
         }
 
-        blur.setValue(blurRadius, forKey: "inputRadius")
-        if !isProminent {
-            blur.setValue(Self.gradientMaskImage, forKey: "inputMaskImage")
-            blur.setValue(true, forKey: "inputNormalizeEdges")
-        }
-
-        blurFilter = blur
+        blur.setValue(Self.blurRadius, forKey: "inputRadius")
+        // Without this the kernel runs out of samples near the band's top and
+        // bottom edges and blurs them less than the middle, so the strip reads
+        // as a gradient rather than one flat blur.
+        blur.setValue(true, forKey: "inputNormalizeEdges")
         backdropLayer.filters = [blur]
     }
 
-    private func updateBackgroundGradient() {
+    private func updateBackgroundColor() {
         let background = EditorThemeColors.default
             .variant(for: effectiveAppearance)
             .background
-        if isProminent {
-            backgroundGradientLayer.colors = [
-                background.withAlphaComponent(0.94).cgColor,
-                background.withAlphaComponent(0.94).cgColor,
-            ]
-            return
-        }
-
-        backgroundGradientLayer.colors = [
-            background.withAlphaComponent(0.9).cgColor,
-            background.withAlphaComponent(0).cgColor,
-        ]
+        backgroundLayer.backgroundColor = background
+            .withAlphaComponent(Self.backgroundAlpha)
+            .cgColor
     }
 
     private static func makeBackdropLayer() -> CALayer {

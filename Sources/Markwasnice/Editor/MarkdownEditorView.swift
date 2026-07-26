@@ -3,6 +3,10 @@
 protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
     func markdownEditorViewDidScroll(_ editorView: MarkdownEditorView)
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        didChangeScrolledFromTop isScrolled: Bool
+    )
     func markdownEditorViewShowSearch(_ editorView: MarkdownEditorView)
     func markdownEditorViewRequestInsertTable(_ editorView: MarkdownEditorView)
     func markdownEditorView(
@@ -96,6 +100,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var isChromeVisible = true
     private var lastScrollOffsetY: CGFloat?
     private var lastScrollClipSize: NSSize?
+    private var isScrolledFromTop = false
 
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var codeInlineDrawRanges: [NSRange] = []
@@ -224,6 +229,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             proofreadingPresenter.dismissPopup()
         }
         previewPresenter.setActive(isActive)
+        updateScrolledFromTop()
     }
 
     func setProofreadingEnabled(_ isEnabled: Bool) {
@@ -408,6 +414,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             }
 
             delegate?.markdownEditorViewDidScroll(self)
+        }
+        presenter.onScrollOffsetChanged = { [weak self] in
+            self?.updateScrolledFromTop()
         }
         presenter.onExitRequested = { [weak self] in
             self?.onPreviewExitRequested?()
@@ -1150,6 +1159,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             lastScrollOffsetY = offsetY
             lastScrollClipSize = clipSize
         }
+        // Ahead of every guard below: focus-mode centering and window
+        // resizes genuinely move the content, so the chrome separator has to
+        // follow them even though they do not count as user scrolling.
+        updateScrolledFromTop()
         MarkdownEditorDiagnostics.log(
             "boundsChanged y=\(offsetY) last=\(lastScrollOffsetY.map(String.init(describing:)) ?? "nil") "
                 + "height=\(textView.frame.height) visible=\(textView.visibleRect) "
@@ -1193,6 +1206,20 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         delegate?.markdownEditorViewDidScroll(self)
+    }
+
+    /// Whether the visible surface — the preview while it is up, the editor
+    /// otherwise — sits away from its resting top position.
+    private func updateScrolledFromTop() {
+        let isScrolled = previewPresenter.isActive
+            ? previewPresenter.isScrolledFromTop
+            : clipView.bounds.origin.y > 0.5
+        guard isScrolled != isScrolledFromTop else {
+            return
+        }
+
+        isScrolledFromTop = isScrolled
+        delegate?.markdownEditorView(self, didChangeScrolledFromTop: isScrolled)
     }
 
     private func updateCodeBackgroundRanges() {

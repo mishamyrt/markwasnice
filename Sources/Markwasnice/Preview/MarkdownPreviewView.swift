@@ -5,6 +5,9 @@ import AppKit
 /// MarkdownEditorView, which also mirrors the editor's chrome insets here.
 final class MarkdownPreviewView: NSView {
     var onScroll: (() -> Void)?
+    /// Fires for every bounds change, including programmatic ones, unlike
+    /// `onScroll` — which stands for "the user scrolled" and hides the chrome.
+    var onScrollOffsetChanged: (() -> Void)?
     var onExitRequested: (() -> Void)? {
         get { textView.onExitRequested }
         set { textView.onExitRequested = newValue }
@@ -95,6 +98,13 @@ final class MarkdownPreviewView: NSView {
 
     func focus() {
         window?.makeFirstResponder(textView)
+    }
+
+    /// The resting top is `-contentInsets.top`, not zero: the preview keeps
+    /// its chrome padding on the clip view.
+    var isScrolledFromTop: Bool {
+        let clipView = scrollView.contentView
+        return clipView.bounds.origin.y > -clipView.contentInsets.top + 0.5
     }
 
     var scrollFraction: CGFloat {
@@ -188,6 +198,7 @@ final class MarkdownPreviewView: NSView {
             lastScrollOffsetY = offsetY
             lastScrollClipSize = clipSize
         }
+        onScrollOffsetChanged?()
         // Window resizes change the clip size and shift the origin as a
         // side effect; only origin-only changes are user scrolling.
         guard let lastScrollOffsetY,

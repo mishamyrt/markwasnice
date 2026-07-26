@@ -13,6 +13,7 @@ final class MarkdownPreviewPresenter {
     var editorScrollFraction: (() -> CGFloat)?
     var focusEditor: (() -> Void)?
     var onScroll: (() -> Void)?
+    var onScrollOffsetChanged: (() -> Void)?
     var onExitRequested: (() -> Void)?
     var onPreviewCreated: ((MarkdownPreviewView) -> Void)?
 
@@ -39,6 +40,10 @@ final class MarkdownPreviewPresenter {
         } else {
             hide()
         }
+    }
+
+    var isScrolledFromTop: Bool {
+        previewView?.isScrolledFromTop ?? false
     }
 
     func refreshIfActive() {
@@ -113,6 +118,9 @@ final class MarkdownPreviewPresenter {
         preview.isHidden = true
         preview.onScroll = { [weak self] in
             self?.onScroll?()
+        }
+        preview.onScrollOffsetChanged = { [weak self] in
+            self?.onScrollOffsetChanged?()
         }
         preview.onExitRequested = { [weak self] in
             self?.onExitRequested?()
