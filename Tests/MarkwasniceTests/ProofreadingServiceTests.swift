@@ -60,6 +60,64 @@ struct ProofreadingServiceTests {
         #expect(issues.isEmpty)
     }
 
+    /// The protected ranges are searched, not scanned, so their overlaps have
+    /// to be coalesced first: here the enclosing range starts earlier than the
+    /// nested one, and a search over the raw array would stop at the nested
+    /// range — which ends before the issue — and report no protection.
+    @Test
+    func dropsIssuesInsideAnEnclosingRangeThatStartsBeforeANestedOne() throws {
+        let checker = try #require(Self.checker)
+        let text = "Наша команда профессионалов передаёт привет."
+        let issue = try #require(
+            ProofreadingService.issues(
+                in: text,
+                checker: checker,
+                protectedRanges: []
+            ).first
+        )
+        let nested = NSRange(location: 0, length: issue.range.location - 1)
+
+        let issues = ProofreadingService.issues(
+            in: text,
+            checker: checker,
+            protectedRanges: [
+                NSRange(location: 0, length: (text as NSString).length),
+                nested,
+            ]
+        )
+
+        #expect(NSMaxRange(nested) < issue.range.location)
+        #expect(issues.isEmpty)
+    }
+
+    /// Touching is not overlapping, in either direction.
+    @Test
+    func keepsIssuesThatOnlyAbutAProtectedRange() throws {
+        let checker = try #require(Self.checker)
+        let text = "Наша команда профессионалов передаёт привет."
+        let issue = try #require(
+            ProofreadingService.issues(
+                in: text,
+                checker: checker,
+                protectedRanges: []
+            ).first
+        )
+
+        let issues = ProofreadingService.issues(
+            in: text,
+            checker: checker,
+            protectedRanges: [
+                NSRange(location: 0, length: issue.range.location),
+                NSRange(
+                    location: NSMaxRange(issue.range),
+                    length: (text as NSString).length - NSMaxRange(issue.range)
+                ),
+            ]
+        )
+
+        #expect(issues.map(\.range) == [issue.range])
+    }
+
     @Test
     func extractsProtectedRangesFromSpans() {
         let spans = [

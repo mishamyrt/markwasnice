@@ -7,7 +7,7 @@ import Foundation
 /// they are already part of the list marker range (see listMarkerRegex).
 enum MarkdownTaskCheckboxScanner {
     private static let bareCheckboxRegex = try! NSRegularExpression(
-        pattern: #"^[ \t]*(\[[ xX]\])(?=[ \t]|$)"#,
+        pattern: #"^[ \t]*(\#(MarkdownLineGrammar.checkbox))(?=[ \t]|$)"#,
         options: [.anchorsMatchLines]
     )
 

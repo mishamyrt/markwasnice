@@ -195,7 +195,8 @@ final class MarkdownStyleApplier {
     /// The task checkbox counts as part of the marker, so "- [x] " dims as a
     /// whole instead of leaving brackets in the body colour.
     private static let listMarkerRegex = try! NSRegularExpression(
-        pattern: "^\\s*(?:[-+*]|\\d+[.)])\\s+(?:\\[[ xX]\\]\\s+)?",
+        pattern: "^\\s*\(MarkdownLineGrammar.listMarker)\\s+"
+            + "(?:\(MarkdownLineGrammar.checkbox)\\s+)?",
         options: [.anchorsMatchLines]
     )
     private func applyHeadingStyle(range: NSRange, string: NSString) {

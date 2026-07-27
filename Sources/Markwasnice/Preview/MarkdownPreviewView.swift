@@ -107,14 +107,26 @@ final class MarkdownPreviewView: NSView {
         return clipView.bounds.origin.y > -clipView.contentInsets.top + 0.5
     }
 
+    /// The legal resting offsets of the clip view. `scrollFraction` and
+    /// `scrollToFraction` have to stay exact inverses for the round-trip
+    /// scroll sync to hold, so they read the bounds from here rather than
+    /// each deriving them.
+    private var scrollOffsetBounds: (min: CGFloat, max: CGFloat) {
+        let clipView = scrollView.contentView
+        let minOffset = -clipView.contentInsets.top
+        return (
+            min: minOffset,
+            max: max(
+                minOffset,
+                textView.frame.height - clipView.bounds.height
+                    + clipView.contentInsets.bottom
+            )
+        )
+    }
+
     var scrollFraction: CGFloat {
         let clipView = scrollView.contentView
-        let minOffset = -scrollView.contentView.contentInsets.top
-        let maxOffset = max(
-            minOffset,
-            textView.frame.height - clipView.bounds.height
-                + scrollView.contentView.contentInsets.bottom
-        )
+        let (minOffset, maxOffset) = scrollOffsetBounds
         guard maxOffset > minOffset else {
             return 0
         }
@@ -127,12 +139,7 @@ final class MarkdownPreviewView: NSView {
         previewLayoutManager.ensureLayout(for: textContainer)
 
         let clipView = scrollView.contentView
-        let minOffset = -scrollView.contentView.contentInsets.top
-        let maxOffset = max(
-            minOffset,
-            textView.frame.height - clipView.bounds.height
-                + scrollView.contentView.contentInsets.bottom
-        )
+        let (minOffset, maxOffset) = scrollOffsetBounds
         let clamped = min(max(fraction, 0), 1)
         let target = minOffset + (maxOffset - minOffset) * clamped
         clipView.setBoundsOrigin(NSPoint(x: clipView.bounds.origin.x, y: target))

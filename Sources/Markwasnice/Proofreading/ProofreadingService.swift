@@ -77,14 +77,16 @@ final class ProofreadingService {
         checker: TextChecker,
         protectedRanges: [NSRange]
     ) -> [ProofreadingIssue] {
-        checker.check(text).compactMap { issue in
+        // Both sides grow with the document, so the linear scan per issue was
+        // the dominant cost of a check on a code-heavy file. Normalized once,
+        // each issue then costs a binary search.
+        let protected = normalized(protectedRanges)
+        return checker.check(text).compactMap { issue in
             // String.Index is bound to this exact snapshot; the conversion
             // must never touch the live editor string.
             let range = NSRange(issue.range, in: text)
             guard range.length > 0,
-                  !protectedRanges.contains(where: {
-                      NSIntersectionRange(range, $0).length > 0
-                  })
+                  !intersects(range, protected)
             else {
                 return nil
             }
@@ -97,6 +99,45 @@ final class ProofreadingService {
                 weight: issue.rule.weight
             )
         }
+    }
+
+    /// Sorted and coalesced, which is what makes the binary search below
+    /// valid: with overlapping ranges (a link destination inside a code span,
+    /// say) a lower-starting range can outlive the one the search lands on.
+    /// Empty ranges are dropped — they can never intersect anything.
+    nonisolated private static func normalized(_ ranges: [NSRange]) -> [NSRange] {
+        var merged: [NSRange] = []
+        merged.reserveCapacity(ranges.count)
+        for range in ranges.filter({ $0.length > 0 })
+            .sorted(by: { $0.location < $1.location })
+        {
+            if let last = merged.last, range.location <= NSMaxRange(last) {
+                merged[merged.count - 1] = NSUnionRange(last, range)
+            } else {
+                merged.append(range)
+            }
+        }
+        return merged
+    }
+
+    /// `ranges` must come from `normalized(_:)`.
+    nonisolated private static func intersects(
+        _ range: NSRange,
+        _ ranges: [NSRange]
+    ) -> Bool {
+        // The first range that has not already ended before `range` starts is
+        // the only candidate: everything after it starts even later.
+        var low = 0
+        var high = ranges.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if NSMaxRange(ranges[middle]) <= range.location {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        return low < ranges.count && ranges[low].location < NSMaxRange(range)
     }
 
     nonisolated static func protectedRanges(

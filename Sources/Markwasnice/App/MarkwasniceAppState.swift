@@ -29,6 +29,8 @@ final class MarkwasniceAppState: ObservableObject {
     /// later failure would only get in the way of saving files by hand.
     private var didReportAutosaveFailure = false
     private var preferencesWindowController: PreferencesWindowController?
+    /// Trailing edge of a settings drag: see `applySettings(_:phase:)`.
+    private var settingsRolloutWorkItem: DispatchWorkItem?
     private var didCreateInitialSessions = false
     /// Set while the launch-time sessions are being read back from autosave:
     /// for that moment the app has neither a session nor a window.
@@ -267,8 +269,8 @@ final class MarkwasniceAppState: ObservableObject {
         if preferencesWindowController == nil {
             preferencesWindowController = PreferencesWindowController(
                 settings: settings
-            ) { [weak self] settings in
-                self?.applySettings(settings)
+            ) { [weak self] settings, phase in
+                self?.applySettings(settings, phase: phase)
             }
         }
 
@@ -646,7 +648,10 @@ final class MarkwasniceAppState: ObservableObject {
         }
     }
 
-    private func applySettings(_ settings: EditorSettings) {
+    private func applySettings(
+        _ settings: EditorSettings,
+        phase: PreferencesWindowController.ChangePhase
+    ) {
         // Continuous slider drags resend unchanged values; skip the
         // whole-document restyle of every session when nothing changed.
         guard settings != self.settings else {
@@ -654,6 +659,34 @@ final class MarkwasniceAppState: ObservableObject {
         }
 
         self.settings = settings
+        switch phase {
+        case .live:
+            // Every tick of a drag would otherwise restyle each open document
+            // in full, synchronously, between two frames of the slider. Only
+            // the document the user is watching keeps up live; the others —
+            // and the defaults write — ride the trailing edge.
+            activeSession?.applySettings(settings)
+            scheduleSettingsRollout()
+        case .committed:
+            commitSettings()
+        }
+    }
+
+    private func scheduleSettingsRollout() {
+        settingsRolloutWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.commitSettings()
+        }
+        settingsRolloutWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
+    }
+
+    /// Rolls the current settings out to every session and persists them.
+    /// A backstop as much as a trailing edge: a drag that ends without a
+    /// mouse-up reaching the control still lands here.
+    private func commitSettings() {
+        settingsRolloutWorkItem?.cancel()
+        settingsRolloutWorkItem = nil
         settingsStore.save(settings)
         for session in sessions.values {
             session.applySettings(settings)

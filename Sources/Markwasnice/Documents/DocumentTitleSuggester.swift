@@ -77,7 +77,8 @@ enum DocumentTitleSuggester {
                 }
             }
 
-            if let bullet = rest.first, "-*+".contains(bullet),
+            if let bullet = rest.first,
+               MarkdownLineGrammar.bulletCharacters.contains(bullet),
                rest.dropFirst().first == " "
             {
                 rest = rest.dropFirst().drop { $0 == " " }
@@ -86,14 +87,17 @@ enum DocumentTitleSuggester {
             let digits = rest.prefix(while: \.isNumber)
             if !digits.isEmpty, digits.count <= 9 {
                 let after = rest.dropFirst(digits.count)
-                if let separator = after.first, ".)".contains(separator),
+                if let separator = after.first,
+                   MarkdownLineGrammar.orderedMarkerSeparators.contains(separator),
                    after.dropFirst().first == " "
                 {
                     rest = after.dropFirst().drop { $0 == " " }
                 }
             }
 
-            for checkbox in ["[ ] ", "[x] ", "[X] "] where rest.hasPrefix(checkbox) {
+            for checkbox in MarkdownLineGrammar.checkboxLiterals
+                where rest.hasPrefix(checkbox)
+            {
                 rest = rest.dropFirst(checkbox.count).drop { $0 == " " }
             }
 

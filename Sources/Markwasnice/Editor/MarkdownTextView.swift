@@ -173,8 +173,7 @@ final class MarkdownTextView: NSTextView {
 
         searchMatchBorderColor.setStroke()
         for range in searchBorderRanges
-            where visibleRange == nil
-            || NSIntersectionRange(range, visibleRange ?? range).length > 0
+            where Self.range(range, mayBeVisibleIn: visibleRange)
         {
             for segment in inlineLineRects(for: range, origin: origin) {
                 let padded = segment.insetBy(
@@ -198,10 +197,7 @@ final class MarkdownTextView: NSTextView {
         }
 
         if let selectedRange = searchSelectedMatchRange,
-           visibleRange == nil
-           || NSIntersectionRange(
-               selectedRange, visibleRange ?? selectedRange
-           ).length > 0
+           Self.range(selectedRange, mayBeVisibleIn: visibleRange)
         {
             searchMatchFillColor.setFill()
             for segment in inlineLineRects(for: selectedRange, origin: origin) {
@@ -237,18 +233,30 @@ final class MarkdownTextView: NSTextView {
         codeBackgroundFillColor.setFill()
 
         for range in codeBlockRanges
-            where visibleRange == nil
-            || NSIntersectionRange(range, visibleRange ?? range).length > 0
+            where Self.range(range, mayBeVisibleIn: visibleRange)
         {
             drawCodeBlockBackground(range: range, origin: origin, dirtyRect: rect)
         }
 
         for range in inlineCodeRanges
-            where visibleRange == nil
-            || NSIntersectionRange(range, visibleRange ?? range).length > 0
+            where Self.range(range, mayBeVisibleIn: visibleRange)
         {
             drawInlineCodeBackground(range: range, origin: origin, dirtyRect: rect)
         }
+    }
+
+    /// Whether a decoration range can reach the character range a dirty rect
+    /// maps to. A nil `visibleRange` means the mapping failed (no layout
+    /// manager, or an empty glyph range) and nothing may be culled.
+    private static func range(
+        _ range: NSRange,
+        mayBeVisibleIn visibleRange: NSRange?
+    ) -> Bool {
+        guard let visibleRange else {
+            return true
+        }
+
+        return NSIntersectionRange(range, visibleRange).length > 0
     }
 
     private func characterRange(
@@ -295,18 +303,40 @@ final class MarkdownTextView: NSTextView {
         ).fill()
     }
 
-    /// The filled band of a code block: the glyph rects' union stretched to
-    /// the container width minus the gutter. Shared with the invalidation
+    /// The filled band of a code block: the block's vertical extent stretched
+    /// to the container width minus the gutter. Shared with the invalidation
     /// path so a repaint is asked for exactly what gets drawn.
     private func codeBlockRect(for range: NSRange, origin: NSPoint) -> NSRect? {
-        let rects = segmentRects(for: range, origin: origin)
-        guard var union = rects.first else {
+        guard let layoutManager,
+              let storageLength = textStorage?.length,
+              range.location >= 0,
+              NSMaxRange(range) <= storageLength
+        else {
             return nil
         }
 
-        for segment in rects.dropFirst() {
-            union = union.union(segment)
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: range,
+            actualCharacterRange: nil
+        )
+        guard glyphRange.location != NSNotFound, glyphRange.length > 0 else {
+            return nil
         }
+
+        // Only the top and bottom of the band are read from layout — the
+        // width comes from the container below — so the first and last line
+        // fragments answer the question on their own. Enumerating every
+        // fragment of a thousand-line block would cost the same rect once per
+        // scroll frame.
+        let first = layoutManager.lineFragmentRect(
+            forGlyphAt: glyphRange.location,
+            effectiveRange: nil
+        )
+        let last = layoutManager.lineFragmentRect(
+            forGlyphAt: NSMaxRange(glyphRange) - 1,
+            effectiveRange: nil
+        )
+        let union = first.union(last).offsetBy(dx: origin.x, dy: origin.y)
 
         let containerWidth = textContainer?.size.width ?? bounds.width
         let left = origin.x + codeBackgroundGutter
@@ -338,11 +368,11 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
-    /// One rect per visual line, hugging the glyphs vertically. The enclosing
-    /// rects from segmentRects(for:origin:) are unsuitable for inline code:
-    /// they span the full fragment height (the fixed 1.8x line height leaves
-    /// large gaps above and below the text) and merge the middle lines of a
-    /// wrapped range into a single full-width block.
+    /// One rect per visual line, hugging the glyphs vertically. The layout
+    /// manager's own enclosing rects are unsuitable for inline code: they span
+    /// the full fragment height (the fixed 1.8x line height leaves large gaps
+    /// above and below the text) and merge the middle lines of a wrapped range
+    /// into a single full-width block.
     private func inlineLineRects(for range: NSRange, origin: NSPoint) -> [NSRect] {
         guard let layoutManager, let textContainer, let textStorage,
               range.location >= 0,
@@ -434,8 +464,7 @@ final class MarkdownTextView: NSTextView {
         let visibleRange = characterRange(forViewRect: queryRect, origin: origin)
 
         for item in proofreadingHighlights
-            where visibleRange == nil
-            || NSIntersectionRange(item.range, visibleRange ?? item.range).length > 0
+            where Self.range(item.range, mayBeVisibleIn: visibleRange)
         {
             item.color.setFill()
             for segment in inlineLineRects(for: item.range, origin: origin)
@@ -451,8 +480,7 @@ final class MarkdownTextView: NSTextView {
         }
 
         for item in proofreadingUnderlines
-            where visibleRange == nil
-            || NSIntersectionRange(item.range, visibleRange ?? item.range).length > 0
+            where Self.range(item.range, mayBeVisibleIn: visibleRange)
         {
             drawProofreadingUnderline(
                 range: item.range,
@@ -556,36 +584,6 @@ final class MarkdownTextView: NSTextView {
             x = nextX
         }
         path.stroke()
-    }
-
-    private func segmentRects(for range: NSRange, origin: NSPoint) -> [NSRect] {
-        guard let layoutManager, let textContainer,
-              let storageLength = textStorage?.length,
-              range.location >= 0,
-              NSMaxRange(range) <= storageLength
-        else {
-            return []
-        }
-
-        let glyphRange = layoutManager.glyphRange(
-            forCharacterRange: range,
-            actualCharacterRange: nil
-        )
-        guard glyphRange.location != NSNotFound, glyphRange.length > 0 else {
-            return []
-        }
-
-        var rects: [NSRect] = []
-        layoutManager.enumerateEnclosingRects(
-            forGlyphRange: glyphRange,
-            withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
-            in: textContainer
-        ) { rect, _ in
-            if !rect.isEmpty {
-                rects.append(rect.offsetBy(dx: origin.x, dy: origin.y))
-            }
-        }
-        return rects
     }
 
     override func resetCursorRects() {

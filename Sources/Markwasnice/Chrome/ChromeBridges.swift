@@ -222,13 +222,10 @@ final class TopHoverTrackingView: NSView {
     }
 
     private var cursorExclusionRect: NSRect {
-        let height = min(EditorShellState.toolbarCursorExclusionHeight, bounds.height)
-        let y = isFlipped ? bounds.minY : bounds.maxY - height
-        return NSRect(
-            x: bounds.minX,
-            y: y,
-            width: bounds.width,
-            height: height
+        TopChromeGeometry.topAlignedRect(
+            height: EditorShellState.toolbarCursorExclusionHeight,
+            in: bounds,
+            isFlipped: isFlipped
         )
     }
 

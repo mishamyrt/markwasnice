@@ -9,10 +9,11 @@ import Foundation
 /// UTF-16 range math, and the editor hands over the text storage's backing
 /// string, which bridging into a Swift String would copy on every Return.
 enum MarkdownContinuationCommand {
-    private static let checkboxPattern = "\\[[ xX]\\]"
+    private static let checkboxPattern = MarkdownLineGrammar.checkbox
+    private static let markerPattern = MarkdownLineGrammar.listMarker
     private static let emptyCheckbox = "[ ] "
     private static let listContinuationRegex = try! NSRegularExpression(
-        pattern: "^([ \\t]*)([-+*]|\\d+[.)])\\s+(\(checkboxPattern)\\s+)?(.+)$"
+        pattern: "^([ \\t]*)(\(markerPattern))\\s+(\(checkboxPattern)\\s+)?(.+)$"
     )
     /// A checkbox carrying its own list line, with no bullet or number in
     /// front of it — continued as its own kind of list.
@@ -20,16 +21,17 @@ enum MarkdownContinuationCommand {
         pattern: "^([ \\t]*)\(checkboxPattern)\\s+(.+)$"
     )
     private static let emptyListPrefixRegex =
-        try! NSRegularExpression(pattern: "^[ \\t]*(?:[-+*]|\\d+[.)])\\s*$")
+        try! NSRegularExpression(pattern: "^[ \\t]*\(markerPattern)\\s*$")
     private static let emptyCheckboxPrefixRegex = try! NSRegularExpression(
-        pattern: "^[ \\t]*(?:(?:[-+*]|\\d+[.)])\\s+)?\(checkboxPattern)\\s*$"
+        pattern: "^[ \\t]*(?:\(markerPattern)\\s+)?\(checkboxPattern)\\s*$"
     )
     private static let emptyQuotePrefixRegex =
         try! NSRegularExpression(pattern: "^[ \\t]*>\\s*$")
     private static let quoteContinuationRegex =
         try! NSRegularExpression(pattern: "^([ \\t]*)>")
-    private static let orderedMarkerRegex =
-        try! NSRegularExpression(pattern: "^(\\d+)([.)])$")
+    private static let orderedMarkerRegex = try! NSRegularExpression(
+        pattern: "^(\\d+)([\(MarkdownLineGrammar.orderedMarkerSeparators)])$"
+    )
 
     /// The caret's line and the text from the line start up to the caret.
     /// Anchored at `location - 1` so a caret sitting right after a newline

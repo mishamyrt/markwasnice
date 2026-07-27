@@ -3,14 +3,17 @@ import Foundation
 enum MarkdownBlockPrefixAnalyzer {
     private static let headingPrefixRegex =
         try! NSRegularExpression(pattern: #"^[ \t]*#{1,6}[ \t]+"#)
-    private static let unorderedListPrefixRegex =
-        try! NSRegularExpression(pattern: #"^[ \t]*[-+*][ \t]+"#)
-    private static let orderedListPrefixRegex =
-        try! NSRegularExpression(pattern: #"^[ \t]*\d+[.)][ \t]+"#)
+    private static let unorderedListPrefixRegex = try! NSRegularExpression(
+        pattern: #"^[ \t]*\#(MarkdownLineGrammar.bullet)[ \t]+"#
+    )
+    private static let orderedListPrefixRegex = try! NSRegularExpression(
+        pattern: #"^[ \t]*\#(MarkdownLineGrammar.orderedMarker)[ \t]+"#
+    )
     private static let blockQuotePrefixRegex =
         try! NSRegularExpression(pattern: #"^[ \t]*>"#)
-    private static let thematicBreakRegex =
-        try! NSRegularExpression(pattern: #"^[ \t]*([-+*][ \t]*){3,}$"#)
+    private static let thematicBreakRegex = try! NSRegularExpression(
+        pattern: #"^[ \t]*(\#(MarkdownLineGrammar.bullet)[ \t]*){3,}$"#
+    )
 
     /// Line-prefix block detection only — deliberately no fenced-code-block
     /// containment scan, which would have to walk the document from the start

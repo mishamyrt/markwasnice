@@ -196,7 +196,7 @@ enum MarkdownTypographyCommand {
     /// indentation. Without this, the space-surrounded-dash rule reads an
     /// indented "- " marker as a dash between words and turns it into "—".
     private static let markerPrefixRegex = try! NSRegularExpression(
-        pattern: #"^[ \t]*(?:>[ \t]*)*(?:(?:[-+*]|\d+[.)])[ \t]+)?"#,
+        pattern: #"^[ \t]*(?:>[ \t]*)*(?:\#(MarkdownLineGrammar.listMarker)[ \t]+)?"#,
         options: [.anchorsMatchLines]
     )
 

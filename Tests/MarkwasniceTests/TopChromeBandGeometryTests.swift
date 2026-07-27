@@ -78,3 +78,35 @@ struct TopChromeBandGeometryTests {
         #expect(state.isTopChromeSeparatorVisible)
     }
 }
+
+/// The single flip-aware band every top-chrome consumer measures — the reveal
+/// rect and the toolbar's cursor exclusion both come from here, so the two can
+/// no longer drift apart.
+@MainActor
+struct TopAlignedRectTests {
+    private static let bounds = NSRect(x: 10, y: 20, width: 300, height: 200)
+
+    @Test func flippedBandHangsFromTheMinYEdge() {
+        let rect = TopChromeGeometry.topAlignedRect(
+            height: 52, in: Self.bounds, isFlipped: true
+        )
+        #expect(rect == NSRect(x: 10, y: 20, width: 300, height: 52))
+    }
+
+    @Test func unflippedBandHangsFromTheMaxYEdge() {
+        let rect = TopChromeGeometry.topAlignedRect(
+            height: 52, in: Self.bounds, isFlipped: false
+        )
+        #expect(rect == NSRect(x: 10, y: 168, width: 300, height: 52))
+    }
+
+    /// A band taller than the view fills it instead of hanging outside.
+    @Test func heightIsClampedToTheBounds() {
+        for isFlipped in [true, false] {
+            let rect = TopChromeGeometry.topAlignedRect(
+                height: 500, in: Self.bounds, isFlipped: isFlipped
+            )
+            #expect(rect == Self.bounds)
+        }
+    }
+}

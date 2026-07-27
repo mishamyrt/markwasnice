@@ -4,14 +4,28 @@ import AppKit
 final class PreferencesWindowController: NSWindowController {
     private enum Layout {
         static let width: CGFloat = 420
-        static let height: CGFloat = 320
-        /// The CLI helper row is the last one, so a build without it simply
-        /// ends after Typography.
-        static let heightWithoutCLIHelper: CGFloat = 260
+        static let margin: CGFloat = 24
+        static let topMargin: CGFloat = 30
+        /// Picked so a row of popups keeps the 45pt pitch the hand-placed
+        /// form had.
+        static let rowSpacing: CGFloat = 20
+        static let columnSpacing: CGFloat = 12
+        static let labelColumnWidth: CGFloat = 90
+        static let popupWidth: CGFloat = 90
+        static let widePopupWidth: CGFloat = 120
+    }
+
+    /// Whether more values of the same interaction are still coming. An
+    /// NSSlider is continuous by default, so a drag reports every tick it
+    /// crosses; only the value the user settles on is worth rolling out to
+    /// every open document and writing to defaults.
+    enum ChangePhase {
+        case live
+        case committed
     }
 
     private var settings: EditorSettings
-    private let onChange: (EditorSettings) -> Void
+    private let onChange: (EditorSettings, ChangePhase) -> Void
     private let textSizeSlider = NSSlider(
         value: 1, minValue: 0.05, maxValue: 1.95, target: nil, action: nil
     )
@@ -30,18 +44,22 @@ final class PreferencesWindowController: NSWindowController {
     )
     private let cliHelperPath = NSTextField(labelWithString: "")
     private let cliHelperInstaller: CLIHelperInstaller
+    private var formGrid: NSGridView?
+    private var cliHelperRow: NSGridRow?
 
     init(
         settings: EditorSettings,
         cliHelperInstaller: CLIHelperInstaller = .bundled,
-        onChange: @escaping (EditorSettings) -> Void
+        onChange: @escaping (EditorSettings, ChangePhase) -> Void
     ) {
         self.settings = settings
         self.cliHelperInstaller = cliHelperInstaller
         self.onChange = onChange
 
+        // Height is a placeholder: configureControls sizes the window to the
+        // form it just built, and re-sizes it whenever a row comes or goes.
         let contentView = NSView(
-            frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.height)
+            frame: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.width)
         )
         let window = NSWindow(
             contentRect: contentView.frame,
@@ -78,7 +96,19 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func textSizeChanged(_ sender: NSSlider) {
         settings.textSizeScale = CGFloat(sender.doubleValue)
-        onChange(settings)
+        onChange(settings, changePhase(of: sender))
+    }
+
+    /// A control's value is provisional exactly while its mouse tracking loop
+    /// is still running; keyboard-driven changes carry no such event and are
+    /// final on arrival.
+    private func changePhase(of sender: NSControl) -> ChangePhase {
+        switch sender.window?.currentEvent?.type {
+        case .leftMouseDown, .leftMouseDragged:
+            .live
+        default:
+            .committed
+        }
     }
 
     @objc private func widthChanged(_ sender: NSPopUpButton) {
@@ -87,7 +117,7 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         settings.maxTextColumns = value
-        onChange(settings)
+        onChange(settings, .committed)
     }
 
     @objc private func tabModeChanged(_ sender: NSPopUpButton) {
@@ -99,7 +129,7 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         settings.tabInsertionMode = modes[sender.indexOfSelectedItem]
-        onChange(settings)
+        onChange(settings, .committed)
     }
 
     @objc private func tabWidthChanged(_ sender: NSPopUpButton) {
@@ -108,7 +138,7 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         settings.tabWidth = value
-        onChange(settings)
+        onChange(settings, .committed)
     }
 
     @objc private func typographyChanged(_ sender: NSPopUpButton) {
@@ -120,7 +150,7 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         settings.typographyLocale = locales[sender.indexOfSelectedItem]
-        onChange(settings)
+        onChange(settings, .committed)
     }
 
     @objc private func installCLIHelper(_: NSButton) {
@@ -135,22 +165,37 @@ final class PreferencesWindowController: NSWindowController {
 
     private func refreshCLIHelperRow() {
         let state = cliHelperInstaller.state
-        // Nothing to offer in an unbundled build: the whole row goes away
-        // rather than showing a button that cannot work.
-        let isAvailable = state != .unavailable
-        cliHelperLabel.isHidden = !isAvailable
         cliHelperButton.isHidden = state != .notInstalled
-        cliHelperStatus.isHidden = !isAvailable || state == .notInstalled
+        cliHelperStatus.isHidden = state == .notInstalled
         cliHelperPath.isHidden = cliHelperStatus.isHidden
 
         if case let .installed(link) = state {
             cliHelperPath.stringValue = abbreviatedPath(of: link)
         }
 
-        let height = isAvailable ? Layout.height : Layout.heightWithoutCLIHelper
-        if window?.contentView?.frame.height != height {
-            window?.setContentSize(NSSize(width: Layout.width, height: height))
+        // Nothing to offer in an unbundled build: the whole row goes away
+        // rather than showing a button that cannot work.
+        cliHelperRow?.isHidden = state == .unavailable
+        resizeWindowToFitForm()
+    }
+
+    /// The window is exactly as tall as the form asks to be, so a row that
+    /// collapses (or a future row that is added) needs no height constant of
+    /// its own.
+    private func resizeWindowToFitForm() {
+        guard let formGrid else {
+            return
         }
+
+        formGrid.layoutSubtreeIfNeeded()
+        let height = formGrid.fittingSize.height + Layout.topMargin + Layout.margin
+        guard let current = window?.contentView?.frame.height,
+              abs(current - height) > 0.5
+        else {
+            return
+        }
+
+        window?.setContentSize(NSSize(width: Layout.width, height: height))
     }
 
     /// Home-relative so the row does not have to fit an absolute path.
@@ -166,10 +211,8 @@ final class PreferencesWindowController: NSWindowController {
     private func configureControls(in contentView: NSView) {
         let textSizeLabel = NSTextField(labelWithString: "Text Size")
         let widthLabel = NSTextField(labelWithString: "Text Width")
-        let widthCaption = NSTextField(labelWithString: "characters")
         let tabModeLabel = NSTextField(labelWithString: "Tab Inserts")
         let tabWidthLabel = NSTextField(labelWithString: "Tab Size")
-        let tabWidthCaption = NSTextField(labelWithString: "characters")
         let typographyLabel = NSTextField(labelWithString: "Typography")
 
         textSizeSlider.target = self
@@ -220,146 +263,93 @@ final class PreferencesWindowController: NSWindowController {
             .defaultLow,
             for: .horizontal
         )
-        refreshCLIHelperRow()
 
-        for view in [
-            textSizeLabel, smallTextSizeLabel, textSizeSlider, largeTextSizeLabel,
-            widthLabel,
-            widthPopup, widthCaption, tabModeLabel, tabModePopup, tabWidthLabel,
-            tabWidthPopup,
-            tabWidthCaption, typographyLabel, typographyPopup,
-            cliHelperLabel, cliHelperButton, cliHelperStatus, cliHelperPath,
-        ] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            contentView.addSubview(view)
+        let grid = NSGridView(views: [
+            [textSizeLabel, textSizeControls()],
+            [widthLabel, popupRow(
+                widthPopup, width: Layout.popupWidth, caption: "characters"
+            )],
+            [tabModeLabel, popupRow(tabModePopup, width: Layout.widePopupWidth)],
+            [tabWidthLabel, popupRow(
+                tabWidthPopup, width: Layout.popupWidth, caption: "characters"
+            )],
+            [typographyLabel, popupRow(
+                typographyPopup, width: Layout.widePopupWidth
+            )],
+            [cliHelperLabel, cliHelperControls()],
+        ])
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.rowSpacing = Layout.rowSpacing
+        grid.columnSpacing = Layout.columnSpacing
+        grid.column(at: 0).width = Layout.labelColumnWidth
+        grid.column(at: 0).xPlacement = .leading
+        grid.column(at: 1).xPlacement = .fill
+        for index in 0 ..< grid.numberOfRows {
+            grid.row(at: index).yPlacement = .center
         }
+        // The CLI row is the one that stacks two lines under its label, so it
+        // hangs from the top instead of centering against them.
+        let cliRow = grid.row(at: grid.numberOfRows - 1)
+        cliRow.yPlacement = .top
+        cliHelperRow = cliRow
+        formGrid = grid
 
+        contentView.addSubview(grid)
+        // Only three edges: the form's height is what the window is sized
+        // from, so pinning the bottom too would fight every resize.
         NSLayoutConstraint.activate([
-            textSizeLabel.leadingAnchor.constraint(
-                equalTo: contentView.leadingAnchor, constant: 24
+            grid.leadingAnchor.constraint(
+                equalTo: contentView.leadingAnchor, constant: Layout.margin
             ),
-            textSizeLabel.topAnchor.constraint(
-                equalTo: contentView.topAnchor,
-                constant: 30
+            grid.trailingAnchor.constraint(
+                equalTo: contentView.trailingAnchor, constant: -Layout.margin
             ),
-            textSizeLabel.widthAnchor.constraint(equalToConstant: 90),
-
-            smallTextSizeLabel.leadingAnchor.constraint(
-                equalTo: textSizeLabel.trailingAnchor, constant: 12
-            ),
-            smallTextSizeLabel.centerYAnchor
-                .constraint(equalTo: textSizeLabel.centerYAnchor),
-
-            textSizeSlider.leadingAnchor.constraint(
-                equalTo: smallTextSizeLabel.trailingAnchor, constant: 8
-            ),
-            textSizeSlider.trailingAnchor.constraint(
-                equalTo: largeTextSizeLabel.leadingAnchor, constant: -8
-            ),
-            textSizeSlider.centerYAnchor.constraint(equalTo: textSizeLabel.centerYAnchor),
-
-            largeTextSizeLabel.trailingAnchor.constraint(
-                equalTo: contentView.trailingAnchor, constant: -24
-            ),
-            largeTextSizeLabel.centerYAnchor
-                .constraint(equalTo: textSizeLabel.centerYAnchor),
-
-            widthLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
-            widthLabel.topAnchor.constraint(
-                equalTo: textSizeLabel.bottomAnchor,
-                constant: 28
-            ),
-            widthLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
-
-            widthPopup.leadingAnchor.constraint(
-                equalTo: widthLabel.trailingAnchor,
-                constant: 12
-            ),
-            widthPopup.centerYAnchor.constraint(equalTo: widthLabel.centerYAnchor),
-            widthPopup.widthAnchor.constraint(equalToConstant: 90),
-
-            widthCaption.leadingAnchor.constraint(
-                equalTo: widthPopup.trailingAnchor,
-                constant: 8
-            ),
-            widthCaption.centerYAnchor.constraint(equalTo: widthPopup.centerYAnchor),
-
-            tabModeLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
-            tabModeLabel.topAnchor.constraint(
-                equalTo: widthLabel.bottomAnchor,
-                constant: 28
-            ),
-            tabModeLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
-
-            tabModePopup.leadingAnchor.constraint(
-                equalTo: tabModeLabel.trailingAnchor, constant: 12
-            ),
-            tabModePopup.centerYAnchor.constraint(equalTo: tabModeLabel.centerYAnchor),
-            tabModePopup.widthAnchor.constraint(equalToConstant: 120),
-
-            tabWidthLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
-            tabWidthLabel.topAnchor.constraint(
-                equalTo: tabModeLabel.bottomAnchor,
-                constant: 28
-            ),
-            tabWidthLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
-
-            tabWidthPopup.leadingAnchor.constraint(
-                equalTo: tabWidthLabel.trailingAnchor, constant: 12
-            ),
-            tabWidthPopup.centerYAnchor.constraint(equalTo: tabWidthLabel.centerYAnchor),
-            tabWidthPopup.widthAnchor.constraint(equalToConstant: 90),
-
-            tabWidthCaption.leadingAnchor.constraint(
-                equalTo: tabWidthPopup.trailingAnchor, constant: 8
-            ),
-            tabWidthCaption.centerYAnchor
-                .constraint(equalTo: tabWidthPopup.centerYAnchor),
-
-            typographyLabel.leadingAnchor
-                .constraint(equalTo: textSizeLabel.leadingAnchor),
-            typographyLabel.topAnchor.constraint(
-                equalTo: tabWidthLabel.bottomAnchor,
-                constant: 28
-            ),
-            typographyLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
-
-            typographyPopup.leadingAnchor.constraint(
-                equalTo: typographyLabel.trailingAnchor, constant: 12
-            ),
-            typographyPopup.centerYAnchor
-                .constraint(equalTo: typographyLabel.centerYAnchor),
-            typographyPopup.widthAnchor.constraint(equalToConstant: 120),
-
-            cliHelperLabel.leadingAnchor.constraint(equalTo: textSizeLabel.leadingAnchor),
-            cliHelperLabel.topAnchor.constraint(
-                equalTo: typographyLabel.bottomAnchor,
-                constant: 28
-            ),
-            cliHelperLabel.widthAnchor.constraint(equalTo: textSizeLabel.widthAnchor),
-
-            cliHelperButton.leadingAnchor.constraint(
-                equalTo: cliHelperLabel.trailingAnchor, constant: 12
-            ),
-            cliHelperButton.centerYAnchor
-                .constraint(equalTo: cliHelperLabel.centerYAnchor),
-
-            cliHelperStatus.leadingAnchor.constraint(
-                equalTo: cliHelperLabel.trailingAnchor, constant: 12
-            ),
-            cliHelperStatus.centerYAnchor
-                .constraint(equalTo: cliHelperLabel.centerYAnchor),
-
-            cliHelperPath.leadingAnchor
-                .constraint(equalTo: cliHelperStatus.leadingAnchor),
-            cliHelperPath.topAnchor.constraint(
-                equalTo: cliHelperStatus.bottomAnchor,
-                constant: 4
-            ),
-            cliHelperPath.trailingAnchor.constraint(
-                equalTo: contentView.trailingAnchor, constant: -24
+            grid.topAnchor.constraint(
+                equalTo: contentView.topAnchor, constant: Layout.topMargin
             ),
         ])
+
+        refreshCLIHelperRow()
+    }
+
+    /// The size slider between its two sample glyphs. The slider is the only
+    /// view here without an intrinsic width, so it takes the whole remainder.
+    private func textSizeControls() -> NSView {
+        let stack = NSStackView(views: [
+            smallTextSizeLabel, textSizeSlider, largeTextSizeLabel,
+        ])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        return stack
+    }
+
+    private func popupRow(
+        _ popup: NSPopUpButton,
+        width: CGFloat,
+        caption: String? = nil
+    ) -> NSView {
+        popup.widthAnchor.constraint(equalToConstant: width).isActive = true
+        let stack = NSStackView(
+            views: [popup] + (caption.map { [NSTextField(labelWithString: $0)] } ?? [])
+        )
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        return stack
+    }
+
+    /// Install button and installed-state lines share the row: whichever the
+    /// installer state calls for is the only one left visible, and the stack
+    /// collapses the rest.
+    private func cliHelperControls() -> NSView {
+        let stack = NSStackView(views: [
+            cliHelperButton, cliHelperStatus, cliHelperPath,
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        return stack
     }
 
     private func title(for mode: EditorSettings.TabInsertionMode) -> String {
