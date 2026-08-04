@@ -312,7 +312,7 @@ private struct EditorFocusModeIconView: View {
     }
 
     private static let image: NSImage? = {
-        guard let url = Bundle.module.url(
+        guard let url = ResourceBundle.current.url(
             forResource: "text.line.middle.and.arrowtriangle",
             withExtension: "svg"
         ),
@@ -382,7 +382,7 @@ extension EditorShellView {
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.trailing, 18)
-        .frame(height: 28)
+        .frame(height: EditorShellState.statusBarHeight)
         .frame(maxWidth: .infinity)
         .background(Color(nsColor: editorBackgroundColor))
         .overlay(alignment: .top) {

@@ -567,7 +567,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.setChromeInsets(
             top: toolbarHeight + Self.editorTopInset,
             bottom: Self.editorBottomInset,
-            protectedTop: cursorExclusionHeight
+            protectedTop: cursorExclusionHeight,
+            scrollerBottomInset: EditorShellState.statusBarHeight
         )
     }
 

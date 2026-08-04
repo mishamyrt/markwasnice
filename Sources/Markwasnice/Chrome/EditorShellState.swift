@@ -8,6 +8,7 @@ final class EditorShellState: ObservableObject {
     static let toolbarContentHeight: CGFloat = 50
     static let searchAreaHeight: CGFloat = 40
     static let replaceAreaHeight: CGFloat = 28
+    static let statusBarHeight: CGFloat = 28
 
     /// The hairline marking the bottom edge of the top chrome. Drawn twice —
     /// by the in-content band in SwiftUI and by the fullscreen toolbar window

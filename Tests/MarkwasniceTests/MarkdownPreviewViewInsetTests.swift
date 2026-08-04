@@ -49,7 +49,8 @@ final class MarkdownPreviewViewInsetTests: XCTestCase {
 
         // Clip-view insets are invisible to the scroll view's scroller
         // tiling, so the scroller offset must carry the full bar height.
-        preview.setScrollerTopInset(52)
+        preview.setScrollerInsets(top: 52, bottom: 28)
         XCTAssertEqual(scrollView.scrollerInsets.top, 52, accuracy: 0.1)
+        XCTAssertEqual(scrollView.scrollerInsets.bottom, 28, accuracy: 0.1)
     }
 }

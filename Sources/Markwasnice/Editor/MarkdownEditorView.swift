@@ -100,6 +100,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var textTopPadding: CGFloat = 0
     private var textBottomPadding: CGFloat = 160
     private var protectedTopPadding: CGFloat = 0
+    private var scrollerBottomInset: CGFloat = 0
     private var isChromeVisible = true
     private var lastScrollOffsetY: CGFloat?
     private var lastScrollClipSize: NSSize?
@@ -379,11 +380,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     func setChromeInsets(
         top: CGFloat,
         bottom: CGFloat,
-        protectedTop: CGFloat = 0
+        protectedTop: CGFloat = 0,
+        scrollerBottomInset: CGFloat = 0
     ) {
         textTopPadding = top
         textBottomPadding = bottom
         protectedTopPadding = protectedTop
+        self.scrollerBottomInset = scrollerBottomInset
         applyChromeInsets()
         updateScrollerInsets()
         invalidateEditorCursorRects()
@@ -395,12 +398,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     /// Content insets are zero (padding lives inside the text view), so the
-    /// scroller spans the full window height by default; when the top bar is
-    /// visible it is inset by the bar's height.
+    /// scroller spans the full window height by default; when the chrome is
+    /// visible it is inset by the top and bottom bars' heights.
     private func updateScrollerInsets() {
         let topInset = isChromeVisible ? textTopPadding : 0
-        setScrollerTopInset(topInset)
-        previewPresenter.setScrollerTopInset(topInset)
+        let bottomInset = isChromeVisible ? scrollerBottomInset : 0
+        setScrollerInsets(top: topInset, bottom: bottomInset)
+        previewPresenter.setScrollerInsets(top: topInset, bottom: bottomInset)
     }
 
     func setFocusModeEnabled(_ isEnabled: Bool) {
@@ -1966,8 +1970,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             && lhs.right == rhs.right
     }
 
-    private func setScrollerTopInset(_ top: CGFloat) {
-        let scrollerInsets = NSEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
+    private func setScrollerInsets(top: CGFloat, bottom: CGFloat) {
+        let scrollerInsets = NSEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
         guard !edgeInsets(scrollView.scrollerInsets, equalTo: scrollerInsets) else {
             return
         }
