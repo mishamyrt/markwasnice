@@ -48,7 +48,7 @@ final class BundledFontFamily {
 
         didRegisterFonts = true
         for name in resourceNames {
-            guard let url = Bundle.module.url(
+            guard let url = ResourceBundle.current.url(
                 forResource: name, withExtension: "ttf", subdirectory: "Fonts"
             )
             else {

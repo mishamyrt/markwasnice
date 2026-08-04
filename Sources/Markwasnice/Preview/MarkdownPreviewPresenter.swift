@@ -60,8 +60,8 @@ final class MarkdownPreviewPresenter {
         previewView?.setInsets(top: top, bottom: bottom, horizontal: horizontal)
     }
 
-    func setScrollerTopInset(_ inset: CGFloat) {
-        previewView?.setScrollerTopInset(inset)
+    func setScrollerInsets(top: CGFloat, bottom: CGFloat) {
+        previewView?.setScrollerInsets(top: top, bottom: bottom)
     }
 
     private func show() {

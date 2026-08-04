@@ -11,6 +11,9 @@ CLI_SCRIPT_PATH := scripts/markwasnice
 # Distribution paths
 RELEASE_DIR := .build/arm64-apple-macosx/release
 RESOURCES_DIR := $(RELEASE_DIR)/Resources
+# SwiftPM emits the target's declared resources here, beside the executable
+# rather than inside RESOURCES_DIR, so it needs copying in explicitly.
+SPM_BUNDLE := $(RELEASE_DIR)/Markwasnice_Markwasnice.bundle
 APP_ICON_PNG_PATH := $(RESOURCES_DIR)/AppIcon.png
 ICONSET_DIR := $(RESOURCES_DIR)/AppIcon.iconset
 APP_NAME := Markwasnice
@@ -79,6 +82,7 @@ $(APP_DIST): \
 	@cp "$(RELEASE_DIR)/$(APP_NAME)" "$(APP_CONTENTS_DIR)/MacOS/$(APP_NAME)"
 
 	@cp -r "$(RESOURCES_DIR)" "$(APP_CONTENTS_DIR)/Resources"
+	@cp -r "$(SPM_BUNDLE)" "$(APP_CONTENTS_DIR)/Resources/"
 	@cp -r $(ASSETS_MANIFEST_PATH) "$(APP_CONTENTS_DIR)/Info.plist"
 
 	@install -m 755 "$(CLI_SCRIPT_PATH)" "$(APP_CONTENTS_DIR)/Resources/$(CLI_NAME)"

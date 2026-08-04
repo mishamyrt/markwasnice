@@ -25,6 +25,7 @@ final class MarkdownPreviewView: NSView {
     private var lastScrollOffsetY: CGFloat?
     private var lastScrollClipSize: NSSize?
     private var scrollerTopInset: CGFloat = 0
+    private var scrollerBottomInset: CGFloat = 0
 
     init() {
         previewTextStorage.addLayoutManager(previewLayoutManager)
@@ -87,12 +88,13 @@ final class MarkdownPreviewView: NSView {
         applyScrollerInsets()
     }
 
-    /// Mirrors the editor's scroller offset (bar height while the chrome is
-    /// visible, 0 otherwise). Content padding lives on the clip view, which
-    /// the scroll view's scroller tiling does not see, so the full offset
-    /// is applied here just like in the editor.
-    func setScrollerTopInset(_ inset: CGFloat) {
-        scrollerTopInset = inset
+    /// Mirrors the editor's scroller offsets (bar heights while the chrome
+    /// is visible, 0 otherwise). Content padding lives on the clip view,
+    /// which the scroll view's scroller tiling does not see, so the full
+    /// offsets are applied here just like in the editor.
+    func setScrollerInsets(top: CGFloat, bottom: CGFloat) {
+        scrollerTopInset = top
+        scrollerBottomInset = bottom
         applyScrollerInsets()
     }
 
@@ -188,7 +190,12 @@ final class MarkdownPreviewView: NSView {
     }
 
     private func applyScrollerInsets() {
-        let insets = NSEdgeInsets(top: scrollerTopInset, left: 0, bottom: 0, right: 0)
+        let insets = NSEdgeInsets(
+            top: scrollerTopInset,
+            left: 0,
+            bottom: scrollerBottomInset,
+            right: 0
+        )
         if !edgeInsets(scrollView.scrollerInsets, equalTo: insets) {
             scrollView.scrollerInsets = insets
         }
