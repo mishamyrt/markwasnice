@@ -822,6 +822,31 @@ final class MarkdownTextView: NSTextView {
         pasteboard.setString(format.convert(markdown), forType: .string)
     }
 
+    override func paste(_ sender: Any?) {
+        let pasteboard = NSPasteboard.general
+        if let richText = RichTextMarkdownConverter.attributedString(
+            from: pasteboard
+        ) {
+            let markdown = RichTextMarkdownConverter.convert(richText)
+            if !markdown.isEmpty {
+                super.insertText(markdown, replacementRange: selectedRange())
+                return
+            }
+        }
+
+        if let plainText = pasteboard.string(forType: .string) {
+            let normalized = RichTextMarkdownConverter.normalizeLineSeparators(
+                plainText
+            )
+            if normalized != plainText {
+                super.insertText(normalized, replacementRange: selectedRange())
+                return
+            }
+        }
+
+        super.paste(sender)
+    }
+
     /// AppKit disables responsive (asynchronous, pre-rendered) scrolling for
     /// any view that overrides scrollWheel(with:). Our override only observes
     /// the event and always calls super, so it is safe to opt back in — losing
