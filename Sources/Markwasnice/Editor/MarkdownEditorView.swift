@@ -79,7 +79,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     /// flips the shell state, which calls back into setPreviewActive(false).
     var onPreviewExitRequested: (() -> Void)?
 
-    private let scrollView = NSScrollView()
+    private let scrollView = OverlayScrollView()
     private let clipView = NSClipView()
     // TextKit 1 stack: contiguous layout computes exact geometry for the whole
     // document, so the document height is deterministic and the caret-visible

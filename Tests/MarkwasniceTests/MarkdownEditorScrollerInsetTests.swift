@@ -27,6 +27,11 @@ struct MarkdownEditorScrollerInsetTests {
         let scrollView = try #require(
             editor.subviews.compactMap { $0 as? NSScrollView }.first
         )
+        scrollView.scrollerStyle = .legacy
+        editor.layoutSubtreeIfNeeded()
+
+        #expect(scrollView.scrollerStyle == .overlay)
+        #expect(scrollView.contentView.frame.width == scrollView.bounds.width)
         #expect(scrollView.scrollerInsets.top == 60)
         #expect(scrollView.scrollerInsets.bottom == 28)
 

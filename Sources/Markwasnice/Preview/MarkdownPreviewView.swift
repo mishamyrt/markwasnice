@@ -13,7 +13,7 @@ final class MarkdownPreviewView: NSView {
         set { textView.onExitRequested = newValue }
     }
 
-    private let scrollView = NSScrollView()
+    private let scrollView = OverlayScrollView()
     // Same TextKit 1 stack as the editor: exact whole-document geometry keeps
     // the fraction-based scroll sync deterministic.
     private let previewTextStorage = NSTextStorage()

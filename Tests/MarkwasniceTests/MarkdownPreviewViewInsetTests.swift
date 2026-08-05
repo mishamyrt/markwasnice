@@ -42,6 +42,11 @@ final class MarkdownPreviewViewInsetTests: XCTestCase {
             XCTFail("Preview must host a scroll view")
             return
         }
+        scrollView.scrollerStyle = .legacy
+        preview.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(scrollView.scrollerStyle, .overlay)
+        XCTAssertEqual(scrollView.contentView.frame.width, scrollView.bounds.width)
         XCTAssertEqual(scrollView.contentView.contentInsets.top, 52, accuracy: 0.1)
         XCTAssertEqual(scrollView.contentView.contentInsets.bottom, 72, accuracy: 0.1)
         XCTAssertEqual(scrollView.contentView.bounds.origin.y, -52, accuracy: 0.1)
