@@ -79,7 +79,7 @@ final class ToolbarVisibilityView: NSView {
     }
 }
 
-struct TopHoverTrackingBridge: NSViewRepresentable {
+struct HoverTrackingBridge: NSViewRepresentable {
     let onHoverChanged: (Bool) -> Void
 
     private var isDragEnabled = false
@@ -94,20 +94,20 @@ struct TopHoverTrackingBridge: NSViewRepresentable {
         return copy
     }
 
-    func makeNSView(context _: Context) -> TopHoverTrackingView {
-        let view = TopHoverTrackingView(frame: .zero)
+    func makeNSView(context _: Context) -> HoverTrackingView {
+        let view = HoverTrackingView(frame: .zero)
         view.onHoverChanged = onHoverChanged
         view.isDragEnabled = isDragEnabled
         return view
     }
 
-    func updateNSView(_ view: TopHoverTrackingView, context _: Context) {
+    func updateNSView(_ view: HoverTrackingView, context _: Context) {
         view.onHoverChanged = onHoverChanged
         view.isDragEnabled = isDragEnabled
     }
 }
 
-final class TopHoverTrackingView: NSView {
+final class HoverTrackingView: NSView {
     var onHoverChanged: ((Bool) -> Void)?
     var isDragEnabled = false {
         didSet {
@@ -163,7 +163,14 @@ final class TopHoverTrackingView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         updateCursor(with: event)
-        setHovering(true)
+        if isHovering {
+            // Typing or scrolling can hide a bar without moving the pointer
+            // out of its reveal zone. The next deliberate pointer movement
+            // inside that zone should reveal it again.
+            onHoverChanged?(true)
+        } else {
+            setHovering(true)
+        }
     }
 
     override func cursorUpdate(with event: NSEvent) {

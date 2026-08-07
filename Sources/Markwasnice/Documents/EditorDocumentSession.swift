@@ -26,10 +26,9 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     private let stylingController: MarkdownStylingController
     private let onAutosaveNeeded: () -> Void
-    private var wordCountTask: Task<Void, Never>?
+    private var statisticsTask: Task<Void, Never>?
     private var isCloseApproved = false
     private var isPromptVisible = false
-    private var isPointerInChromeRevealZone = false
     private(set) var isTabBarTemporarilyHidden = false
     private weak var hiddenTabBarAccessory: NSTitlebarAccessoryViewController?
     private var text: String
@@ -64,11 +63,17 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         hasUnsavedFileChanges = isEdited
         self.onAutosaveNeeded = onAutosaveNeeded
         editorView = MarkdownEditorView(settings: settings)
-        shellState = EditorShellState()
+        shellState = EditorShellState(
+            readingWordsPerMinute: settings.readingWordsPerMinute,
+            speakingWordsPerMinute: settings.speakingWordsPerMinute
+        )
         stylingController = MarkdownStylingController(editorView: editorView)
 
-        shellState.onTopHoverChanged = { [weak self] isHovering in
-            self?.handleTopHoverChanged(isHovering)
+        shellState.onToolbarHoverChanged = { [weak self] isHovering in
+            self?.handleToolbarHoverChanged(isHovering)
+        }
+        shellState.onStatusBarHoverChanged = { [weak self] isHovering in
+            self?.handleStatusBarHoverChanged(isHovering)
         }
         shellState.onFocusModeEnabledChanged = { [weak self] isEnabled in
             self?.editorView.setFocusModeEnabled(isEnabled)
@@ -120,7 +125,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         stylingController.scheduleParse(text: text)
         // didSet observers don't fire during init.
         updateTitle()
-        scheduleWordCount(text: text)
+        scheduleStatistics(text: text)
     }
 
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView) {
@@ -137,9 +142,16 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
         onAutosaveNeeded()
         stylingController.scheduleParse(text: newText)
-        scheduleWordCount(text: newText)
+        scheduleStatistics(text: newText)
         refreshSearchMatches(selectsFirstMatch: false)
         hideChrome()
+    }
+
+    func markdownEditorView(
+        _: MarkdownEditorView,
+        didChangeSelectionText selectedText: String?
+    ) {
+        shellState.selectionStatistics = selectedText.map(Self.statistics(in:))
     }
 
     func markdownEditorViewDidScroll(_: MarkdownEditorView) {
@@ -224,6 +236,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     func applySettings(_ settings: EditorSettings) {
         stylingController.applySettings(settings)
+        if shellState.readingWordsPerMinute != settings.readingWordsPerMinute {
+            shellState.readingWordsPerMinute = settings.readingWordsPerMinute
+        }
+        if shellState.speakingWordsPerMinute != settings.speakingWordsPerMinute {
+            shellState.speakingWordsPerMinute = settings.speakingWordsPerMinute
+        }
     }
 
     var isEmptyDocument: Bool {
@@ -237,7 +255,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.documentURL = url
         editorView.setString(text, clearsUndo: true)
         stylingController.scheduleParse(text: text)
-        scheduleWordCount(text: text)
+        scheduleStatistics(text: text)
         refreshSearchMatches(selectsFirstMatch: false)
         onAutosaveNeeded()
     }
@@ -529,9 +547,9 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         shellState.updateTitle(title, isEdited: hasUnsavedFileChanges)
     }
 
-    private func scheduleWordCount(text: String) {
-        wordCountTask?.cancel()
-        wordCountTask = Task.detached { [weak self] in
+    private func scheduleStatistics(text: String) {
+        statisticsTask?.cancel()
+        statisticsTask = Task.detached { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else {
                 return
@@ -539,6 +557,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
             let words = Self.wordCount(in: text)
             let characters = text.count
+            let sentences = Self.sentenceCount(in: text)
             await MainActor.run {
                 guard !Task.isCancelled, let shellState = self?.shellState else {
                     return
@@ -552,6 +571,9 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 }
                 if shellState.characterCount != characters {
                     shellState.characterCount = characters
+                }
+                if shellState.sentenceCount != sentences {
+                    shellState.sentenceCount = sentences
                 }
             }
         }
@@ -582,26 +604,47 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }.count
     }
 
+    nonisolated static func sentenceCount(in text: String) -> Int {
+        var count = 0
+        text.enumerateSubstrings(
+            in: text.startIndex ..< text.endIndex,
+            options: [.bySentences, .substringNotRequired]
+        ) { _, _, _, _ in
+            count += 1
+        }
+        return count
+    }
+
+    nonisolated private static func statistics(in text: String) -> EditorTextStatistics {
+        EditorTextStatistics(
+            characterCount: text.count,
+            wordCount: wordCount(in: text),
+            sentenceCount: sentenceCount(in: text)
+        )
+    }
+
     private func showChrome() {
-        // @Published fires objectWillChange even for equal values; writing on
-        // every scroll tick invalidates the whole SwiftUI shell per frame.
+        showToolbar()
+        showStatusBar()
+    }
+
+    private func showToolbar() {
+        // @Published fires objectWillChange even for equal values; avoid
+        // invalidating the whole SwiftUI shell for an already-visible bar.
         if !shellState.isToolbarVisible {
             shellState.isToolbarVisible = true
-        }
-        if !shellState.isStatusBarVisible {
-            shellState.isStatusBarVisible = true
         }
         restoreTabBarIfNeeded()
     }
 
+    private func showStatusBar() {
+        if !shellState.isStatusBarVisible {
+            shellState.isStatusBarVisible = true
+        }
+    }
+
     private func hideChrome() {
         guard !shellState.isSearchPresented else {
-            return
-        }
-
-        updatePointerInChromeRevealZone()
-
-        guard !isPointerInChromeRevealZone else {
             return
         }
 
@@ -622,7 +665,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         hideTabBarTemporarilyIfNeeded()
     }
 
-    /// The tab bar hides and reveals together with the rest of the chrome.
+    /// The tab bar hides with the chrome and reveals with the toolbar.
     /// While it is temporarily hidden the logical tab chrome state (insets,
     /// prominent backdrop) is kept frozen so the text does not shift; the
     /// KVO refresh in WindowLifecycleView skips updates for this state.
@@ -664,35 +707,16 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
     }
 
-    private func handleTopHoverChanged(_ isHovering: Bool) {
-        isPointerInChromeRevealZone = isHovering
+    private func handleToolbarHoverChanged(_ isHovering: Bool) {
         if isHovering {
-            showChrome()
+            showToolbar()
         }
     }
 
-    private func updatePointerInChromeRevealZone() {
-        guard let window = editorView.window,
-              let contentView = window.contentView,
-              let revealRect = TopChromeGeometry.revealRectInContentView(
-                  window: window,
-                  revealHeight: shellState.isFullScreen
-                      ? 0 : shellState.topChromeInsetHeight
-              )
-        else {
-            isPointerInChromeRevealZone = false
-            return
+    private func handleStatusBarHoverChanged(_ isHovering: Bool) {
+        if isHovering {
+            showStatusBar()
         }
-
-        let pointInWindow = window.mouseLocationOutsideOfEventStream
-        let pointInContentView = contentView.convert(pointInWindow, from: nil)
-        let isHovering = revealRect.contains(pointInContentView)
-
-        guard isHovering != isPointerInChromeRevealZone else {
-            return
-        }
-
-        handleTopHoverChanged(isHovering)
     }
 
     private func handleSearchPresentationChanged(_ isPresented: Bool) {

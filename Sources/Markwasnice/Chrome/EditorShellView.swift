@@ -28,12 +28,7 @@ struct EditorShellView: View {
 
                 Spacer(minLength: 0)
 
-                statusBar
-                    .opacity(state.isStatusBarVisible ? 1 : 0)
-                    .animation(
-                        .easeInOut(duration: 0.1),
-                        value: state.isStatusBarVisible
-                    )
+                statusBarHoverLayer
             }
 
             if !state.isFullScreen, state.isSearchPresented {
@@ -53,10 +48,13 @@ struct EditorShellView: View {
         .background(Color(nsColor: editorBackgroundColor))
         .ignoresSafeArea(.container, edges: .top)
         .onAppear {
-            editorView.setChromeVisible(state.isToolbarVisible)
+            updateEditorChromeVisibility()
         }
-        .onChange(of: state.isToolbarVisible) { _, isVisible in
-            editorView.setChromeVisible(isVisible)
+        .onChange(of: state.isToolbarVisible) { _, _ in
+            updateEditorChromeVisibility()
+        }
+        .onChange(of: state.isStatusBarVisible) { _, _ in
+            updateEditorChromeVisibility()
         }
     }
 
@@ -107,8 +105,8 @@ struct EditorShellView: View {
 
     private var toolbarHoverLayer: some View {
         ZStack(alignment: .top) {
-            TopHoverTrackingBridge { isHovering in
-                state.onTopHoverChanged?(isHovering)
+            HoverTrackingBridge { isHovering in
+                state.onToolbarHoverChanged?(isHovering)
             }
             .isDragEnabled(state.isToolbarVisible)
             .frame(height: EditorShellState.toolbarRevealHeight)
@@ -373,14 +371,16 @@ extension EditorShellView {
     }
 
     private var statusBar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 6) {
             Spacer(minLength: 0)
-            Text(state.characterCountText)
-            Text(state.wordCountText)
-            Text(state.readingTimeText)
+            statusMetric(state.characterCountText)
+            statusMetric(state.wordCountText)
+            statusMetric(state.sentenceCountText)
+            statusMetric(state.readingTimeText)
+            statusMetric(state.speakingTimeText)
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        .font(.body)
+        .foregroundStyle(Color(nsColor: editorForegroundColor))
         .padding(.trailing, 18)
         .frame(height: EditorShellState.statusBarHeight)
         .frame(maxWidth: .infinity)
@@ -393,12 +393,59 @@ extension EditorShellView {
         .allowsHitTesting(false)
     }
 
+    private func statusMetric(_ text: String) -> some View {
+        Text(text)
+            .padding(.horizontal, 3)
+            .padding(.vertical, 2)
+            .background {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(
+                        state.selectionStatistics == nil
+                            ? Color.clear
+                            : Color(nsColor: editorSelectionColor)
+                    )
+            }
+    }
+
+    private var statusBarHoverLayer: some View {
+        ZStack {
+            HoverTrackingBridge { isHovering in
+                state.onStatusBarHoverChanged?(isHovering)
+            }
+
+            statusBar
+                .opacity(state.isStatusBarVisible ? 1 : 0)
+                .animation(
+                    .easeInOut(duration: 0.1),
+                    value: state.isStatusBarVisible
+                )
+        }
+        .frame(height: EditorShellState.statusBarHeight)
+    }
+
+    private func updateEditorChromeVisibility() {
+        editorView.setChromeVisibility(
+            toolbarVisible: state.isToolbarVisible,
+            statusBarVisible: state.isStatusBarVisible
+        )
+    }
+
+    private var editorForegroundColor: NSColor {
+        let colors = EditorThemeColors.default
+        return colorScheme == .dark ? colors.dark.foreground : colors.light.foreground
+    }
+
     /// Derived from the SwiftUI color scheme rather than NSApp's appearance:
     /// reading NSApp.effectiveAppearance here leaves SwiftUI unaware of the
     /// dependency, so the background would not refresh on theme changes.
     private var editorBackgroundColor: NSColor {
         let colors = EditorThemeColors.default
         return colorScheme == .dark ? colors.dark.background : colors.light.background
+    }
+
+    private var editorSelectionColor: NSColor {
+        let colors = EditorThemeColors.default
+        return colorScheme == .dark ? colors.dark.selection : colors.light.selection
     }
 }
 

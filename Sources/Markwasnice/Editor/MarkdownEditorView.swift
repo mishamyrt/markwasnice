@@ -2,6 +2,10 @@
 
 protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        didChangeSelectionText selectedText: String?
+    )
     func markdownEditorViewDidScroll(_ editorView: MarkdownEditorView)
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
@@ -101,7 +105,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var textBottomPadding: CGFloat = 160
     private var protectedTopPadding: CGFloat = 0
     private var scrollerBottomInset: CGFloat = 0
-    private var isChromeVisible = true
+    private var isToolbarVisible = true
+    private var isStatusBarVisible = true
     private var lastScrollOffsetY: CGFloat?
     private var lastScrollClipSize: NSSize?
     private var isScrolledFromTop = false
@@ -392,17 +397,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         invalidateEditorCursorRects()
     }
 
-    func setChromeVisible(_ isVisible: Bool) {
-        isChromeVisible = isVisible
+    func setChromeVisibility(
+        toolbarVisible: Bool,
+        statusBarVisible: Bool
+    ) {
+        isToolbarVisible = toolbarVisible
+        isStatusBarVisible = statusBarVisible
         updateScrollerInsets()
     }
 
     /// Content insets are zero (padding lives inside the text view), so the
     /// scroller spans the full window height by default; when the chrome is
-    /// visible it is inset by the top and bottom bars' heights.
+    /// visible it is inset independently by the top and bottom bars' heights.
     private func updateScrollerInsets() {
-        let topInset = isChromeVisible ? textTopPadding : 0
-        let bottomInset = isChromeVisible ? scrollerBottomInset : 0
+        let topInset = isToolbarVisible ? textTopPadding : 0
+        let bottomInset = isStatusBarVisible ? scrollerBottomInset : 0
         setScrollerInsets(top: topInset, bottom: bottomInset)
         previewPresenter.setScrollerInsets(top: topInset, bottom: bottomInset)
     }
@@ -994,6 +1003,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let didClearSelection = previousSelectionRange.length > 0
             && selectedRange.length == 0
         previousSelectionRange = selectedRange
+        delegate?.markdownEditorView(
+            self,
+            didChangeSelectionText: selectedText(in: selectedRange)
+        )
 
         guard !isApplyingStyles else {
             return
@@ -1017,6 +1030,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             // just outside the new bounds otherwise remain in the backing store.
             textView.setNeedsDisplay(textView.visibleRect)
         }
+    }
+
+    private func selectedText(in range: NSRange) -> String? {
+        guard range.length > 0,
+              range.location != NSNotFound,
+              NSMaxRange(range) <= sourceCharacters.length
+        else {
+            return nil
+        }
+
+        return sourceCharacters.substring(with: range)
     }
 
     @available(*, unavailable)

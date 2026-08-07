@@ -12,7 +12,7 @@ struct MarkdownEditorScrollerInsetTests {
         tabWidth: 4
     )
 
-    @Test func visibleChromeInsetsScrollerByBothBars() throws {
+    @Test func chromeBarsInsetScrollerIndependently() throws {
         let editor = MarkdownEditorView(
             settings: Self.settings,
             frame: NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -35,7 +35,24 @@ struct MarkdownEditorScrollerInsetTests {
         #expect(scrollView.scrollerInsets.top == 60)
         #expect(scrollView.scrollerInsets.bottom == 28)
 
-        editor.setChromeVisible(false)
+        editor.setChromeVisibility(
+            toolbarVisible: false,
+            statusBarVisible: true
+        )
+        #expect(scrollView.scrollerInsets.top == 0)
+        #expect(scrollView.scrollerInsets.bottom == 28)
+
+        editor.setChromeVisibility(
+            toolbarVisible: true,
+            statusBarVisible: false
+        )
+        #expect(scrollView.scrollerInsets.top == 60)
+        #expect(scrollView.scrollerInsets.bottom == 0)
+
+        editor.setChromeVisibility(
+            toolbarVisible: false,
+            statusBarVisible: false
+        )
         #expect(scrollView.scrollerInsets.top == 0)
         #expect(scrollView.scrollerInsets.bottom == 0)
     }

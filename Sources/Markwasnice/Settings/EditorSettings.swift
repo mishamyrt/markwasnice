@@ -13,18 +13,23 @@ struct EditorSettings: Equatable {
 
     static let maxTextWidthOptions = [64, 72, 80]
     static let tabWidthOptions = [1, 2, 4]
+    static let wordsPerMinuteRange = 1 ... 1000
     static let defaultBasePointSize: CGFloat = 20
     static let defaultTextSizeScale: CGFloat = 1
     static let defaultMaxTextColumns = 64
     static let defaultTabInsertionMode = TabInsertionMode.spaces
     static let defaultTabWidth = 4
     static let defaultTypographyLocale = TypographyLocale.russian
+    static let defaultReadingWordsPerMinute = 200
+    static let defaultSpeakingWordsPerMinute = 130
 
     var textSizeScale: CGFloat
     var maxTextColumns: Int
     var tabInsertionMode: TabInsertionMode
     var tabWidth: Int
     var typographyLocale: TypographyLocale = Self.defaultTypographyLocale
+    var readingWordsPerMinute = Self.defaultReadingWordsPerMinute
+    var speakingWordsPerMinute = Self.defaultSpeakingWordsPerMinute
 
     var basePointSize: CGFloat {
         Self.defaultBasePointSize * textSizeScale
@@ -42,6 +47,8 @@ final class EditorSettingsStore {
         static let tabInsertionMode = "editor.tabInsertionMode"
         static let tabWidth = "editor.tabWidth"
         static let typographyLocale = "editor.typographyLocale"
+        static let readingWordsPerMinute = "editor.readingWordsPerMinute"
+        static let speakingWordsPerMinute = "editor.speakingWordsPerMinute"
     }
 
     private let defaults: UserDefaults
@@ -74,13 +81,29 @@ final class EditorSettingsStore {
             storedTypographyLocale
                 .flatMap(EditorSettings.TypographyLocale.init(rawValue:))
                 ?? EditorSettings.defaultTypographyLocale
+        let storedReadingWordsPerMinute = defaults.integer(
+            forKey: Key.readingWordsPerMinute
+        )
+        let readingWordsPerMinute =
+            EditorSettings.wordsPerMinuteRange.contains(storedReadingWordsPerMinute)
+                ? storedReadingWordsPerMinute
+                : EditorSettings.defaultReadingWordsPerMinute
+        let storedSpeakingWordsPerMinute = defaults.integer(
+            forKey: Key.speakingWordsPerMinute
+        )
+        let speakingWordsPerMinute =
+            EditorSettings.wordsPerMinuteRange.contains(storedSpeakingWordsPerMinute)
+                ? storedSpeakingWordsPerMinute
+                : EditorSettings.defaultSpeakingWordsPerMinute
 
         return EditorSettings(
             textSizeScale: textSizeScale,
             maxTextColumns: maxTextColumns,
             tabInsertionMode: tabInsertionMode,
             tabWidth: tabWidth,
-            typographyLocale: typographyLocale
+            typographyLocale: typographyLocale,
+            readingWordsPerMinute: readingWordsPerMinute,
+            speakingWordsPerMinute: speakingWordsPerMinute
         )
     }
 
@@ -90,5 +113,13 @@ final class EditorSettingsStore {
         defaults.set(settings.tabInsertionMode.rawValue, forKey: Key.tabInsertionMode)
         defaults.set(settings.tabWidth, forKey: Key.tabWidth)
         defaults.set(settings.typographyLocale.rawValue, forKey: Key.typographyLocale)
+        defaults.set(
+            settings.readingWordsPerMinute,
+            forKey: Key.readingWordsPerMinute
+        )
+        defaults.set(
+            settings.speakingWordsPerMinute,
+            forKey: Key.speakingWordsPerMinute
+        )
     }
 }

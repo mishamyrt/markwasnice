@@ -55,7 +55,7 @@ struct PreferencesFormLayoutTests {
         contentView.layoutSubtreeIfNeeded()
 
         let form = try #require(contentView.subviews.first as? NSGridView)
-        #expect(form.numberOfRows == 6)
+        #expect(form.numberOfRows == 8)
         #expect(form.frame.maxY <= contentView.bounds.height + 0.5)
         #expect(form.frame.minY >= -0.5)
         #expect(form.frame.width <= contentView.bounds.width)
@@ -79,8 +79,8 @@ struct PreferencesFormLayoutTests {
         let tallForm = try #require(tall.subviews.first as? NSGridView)
         let shortForm = try #require(short.subviews.first as? NSGridView)
 
-        #expect(!tallForm.row(at: 5).isHidden)
-        #expect(shortForm.row(at: 5).isHidden)
+        #expect(!tallForm.row(at: 7).isHidden)
+        #expect(shortForm.row(at: 7).isHidden)
         #expect(short.bounds.height < tall.bounds.height)
         #expect(short.bounds.width == tall.bounds.width)
     }

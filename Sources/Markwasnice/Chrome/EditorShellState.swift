@@ -1,5 +1,11 @@
 import SwiftUI
 
+struct EditorTextStatistics: Equatable, Sendable {
+    let characterCount: Int
+    let wordCount: Int
+    let sentenceCount: Int
+}
+
 @MainActor
 final class EditorShellState: ObservableObject {
     static let toolbarRevealHeight: CGFloat = 60
@@ -8,7 +14,7 @@ final class EditorShellState: ObservableObject {
     static let toolbarContentHeight: CGFloat = 50
     static let searchAreaHeight: CGFloat = 40
     static let replaceAreaHeight: CGFloat = 28
-    static let statusBarHeight: CGFloat = 28
+    static let statusBarHeight: CGFloat = 38
 
     /// The hairline marking the bottom edge of the top chrome. Drawn twice —
     /// by the in-content band in SwiftUI and by the fullscreen toolbar window
@@ -20,6 +26,10 @@ final class EditorShellState: ObservableObject {
     @Published var isEdited = false
     @Published var wordCount = 0
     @Published var characterCount = 0
+    @Published var sentenceCount = 0
+    @Published var selectionStatistics: EditorTextStatistics?
+    @Published var readingWordsPerMinute: Int
+    @Published var speakingWordsPerMinute: Int
     @Published var isToolbarVisible = true
     @Published var isStatusBarVisible = true
     @Published var isFullScreen = false
@@ -40,7 +50,8 @@ final class EditorShellState: ObservableObject {
     @Published var isPreviewActive = false
     @Published var isContentScrolled = false
 
-    var onTopHoverChanged: ((Bool) -> Void)?
+    var onToolbarHoverChanged: ((Bool) -> Void)?
+    var onStatusBarHoverChanged: ((Bool) -> Void)?
     var onFocusModeEnabledChanged: ((Bool) -> Void)?
     var onFocusModeSelected: ((EditorFocusMode) -> Void)?
     var onProofreadingEnabledChanged: ((Bool) -> Void)?
@@ -54,30 +65,73 @@ final class EditorShellState: ObservableObject {
     var onReplaceAllMatches: (() -> Void)?
     var onPreviewActiveChanged: ((Bool) -> Void)?
 
-    static let readingWordsPerMinute = 200.0
+    init(
+        readingWordsPerMinute: Int = EditorSettings.defaultReadingWordsPerMinute,
+        speakingWordsPerMinute: Int = EditorSettings.defaultSpeakingWordsPerMinute
+    ) {
+        self.readingWordsPerMinute = readingWordsPerMinute
+        self.speakingWordsPerMinute = speakingWordsPerMinute
+    }
 
     var wordCountText: String {
-        wordCount == 1 ? "1 word" : "\(wordCount) words"
+        displayedWordCount == 1 ? "1 word" : "\(displayedWordCount) words"
     }
 
     var characterCountText: String {
-        characterCount == 1 ? "1 character" : "\(characterCount) characters"
+        displayedCharacterCount == 1
+            ? "1 character"
+            : "\(displayedCharacterCount) characters"
+    }
+
+    var sentenceCountText: String {
+        displayedSentenceCount == 1
+            ? "1 sentence"
+            : "\(displayedSentenceCount) sentences"
     }
 
     var readingTimeText: String {
+        durationText(
+            wordsPerMinute: readingWordsPerMinute,
+            activity: "reading"
+        )
+    }
+
+    var speakingTimeText: String {
+        durationText(
+            wordsPerMinute: speakingWordsPerMinute,
+            activity: "speaking"
+        )
+    }
+
+    private func durationText(
+        wordsPerMinute: Int,
+        activity: String
+    ) -> String {
         let seconds = Int(
-            (Double(wordCount) / Self.readingWordsPerMinute * 60).rounded()
+            (Double(displayedWordCount) / Double(wordsPerMinute) * 60).rounded()
         )
         if seconds < 60 {
-            return "\(seconds) sec"
+            return "\(seconds) sec. \(activity)"
         }
 
         let minutes = Int((Double(seconds) / 60).rounded())
         if minutes < 60 {
-            return "\(minutes) min"
+            return "\(minutes) min. \(activity)"
         }
 
-        return "\(Int((Double(minutes) / 60).rounded())) h"
+        return "\(Int((Double(minutes) / 60).rounded())) h. \(activity)"
+    }
+
+    private var displayedCharacterCount: Int {
+        selectionStatistics?.characterCount ?? characterCount
+    }
+
+    private var displayedWordCount: Int {
+        selectionStatistics?.wordCount ?? wordCount
+    }
+
+    private var displayedSentenceCount: Int {
+        selectionStatistics?.sentenceCount ?? sentenceCount
     }
 
     var searchBarHeight: CGFloat {

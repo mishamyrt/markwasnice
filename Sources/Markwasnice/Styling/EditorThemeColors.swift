@@ -58,7 +58,7 @@ struct EditorThemeColors: Equatable {
             ),
             foreground: lightForeground,
             caret: NSColor(calibratedRed: 0.13, green: 0.12, blue: 0.11, alpha: 1),
-            selection: NSColor(srgbRed:0.519, green:0.893, blue:1.000, alpha:0.46),
+            selection: NSColor(srgbRed: 0.519, green: 0.893, blue: 1.000, alpha: 0.46),
             codeBackground: NSColor(
                 calibratedRed: 0.937,
                 green: 0.937,
@@ -104,8 +104,13 @@ struct EditorThemeColors: Equatable {
             background: NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.08, alpha: 1),
             foreground: darkForeground,
             caret: NSColor(calibratedRed: 0.88, green: 0.86, blue: 0.81, alpha: 1),
-            selection: NSColor(srgbRed:0.008, green:0.302, blue:0.403, alpha:0.76),
-            codeBackground: NSColor(srgbRed:0.153, green:0.153, blue:0.153, alpha:1.00),
+            selection: NSColor(srgbRed: 0.008, green: 0.302, blue: 0.403, alpha: 0.76),
+            codeBackground: NSColor(
+                srgbRed: 0.153,
+                green: 0.153,
+                blue: 0.153,
+                alpha: 1.00
+            ),
             punctuation: darkForeground.withAlphaComponent(0.54),
             underline: darkForeground.withAlphaComponent(0.33),
             thematicBreak: NSColor(

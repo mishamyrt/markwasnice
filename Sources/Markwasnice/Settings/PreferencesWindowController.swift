@@ -1,7 +1,7 @@
 import AppKit
 
 @MainActor
-final class PreferencesWindowController: NSWindowController {
+final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate {
     private enum Layout {
         static let width: CGFloat = 420
         static let margin: CGFloat = 24
@@ -10,7 +10,7 @@ final class PreferencesWindowController: NSWindowController {
         /// form had.
         static let rowSpacing: CGFloat = 20
         static let columnSpacing: CGFloat = 12
-        static let labelColumnWidth: CGFloat = 90
+        static let labelColumnWidth: CGFloat = 110
         static let popupWidth: CGFloat = 90
         static let widePopupWidth: CGFloat = 120
     }
@@ -35,6 +35,8 @@ final class PreferencesWindowController: NSWindowController {
     private let tabModePopup = NSPopUpButton()
     private let tabWidthPopup = NSPopUpButton()
     private let typographyPopup = NSPopUpButton()
+    private let readingSpeedField = NSTextField()
+    private let speakingSpeedField = NSTextField()
     private let cliHelperLabel = NSTextField(labelWithString: "CLI Helper")
     private let cliHelperButton = NSButton(
         title: "Install CLI helper", target: nil, action: nil
@@ -83,6 +85,8 @@ final class PreferencesWindowController: NSWindowController {
         tabModePopup.selectItem(withTitle: title(for: settings.tabInsertionMode))
         tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
         typographyPopup.selectItem(withTitle: title(for: settings.typographyLocale))
+        readingSpeedField.integerValue = settings.readingWordsPerMinute
+        speakingSpeedField.integerValue = settings.speakingWordsPerMinute
         // The link can come and go behind the app's back (removed manually,
         // a deleted bundle), so the row is re-read every time the window is
         // about to be shown.
@@ -153,6 +157,35 @@ final class PreferencesWindowController: NSWindowController {
         onChange(settings, .committed)
     }
 
+    private func speedChanged(_ sender: NSTextField) {
+        commitSpeed(sender.integerValue, for: sender)
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField,
+              field == readingSpeedField || field == speakingSpeedField
+        else {
+            return
+        }
+
+        speedChanged(field)
+    }
+
+    private func commitSpeed(_ value: Int, for field: NSTextField) {
+        let value = min(
+            max(value, EditorSettings.wordsPerMinuteRange.lowerBound),
+            EditorSettings.wordsPerMinuteRange.upperBound
+        )
+        field.integerValue = value
+
+        if field == readingSpeedField {
+            settings.readingWordsPerMinute = value
+        } else {
+            settings.speakingWordsPerMinute = value
+        }
+        onChange(settings, .committed)
+    }
+
     @objc private func installCLIHelper(_: NSButton) {
         do {
             try cliHelperInstaller.install()
@@ -214,6 +247,8 @@ final class PreferencesWindowController: NSWindowController {
         let tabModeLabel = NSTextField(labelWithString: "Tab Inserts")
         let tabWidthLabel = NSTextField(labelWithString: "Tab Size")
         let typographyLabel = NSTextField(labelWithString: "Typography")
+        let readingSpeedLabel = NSTextField(labelWithString: "Reading Speed")
+        let speakingSpeedLabel = NSTextField(labelWithString: "Speaking Speed")
 
         textSizeSlider.target = self
         textSizeSlider.action = #selector(textSizeChanged(_:))
@@ -252,6 +287,15 @@ final class PreferencesWindowController: NSWindowController {
         typographyPopup.action = #selector(typographyChanged(_:))
         typographyPopup.selectItem(withTitle: title(for: settings.typographyLocale))
 
+        configureSpeedField(
+            field: readingSpeedField,
+            value: settings.readingWordsPerMinute
+        )
+        configureSpeedField(
+            field: speakingSpeedField,
+            value: settings.speakingWordsPerMinute
+        )
+
         cliHelperButton.target = self
         cliHelperButton.action = #selector(installCLIHelper(_:))
         cliHelperButton.bezelStyle = .rounded
@@ -276,6 +320,8 @@ final class PreferencesWindowController: NSWindowController {
             [typographyLabel, popupRow(
                 typographyPopup, width: Layout.widePopupWidth
             )],
+            [readingSpeedLabel, speedFieldRow(readingSpeedField)],
+            [speakingSpeedLabel, speedFieldRow(speakingSpeedField)],
             [cliHelperLabel, cliHelperControls()],
         ])
         grid.translatesAutoresizingMaskIntoConstraints = false
@@ -336,6 +382,30 @@ final class PreferencesWindowController: NSWindowController {
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 8
+        return stack
+    }
+
+    private func configureSpeedField(
+        field: NSTextField,
+        value: Int
+    ) {
+        let formatter = NumberFormatter()
+        formatter.minimum = EditorSettings.wordsPerMinuteRange.lowerBound as NSNumber
+        formatter.maximum = EditorSettings.wordsPerMinuteRange.upperBound as NSNumber
+        formatter.allowsFloats = false
+        field.formatter = formatter
+        field.delegate = self
+        field.integerValue = value
+        field.widthAnchor.constraint(equalToConstant: 56).isActive = true
+    }
+
+    private func speedFieldRow(_ field: NSTextField) -> NSView {
+        let stack = NSStackView(views: [
+            field, NSTextField(labelWithString: "words/min"),
+        ])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
         return stack
     }
 
