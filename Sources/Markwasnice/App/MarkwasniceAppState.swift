@@ -783,6 +783,11 @@ struct MarkwasniceCommands: Commands {
             }
             .keyboardShortcut("t", modifiers: [.command, .shift])
 
+            Button("Full Screen") {
+                NSApp.keyWindow?.toggleFullScreen(nil)
+            }
+            .keyboardShortcut("f", modifiers: [.command, .control])
+
             Button("Focus Mode") {
                 appState.toggleFocusMode()
             }
