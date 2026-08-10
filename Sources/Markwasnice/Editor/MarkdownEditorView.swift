@@ -176,6 +176,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         set { setString(newValue, clearsUndo: false) }
     }
 
+    var selectedTextForSearch: String? {
+        selectedText(in: textView.selectedRange())
+    }
+
     /// The text storage's backing string. Reading `textView.string` bridges
     /// the whole document into a fresh Swift String on every access (Swift
     /// copies a mutable NSString to keep value semantics), while this is a

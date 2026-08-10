@@ -303,6 +303,9 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
 
         showChrome()
+        if let selectedText = editorView.selectedTextForSearch {
+            shellState.setSearchQuery(selectedText)
+        }
         shellState.showSearch()
         applyChromeInsets(isFullScreen: shellState.isFullScreen)
         refreshSearchMatches(selectsFirstMatch: true)
