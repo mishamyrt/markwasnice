@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Testing
 @testable import Markwasnice
 
@@ -10,6 +11,29 @@ import Testing
 /// character dispatch.
 @MainActor
 struct EditorCommandRoutingTests {
+    private enum ArrowKey {
+        case up
+        case down
+
+        var specialKey: NSEvent.SpecialKey {
+            switch self {
+            case .up:
+                .upArrow
+            case .down:
+                .downArrow
+            }
+        }
+
+        var keyCode: UInt16 {
+            switch self {
+            case .up:
+                UInt16(kVK_UpArrow)
+            case .down:
+                UInt16(kVK_DownArrow)
+            }
+        }
+    }
+
     private static let settings = EditorSettings(
         textSizeScale: 1,
         maxTextColumns: 64,
@@ -34,6 +58,22 @@ struct EditorCommandRoutingTests {
         in editor: MarkdownEditorView
     ) -> Bool {
         editor.textView(editor.textView, doCommandBy: selector)
+    }
+
+    private func optionArrowEvent(_ key: ArrowKey) -> NSEvent? {
+        let characters = String(key.specialKey.unicodeScalar)
+        return NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.option, .numericPad],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: key.keyCode
+        )
     }
 
     @Test func insertNewlineContinuesListPrefix() {
@@ -88,5 +128,47 @@ struct EditorCommandRoutingTests {
 
         #expect(handled)
         #expect(editor.textView.string == "text")
+    }
+
+    @Test func optionUpMovesCurrentLine() {
+        let source = "one\ntwo"
+        let editor = makeEditor(source: source, caretAt: 5)
+        guard let event = optionArrowEvent(.up) else {
+            Issue.record("failed to build Option+Up event")
+            return
+        }
+
+        editor.textView.keyDown(with: event)
+
+        #expect(editor.textView.string == "two\none")
+        #expect(editor.textView.selectedRange() == NSRange(location: 1, length: 0))
+    }
+
+    @Test func optionDownMovesCurrentLine() {
+        let source = "one\ntwo"
+        let editor = makeEditor(source: source, caretAt: 1)
+        guard let event = optionArrowEvent(.down) else {
+            Issue.record("failed to build Option+Down event")
+            return
+        }
+
+        editor.textView.keyDown(with: event)
+
+        #expect(editor.textView.string == "two\none")
+        #expect(editor.textView.selectedRange() == NSRange(location: 5, length: 0))
+    }
+
+    @Test func optionDownMovesCaretBetweenIdenticalLines() {
+        let source = "same\nsame"
+        let editor = makeEditor(source: source, caretAt: 2)
+        guard let event = optionArrowEvent(.down) else {
+            Issue.record("failed to build Option+Down event")
+            return
+        }
+
+        editor.textView.keyDown(with: event)
+
+        #expect(editor.textView.string == source)
+        #expect(editor.textView.selectedRange() == NSRange(location: 7, length: 0))
     }
 }

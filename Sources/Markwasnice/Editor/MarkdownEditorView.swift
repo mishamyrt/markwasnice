@@ -724,6 +724,28 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
+    func moveLines(_ command: MarkdownLineMoveCommand) {
+        guard let edit = command.edit(
+            in: sourceCharacters,
+            selectedRange: textView.selectedRange()
+        ) else {
+            return
+        }
+
+        guard edit.replacementString != sourceCharacters.substring(
+            with: edit.replacementRange
+        ) else {
+            textView.setSelectedRange(edit.selectedRange)
+            return
+        }
+
+        replaceText(
+            in: edit.replacementRange,
+            with: edit.replacementString,
+            selectedRange: edit.selectedRange
+        )
+    }
+
     func insertTable(rows: Int, columns: Int) {
         guard let edit = MarkdownTableCommand.edit(
             in: sourceCharacters,
@@ -786,6 +808,13 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     func markdownTextViewInsertBacktab(_: NSTextView) {
         applyIndent(.outdent)
+    }
+
+    func markdownTextView(
+        _: NSTextView,
+        moveLines command: MarkdownLineMoveCommand
+    ) {
+        moveLines(command)
     }
 
     private func applyIndent(_ command: MarkdownIndentCommand) {

@@ -276,6 +276,14 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.applyMarkup(command)
     }
 
+    func moveLines(_ command: MarkdownLineMoveCommand) {
+        guard !shellState.isPreviewActive else {
+            return
+        }
+
+        editorView.moveLines(command)
+    }
+
     func requestInsertTable() {
         guard !shellState.isPreviewActive,
               let window = editorView.window

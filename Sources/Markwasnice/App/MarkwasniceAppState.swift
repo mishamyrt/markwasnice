@@ -249,6 +249,10 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.applyMarkup(command)
     }
 
+    func moveLines(_ command: MarkdownLineMoveCommand) {
+        activeSession?.moveLines(command)
+    }
+
     func insertTable() {
         activeSession?.requestInsertTable()
     }
@@ -898,6 +902,17 @@ struct MarkwasniceCommands: Commands {
                     "Heading 6", .heading6,
                     keyEquivalent: "6", modifiers: [.command, .option]
                 )
+            }
+            Menu("Structure") {
+                Button("Move Line Up") {
+                    appState.moveLines(.up)
+                }
+                .keyboardShortcut(.upArrow, modifiers: .option)
+
+                Button("Move Line Down") {
+                    appState.moveLines(.down)
+                }
+                .keyboardShortcut(.downArrow, modifiers: .option)
             }
             Button("Add Table...") {
                 appState.insertTable()

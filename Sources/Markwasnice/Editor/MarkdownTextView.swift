@@ -4,6 +4,10 @@ protocol MarkdownTextViewCommandDelegate: AnyObject {
     func markdownTextViewShowFind(_ textView: NSTextView)
     func markdownTextViewInsertTab(_ textView: NSTextView)
     func markdownTextViewInsertBacktab(_ textView: NSTextView)
+    func markdownTextView(
+        _ textView: NSTextView,
+        moveLines command: MarkdownLineMoveCommand
+    )
     func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool
     func markdownTextView(
         _ textView: NSTextView, applyMarkup command: MarkdownMarkupCommand
@@ -695,14 +699,20 @@ final class MarkdownTextView: NSTextView {
         super.cursorUpdate(with: event)
     }
 
-    /// Only Cmd-F is handled at the raw-event level. Return/Tab/Backtab are
-    /// intercepted by the editor view's textView(_:doCommandBy:) instead:
-    /// the event must reach the input context first, so IME composition
-    /// keeps Return/Tab for itself and keypad Enter (a different character,
-    /// the same insertNewline command) gets markdown continuation too.
+    /// Cmd-F and line movement shortcuts are handled at the raw-event level.
+    /// Return/Tab/Backtab are intercepted by the editor view's
+    /// textView(_:doCommandBy:) instead: the event must reach the input
+    /// context first, so IME composition keeps Return/Tab for itself and
+    /// keypad Enter (a different character, the same insertNewline command)
+    /// gets markdown continuation too.
     override func keyDown(with event: NSEvent) {
         if isFindShortcut(event) {
             commandDelegate?.markdownTextViewShowFind(self)
+            return
+        }
+
+        if let command = lineMoveCommand(for: event) {
+            commandDelegate?.markdownTextView(self, moveLines: command)
             return
         }
 
@@ -1028,6 +1038,27 @@ final class MarkdownTextView: NSTextView {
     private func isFindShortcut(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         return flags == .command && event.charactersIgnoringModifiers == "f"
+    }
+
+    private func lineMoveCommand(for event: NSEvent) -> MarkdownLineMoveCommand? {
+        let modifiers = event.modifierFlags.intersection([
+            .shift,
+            .control,
+            .option,
+            .command,
+        ])
+        guard modifiers == .option else {
+            return nil
+        }
+
+        switch event.specialKey {
+        case .upArrow:
+            return .up
+        case .downArrow:
+            return .down
+        default:
+            return nil
+        }
     }
 
     private func eventIsInTopChrome(_ event: NSEvent) -> Bool {
