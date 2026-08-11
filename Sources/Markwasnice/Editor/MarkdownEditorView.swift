@@ -599,10 +599,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // A caret, not a range selection: selecting the match makes AppKit
         // draw the inactive-selection gray over the yellow match fill while
         // the search field owns focus. The caret still lands the editor at
-        // the match when the search closes.
+        // the match when the search closes. Do not use showFindIndicator:
+        // its transient overlay can stay fixed to the viewport while scrolling.
         textView.setSelectedRange(NSRange(location: NSMaxRange(range), length: 0))
         scrollSearchMatchToCenter(range)
-        textView.showFindIndicator(for: range)
     }
 
     /// Centers the match in the area below the chrome band (the search bar
