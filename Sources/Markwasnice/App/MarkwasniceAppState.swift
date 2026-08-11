@@ -18,7 +18,7 @@ final class MarkwasniceAppState: ObservableObject {
     /// successful flush.
     @Published private(set) var isAutosaveFailing = false
 
-    private let settingsStore = EditorSettingsStore()
+    private let settingsStore: EditorSettingsStore
     private let autosaveStore: AutosaveStore
     private var autosaveWorkItem: DispatchWorkItem?
     /// Resolves to false when the write failed; a cancelled (superseded)
@@ -45,8 +45,12 @@ final class MarkwasniceAppState: ObservableObject {
     private var restoreTabLeads: [EditorDocumentSession.ID: EditorDocumentSession.ID] =
         [:]
 
-    init(autosaveStore: AutosaveStore = AutosaveStore()) {
+    init(
+        autosaveStore: AutosaveStore = AutosaveStore(),
+        settingsStore: EditorSettingsStore = EditorSettingsStore()
+    ) {
         self.autosaveStore = autosaveStore
+        self.settingsStore = settingsStore
         settings = settingsStore.load()
     }
 
@@ -263,6 +267,26 @@ final class MarkwasniceAppState: ObservableObject {
 
     func toggleProofreading() {
         activeSession?.shellState.toggleProofreading()
+    }
+
+    func increaseTextSize() {
+        adjustTextSize(by: 1)
+    }
+
+    func decreaseTextSize() {
+        adjustTextSize(by: -1)
+    }
+
+    private func adjustTextSize(by stepCount: Int) {
+        var updatedSettings = settings
+        let proposedScale = settings.textSizeScale
+            + CGFloat(stepCount) * EditorSettings.textSizeScaleStep
+        updatedSettings.textSizeScale = min(
+            max(proposedScale, EditorSettings.textSizeScaleRange.lowerBound),
+            EditorSettings.textSizeScaleRange.upperBound
+        )
+        applySettings(updatedSettings, phase: .committed)
+        preferencesWindowController?.update(settings: settings)
     }
 
     func showPreferences(_ sender: Any?) {
@@ -797,6 +821,18 @@ struct MarkwasniceCommands: Commands {
                 appState.toggleProofreading()
             }
             .keyboardShortcut("r")
+
+            Divider()
+
+            Button("Increase Text Size") {
+                appState.increaseTextSize()
+            }
+            .keyboardShortcut("+")
+
+            Button("Decrease Text Size") {
+                appState.decreaseTextSize()
+            }
+            .keyboardShortcut("-")
         }
 
         CommandGroup(after: .pasteboard) {

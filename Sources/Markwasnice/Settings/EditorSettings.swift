@@ -16,6 +16,11 @@ struct EditorSettings: Equatable {
     static let wordsPerMinuteRange = 1 ... 1000
     static let defaultBasePointSize: CGFloat = 20
     static let defaultTextSizeScale: CGFloat = 1
+    static let textSizeScaleRange: ClosedRange<CGFloat> = 0.05 ... 1.95
+    static let textSizeScaleTickCount = 15
+    static let textSizeScaleStep =
+        (textSizeScaleRange.upperBound - textSizeScaleRange.lowerBound)
+            / CGFloat(textSizeScaleTickCount - 1)
     static let defaultMaxTextColumns = 64
     static let defaultTabInsertionMode = TabInsertionMode.spaces
     static let defaultTabWidth = 4

@@ -27,7 +27,11 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
     private var settings: EditorSettings
     private let onChange: (EditorSettings, ChangePhase) -> Void
     private let textSizeSlider = NSSlider(
-        value: 1, minValue: 0.05, maxValue: 1.95, target: nil, action: nil
+        value: 1,
+        minValue: Double(EditorSettings.textSizeScaleRange.lowerBound),
+        maxValue: Double(EditorSettings.textSizeScaleRange.upperBound),
+        target: nil,
+        action: nil
     )
     private let smallTextSizeLabel = NSTextField(labelWithString: "A")
     private let largeTextSizeLabel = NSTextField(labelWithString: "A")
@@ -253,7 +257,7 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         textSizeSlider.target = self
         textSizeSlider.action = #selector(textSizeChanged(_:))
         textSizeSlider.doubleValue = Double(settings.textSizeScale)
-        textSizeSlider.numberOfTickMarks = 15
+        textSizeSlider.numberOfTickMarks = EditorSettings.textSizeScaleTickCount
         textSizeSlider.allowsTickMarkValuesOnly = true
 
         smallTextSizeLabel.font = LilexFontProvider.regular(size: 11)

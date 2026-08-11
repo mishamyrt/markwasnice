@@ -27,4 +27,56 @@ struct EditorSettingsStoreTests {
         #expect(restored.readingWordsPerMinute == 240)
         #expect(restored.speakingWordsPerMinute == 150)
     }
+
+    @MainActor
+    @Test func textSizeCommandsApplyAndPersistAcrossLaunches() throws {
+        let suiteName = "EditorSettingsStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = EditorSettingsStore(defaults: defaults)
+        let appState = MarkwasniceAppState(settingsStore: store)
+
+        appState.increaseTextSize()
+
+        #expect(
+            appState.settings.textSizeScale
+                == EditorSettings.defaultTextSizeScale
+                + EditorSettings.textSizeScaleStep
+        )
+        let relaunchedState = MarkwasniceAppState(settingsStore: store)
+        #expect(relaunchedState.settings == appState.settings)
+
+        relaunchedState.decreaseTextSize()
+        #expect(
+            relaunchedState.settings.textSizeScale
+                == EditorSettings.defaultTextSizeScale
+        )
+    }
+
+    @MainActor
+    @Test func textSizeCommandsStayWithinSliderRange() throws {
+        let suiteName = "EditorSettingsStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = EditorSettingsStore(defaults: defaults)
+        var settings = store.load()
+        settings.textSizeScale = EditorSettings.textSizeScaleRange.upperBound
+        store.save(settings)
+        let appState = MarkwasniceAppState(settingsStore: store)
+
+        appState.increaseTextSize()
+        #expect(
+            appState.settings.textSizeScale
+                == EditorSettings.textSizeScaleRange.upperBound
+        )
+
+        settings.textSizeScale = EditorSettings.textSizeScaleRange.lowerBound
+        store.save(settings)
+        let lowerBoundState = MarkwasniceAppState(settingsStore: store)
+        lowerBoundState.decreaseTextSize()
+        #expect(
+            lowerBoundState.settings.textSizeScale
+                == EditorSettings.textSizeScaleRange.lowerBound
+        )
+    }
 }
