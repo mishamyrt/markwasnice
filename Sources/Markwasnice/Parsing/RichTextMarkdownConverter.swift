@@ -13,7 +13,7 @@ enum RichTextMarkdownConverter {
     static func pasteText(from pasteboard: NSPasteboard) -> String? {
         let markdownText = pasteboard.string(forType: markdownPasteboardType)
             ?? pasteboard.data(forType: markdownPasteboardType)
-                .flatMap { String(data: $0, encoding: .utf8) }
+            .flatMap { String(data: $0, encoding: .utf8) }
         if let markdownText {
             return preferredText(
                 markdownText: markdownText,

@@ -242,6 +242,46 @@ struct MarkdownStyleApplierTests {
         #expect(foregroundColor(in: storage, at: 6) == Self.colors.listMarker)
     }
 
+    @Test func listMarkerGivesWrappedLinesATwoCharacterHangingIndent() throws {
+        let text = "- a long item\n- another long item"
+        let (applier, storage) = makeApplier(text: text)
+
+        applier.applyStyle(
+            .unorderedList,
+            range: NSRange(location: 0, length: storage.length),
+            string: storage.mutableString
+        )
+
+        let expectedIndent = Self.paragraphGutter
+            + 2 * (applier.characterWidth() + applier.baseLetterSpacing)
+        for location in [0, 14] {
+            let style = try #require(paragraphStyle(in: storage, at: location))
+            #expect(style.firstLineHeadIndent == Self.paragraphGutter)
+            #expect(style.headIndent == expectedIndent)
+        }
+        #expect(storage.string == text)
+    }
+
+    @Test func quoteMarkerGivesWrappedLinesATwoCharacterHangingIndent() throws {
+        let text = "> a long quote\n> another long quote"
+        let (applier, storage) = makeApplier(text: text)
+
+        applier.applyStyle(
+            .blockQuote,
+            range: NSRange(location: 0, length: storage.length),
+            string: storage.mutableString
+        )
+
+        let expectedIndent = Self.paragraphGutter
+            + 2 * (applier.characterWidth() + applier.baseLetterSpacing)
+        for location in [0, 15] {
+            let style = try #require(paragraphStyle(in: storage, at: location))
+            #expect(style.firstLineHeadIndent == Self.paragraphGutter)
+            #expect(style.headIndent == expectedIndent)
+        }
+        #expect(storage.string == text)
+    }
+
     /// The marker offsets come back from a regex run over the extracted span
     /// text, so a span that does not start at zero has to be offset back onto
     /// the document.

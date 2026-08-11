@@ -105,6 +105,13 @@ final class MarkdownStyleApplier {
         return width > 0 ? width : basePointSize * 0.6
     }
 
+    /// The source marker and its following space (for example, `- ` or `> `).
+    /// It is expressed in the same character-cell metric used for the editor
+    /// gutter, including the spacing applied to every glyph.
+    private var markerWithSpaceWidth: CGFloat {
+        2 * (characterWidth() + baseLetterSpacing)
+    }
+
     // MARK: Attribute application
 
     func applyStyle(
@@ -344,7 +351,28 @@ final class MarkdownStyleApplier {
                 value: colors.listMarker,
                 range: markerRange
             )
+
+            applyMarkerHangingIndent(to: string.lineRange(for: markerRange))
         }
+    }
+
+    /// Keeps a wrapped line aligned under the text following a list or quote
+    /// marker. This is a paragraph-layout attribute only: the source string
+    /// remains unchanged for editing and copying.
+    private func applyMarkerHangingIndent(to lineRange: NSRange) {
+        guard !MarkdownEditorDiagnostics.disableParagraphStyle,
+              let lineRange = boundedRange(lineRange)
+        else {
+            return
+        }
+
+        let paragraphStyle = baseParagraphStyle()
+        paragraphStyle.headIndent += markerWithSpaceWidth
+        textStorage.addAttribute(
+            .paragraphStyle,
+            value: paragraphStyle,
+            range: lineRange
+        )
     }
 
     func applyNonbreakingSpaceStyle(range: NSRange, string: NSString) {
