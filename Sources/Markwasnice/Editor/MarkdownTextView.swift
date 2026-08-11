@@ -824,24 +824,9 @@ final class MarkdownTextView: NSTextView {
 
     override func paste(_ sender: Any?) {
         let pasteboard = NSPasteboard.general
-        if let richText = RichTextMarkdownConverter.attributedString(
-            from: pasteboard
-        ) {
-            let markdown = RichTextMarkdownConverter.convert(richText)
-            if !markdown.isEmpty {
-                super.insertText(markdown, replacementRange: selectedRange())
-                return
-            }
-        }
-
-        if let plainText = pasteboard.string(forType: .string) {
-            let normalized = RichTextMarkdownConverter.normalizeLineSeparators(
-                plainText
-            )
-            if normalized != plainText {
-                super.insertText(normalized, replacementRange: selectedRange())
-                return
-            }
+        if let text = RichTextMarkdownConverter.pasteText(from: pasteboard) {
+            super.insertText(text, replacementRange: selectedRange())
+            return
         }
 
         super.paste(sender)

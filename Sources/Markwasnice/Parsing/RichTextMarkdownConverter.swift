@@ -1,10 +1,55 @@
 @preconcurrency import AppKit
+import Markdown
 
 /// Converts the semantic attributes supplied by rich-text pasteboards into
 /// Markdown source. Both HTML and RTF are decoded by AppKit before reaching
 /// this type, so the conversion path is shared by Pages, browsers, and other
 /// native text editors.
 enum RichTextMarkdownConverter {
+    private static let markdownPasteboardType = NSPasteboard.PasteboardType(
+        "net.daringfireball.markdown"
+    )
+
+    static func pasteText(from pasteboard: NSPasteboard) -> String? {
+        let markdownText = pasteboard.string(forType: markdownPasteboardType)
+            ?? pasteboard.data(forType: markdownPasteboardType)
+                .flatMap { String(data: $0, encoding: .utf8) }
+        if let markdownText {
+            return preferredText(
+                markdownText: markdownText,
+                plainText: nil,
+                richText: nil
+            )
+        }
+
+        return preferredText(
+            plainText: pasteboard.string(forType: .string),
+            richText: attributedString(from: pasteboard)
+        )
+    }
+
+    static func preferredText(
+        markdownText: String? = nil,
+        plainText: String?,
+        richText: NSAttributedString?
+    ) -> String? {
+        if let markdownText {
+            return normalizeLineSeparators(markdownText)
+        }
+
+        let plainText = plainText.map(normalizeLineSeparators)
+        guard let richText else {
+            return plainText
+        }
+
+        if let plainText, containsMarkdownSyntax(plainText) {
+            return plainText
+        }
+
+        let converted = convert(richText)
+        return converted.isEmpty ? plainText : converted
+    }
+
     static func attributedString(from pasteboard: NSPasteboard) -> NSAttributedString? {
         let formats: [(NSPasteboard.PasteboardType, NSAttributedString.DocumentType)] = [
             (.html, .html),
@@ -101,6 +146,20 @@ enum RichTextMarkdownConverter {
             }
         }
         return result
+    }
+
+    private static func containsMarkdownSyntax(_ string: String) -> Bool {
+        let document = Document(parsing: string, options: [.disableSmartOpts])
+        return document.children.contains(where: containsMarkdownSyntax)
+    }
+
+    private static func containsMarkdownSyntax(_ markup: Markup) -> Bool {
+        switch markup {
+        case is Markdown.Paragraph, is Text, is SoftBreak:
+            return markup.children.contains(where: containsMarkdownSyntax)
+        default:
+            return true
+        }
     }
 
     private struct Paragraph {

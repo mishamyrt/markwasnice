@@ -4,6 +4,72 @@ import Testing
 
 @MainActor
 struct RichTextMarkdownConverterTests {
+    @Test func prefersDeclaredMarkdownPasteboardContent() {
+        #expect(RichTextMarkdownConverter.preferredText(
+            markdownText: "# Markdown\u{2028}body",
+            plainText: "rich text",
+            richText: NSAttributedString(string: "rich text")
+        ) == "# Markdown\nbody")
+    }
+
+    @Test func prefersPlainSourceWhenItContainsMarkdownSyntax() {
+        let richText = NSMutableAttributedString(string: "**bold**")
+        richText.addAttribute(
+            .font,
+            value: NSFont.boldSystemFont(ofSize: 13),
+            range: NSRange(location: 0, length: richText.length)
+        )
+
+        #expect(RichTextMarkdownConverter.preferredText(
+            plainText: "**bold**",
+            richText: richText
+        ) == "**bold**")
+    }
+
+    @Test func detectsBlockAndInlineMarkdownSyntax() {
+        let samples = [
+            "# Heading",
+            "A **bold** word",
+            "- list item",
+            "> quote",
+            "`inline code`",
+            "[link](https://example.com)",
+            "~~removed~~",
+            "```swift\nlet value = 1\n```",
+            "| Name | Value |\n| --- | --- |\n| A | 1 |",
+        ]
+        let richText = NSAttributedString(string: "converted")
+
+        for sample in samples {
+            #expect(RichTextMarkdownConverter.preferredText(
+                plainText: sample,
+                richText: richText
+            ) == sample)
+        }
+    }
+
+    @Test func keepsRichConversionForOrdinaryPlainText() {
+        let samples = [
+            "Meeting notes #42",
+            "Temperature is -5 degrees",
+            "Multiply 2 * 3",
+            "https://example.com",
+        ]
+        let richText = NSMutableAttributedString(string: "bold")
+        richText.addAttribute(
+            .font,
+            value: NSFont.boldSystemFont(ofSize: 13),
+            range: NSRange(location: 0, length: richText.length)
+        )
+
+        for sample in samples {
+            #expect(RichTextMarkdownConverter.preferredText(
+                plainText: sample,
+                richText: richText
+            ) == "**bold**")
+        }
+    }
+
     @Test func convertsBoldItalicStrikethroughAndLinks() throws {
         let source =
             NSMutableAttributedString(string: "plain bold italic both strike link")
