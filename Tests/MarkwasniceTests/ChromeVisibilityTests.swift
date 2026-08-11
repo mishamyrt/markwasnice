@@ -17,8 +17,7 @@ struct ChromeVisibilityTests {
             fileURL: nil,
             isEdited: false,
             settings: Self.settings,
-            onAutosaveNeeded: {}
-        )
+        ) {}
     }
 
     @Test func hoverRevealsEachBarWithoutHidingTheOther() {

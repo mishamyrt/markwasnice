@@ -117,7 +117,6 @@ enum DocumentTitleSuggester {
         }
         result = result.replacing(/\s+#+\s*$/, with: "")
         result = result.replacingOccurrences(of: "~~", with: "")
-        result = result.replacingOccurrences(of: "==", with: "")
         result = result.replacingOccurrences(of: "*", with: "")
         result = result.replacingOccurrences(of: "`", with: "")
         // Strip emphasis underscores at word edges while keeping snake_case.

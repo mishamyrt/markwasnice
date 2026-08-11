@@ -10,7 +10,6 @@ enum MarkdownMarkupCommand: Int {
     case bold
     case italic
     case strikethrough
-    case highlight
     case link
     case imageLink
     case code
@@ -48,11 +47,6 @@ enum MarkdownMarkupCommand: Int {
             return Self.inlinePairEdit(
                 in: nsString, selectedRange: selectedRange,
                 opening: "~~", closing: "~~"
-            )
-        case .highlight:
-            return Self.inlinePairEdit(
-                in: nsString, selectedRange: selectedRange,
-                opening: "==", closing: "=="
             )
         case .link:
             return Self.linkEdit(

@@ -14,12 +14,12 @@ struct MarkdownCopyFormatTests {
     }
 
     @Test
-    func plainTextStripsHeadingAndHighlightMarkers() {
+    func plainTextPreservesUnsupportedDoubleEquals() {
         let converted = MarkdownCopyFormat.plainText.convert(
             "# Title\n\nBody with ==mark==."
         )
 
-        #expect(converted == "Title\n\nBody with mark.")
+        #expect(converted == "Title\n\nBody with ==mark==.")
     }
 
     @Test

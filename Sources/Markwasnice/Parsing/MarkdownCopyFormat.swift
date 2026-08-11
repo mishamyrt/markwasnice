@@ -12,14 +12,7 @@ enum MarkdownCopyFormat {
 
     func convert(_ markdown: String) -> String {
         let renderer = Renderer(format: self)
-        let converted = renderer.render(Document(parsing: markdown))
-        // ==highlight== is not CommonMark, so it survives parsing as literal
-        // text; neither target format knows it.
-        return converted.replacingOccurrences(
-            of: "==([^=\\n]+)==",
-            with: "$1",
-            options: .regularExpression
-        )
+        return renderer.render(Document(parsing: markdown))
     }
 
     private struct Renderer {

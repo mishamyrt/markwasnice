@@ -21,7 +21,10 @@ struct DocumentTitleSuggesterTests {
             DocumentTitleSuggester.title(from: "**Bold** and *italic* and `code`")
                 == "Bold and italic and code"
         )
-        #expect(DocumentTitleSuggester.title(from: "~~gone~~ ==marked==") == "gone marked")
+        #expect(
+            DocumentTitleSuggester.title(from: "~~gone~~ ==marked==")
+                == "gone ==marked=="
+        )
     }
 
     @Test

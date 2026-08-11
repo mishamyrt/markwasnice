@@ -87,7 +87,7 @@ struct MarkdownMarkupCommandTests {
 
     @Test
     func multilineWrapLeavesBlankLinesUnchanged() {
-        let edit = MarkdownMarkupCommand.highlight.edit(
+        let edit = MarkdownMarkupCommand.bold.edit(
             in: "one\n   \ntwo" as NSString, selectedRange: NSRange(
                 location: 0,
                 length: 11
@@ -96,7 +96,7 @@ struct MarkdownMarkupCommandTests {
 
         #expect(edit == MarkdownMarkupEdit(
             replacementRange: NSRange(location: 0, length: 11),
-            replacementString: "==one==\n   \n==two==",
+            replacementString: "**one**\n   \n**two**",
             selectedRange: NSRange(location: 0, length: 19)
         ))
     }
@@ -161,21 +161,21 @@ struct MarkdownMarkupCommandTests {
 
     @Test
     func insertsEmptyPairAfterWhitespace() {
-        let edit = MarkdownMarkupCommand.highlight.edit(
+        let edit = MarkdownMarkupCommand.bold.edit(
             in: "hello " as NSString, selectedRange: NSRange(location: 6, length: 0)
         )
 
         #expect(edit == MarkdownMarkupEdit(
             replacementRange: NSRange(location: 6, length: 0),
-            replacementString: "====",
+            replacementString: "****",
             selectedRange: NSRange(location: 8, length: 0)
         ))
     }
 
     @Test
     func removesEmptyPairAtCursor() {
-        let edit = MarkdownMarkupCommand.highlight.edit(
-            in: "====" as NSString,
+        let edit = MarkdownMarkupCommand.bold.edit(
+            in: "****" as NSString,
             selectedRange: NSRange(location: 2, length: 0)
         )
 
