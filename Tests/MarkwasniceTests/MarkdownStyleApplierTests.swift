@@ -262,6 +262,24 @@ struct MarkdownStyleApplierTests {
         #expect(storage.string == text)
     }
 
+    @Test func orderedListMarkerUsesThreeCharacterHangingIndent() throws {
+        let text = "1. a long item"
+        let (applier, storage) = makeApplier(text: text)
+
+        applier.applyStyle(
+            .orderedList,
+            range: NSRange(location: 0, length: storage.length),
+            string: storage.mutableString
+        )
+
+        let style = try #require(paragraphStyle(in: storage, at: 0))
+        let expectedIndent = Self.paragraphGutter
+            + 3 * (applier.characterWidth() + applier.baseLetterSpacing)
+        #expect(style.firstLineHeadIndent == Self.paragraphGutter)
+        #expect(style.headIndent == expectedIndent)
+        #expect(storage.string == text)
+    }
+
     @Test func quoteMarkerGivesWrappedLinesATwoCharacterHangingIndent() throws {
         let text = "> a long quote\n> another long quote"
         let (applier, storage) = makeApplier(text: text)

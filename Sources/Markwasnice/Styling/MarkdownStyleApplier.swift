@@ -105,11 +105,10 @@ final class MarkdownStyleApplier {
         return width > 0 ? width : basePointSize * 0.6
     }
 
-    /// The source marker and its following space (for example, `- ` or `> `).
-    /// It is expressed in the same character-cell metric used for the editor
-    /// gutter, including the spacing applied to every glyph.
-    private var markerWithSpaceWidth: CGFloat {
-        2 * (characterWidth() + baseLetterSpacing)
+    /// A source prefix expressed in the same character-cell metric used for
+    /// the editor gutter, including the spacing applied to every glyph.
+    private func markerPrefixWidth(characterCount: Int) -> CGFloat {
+        CGFloat(characterCount) * (characterWidth() + baseLetterSpacing)
     }
 
     // MARK: Attribute application
@@ -166,7 +165,14 @@ final class MarkdownStyleApplier {
                 string: string,
                 markerCaptureGroup: 1
             )
-        case .orderedList, .unorderedList:
+        case .orderedList:
+            applyLineMarkerStyle(
+                Self.listMarkerRegex,
+                range: range,
+                string: string,
+                hangingIndentCharacterCount: 3
+            )
+        case .unorderedList:
             applyLineMarkerStyle(Self.listMarkerRegex, range: range, string: string)
         case .taskCheckbox:
             // Same colour a list marker gets, so "[ ] a" and "- [ ] a" read
@@ -311,7 +317,8 @@ final class MarkdownStyleApplier {
         _ expression: NSRegularExpression,
         range: NSRange,
         string: NSString,
-        markerCaptureGroup: Int? = nil
+        markerCaptureGroup: Int? = nil,
+        hangingIndentCharacterCount: Int = 2
     ) {
         // Scanned over the extracted span text for the same reason as the
         // heading markers above: the regex needs a Swift String, and the
@@ -352,14 +359,20 @@ final class MarkdownStyleApplier {
                 range: markerRange
             )
 
-            applyMarkerHangingIndent(to: string.lineRange(for: markerRange))
+            applyMarkerHangingIndent(
+                to: string.lineRange(for: markerRange),
+                characterCount: hangingIndentCharacterCount
+            )
         }
     }
 
     /// Keeps a wrapped line aligned under the text following a list or quote
     /// marker. This is a paragraph-layout attribute only: the source string
     /// remains unchanged for editing and copying.
-    private func applyMarkerHangingIndent(to lineRange: NSRange) {
+    private func applyMarkerHangingIndent(
+        to lineRange: NSRange,
+        characterCount: Int
+    ) {
         guard !MarkdownEditorDiagnostics.disableParagraphStyle,
               let lineRange = boundedRange(lineRange)
         else {
@@ -367,7 +380,7 @@ final class MarkdownStyleApplier {
         }
 
         let paragraphStyle = baseParagraphStyle()
-        paragraphStyle.headIndent += markerWithSpaceWidth
+        paragraphStyle.headIndent += markerPrefixWidth(characterCount: characterCount)
         textStorage.addAttribute(
             .paragraphStyle,
             value: paragraphStyle,
