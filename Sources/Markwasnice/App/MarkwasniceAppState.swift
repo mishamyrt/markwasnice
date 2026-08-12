@@ -375,6 +375,13 @@ final class MarkwasniceAppState: ObservableObject {
         adjustTextSize(by: -1)
     }
 
+    func resetTextSize() {
+        var updatedSettings = settings
+        updatedSettings.textSizeScale = EditorSettings.defaultTextSizeScale
+        applySettings(updatedSettings, phase: .committed)
+        preferencesWindowController?.update(settings: settings)
+    }
+
     private func adjustTextSize(by stepCount: Int) {
         var updatedSettings = settings
         let proposedScale = settings.textSizeScale
@@ -1166,15 +1173,22 @@ struct MarkwasniceCommands: Commands {
 
             Divider()
 
-            Button("Increase Text Size") {
-                appState.increaseTextSize()
-            }
-            .keyboardShortcut("+")
+            Menu("Text Size") {
+                Button("Increase Text Size") {
+                    appState.increaseTextSize()
+                }
+                .keyboardShortcut("+")
 
-            Button("Decrease Text Size") {
-                appState.decreaseTextSize()
+                Button("Decrease Text Size") {
+                    appState.decreaseTextSize()
+                }
+                .keyboardShortcut("-")
+
+                Button("Reset Text Size") {
+                    appState.resetTextSize()
+                }
+                .keyboardShortcut("0")
             }
-            .keyboardShortcut("-")
         }
 
         CommandGroup(after: .pasteboard) {

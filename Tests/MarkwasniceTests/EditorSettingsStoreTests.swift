@@ -51,6 +51,16 @@ struct EditorSettingsStoreTests {
             relaunchedState.settings.textSizeScale
                 == EditorSettings.defaultTextSizeScale
         )
+
+        relaunchedState.increaseTextSize()
+        relaunchedState.resetTextSize()
+        #expect(
+            relaunchedState.settings.textSizeScale
+                == EditorSettings.defaultTextSizeScale
+        )
+
+        let resetRelaunchedState = MarkwasniceAppState(settingsStore: store)
+        #expect(resetRelaunchedState.settings == relaunchedState.settings)
     }
 
     @MainActor
