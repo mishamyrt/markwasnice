@@ -199,6 +199,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         selectedText(in: textView.selectedRange())
     }
 
+    var selectedRange: NSRange {
+        textView.selectedRange()
+    }
+
     /// The text storage's backing string. Reading `textView.string` bridges
     /// the whole document into a fresh Swift String on every access (Swift
     /// copies a mutable NSString to keep value semantics), while this is a
@@ -282,6 +286,23 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         previewPresenter.refreshIfActive()
     }
 
+    func restoreSelectedRange(_ range: NSRange?) {
+        guard let range,
+              range.location != NSNotFound,
+              range.location >= 0,
+              range.length >= 0
+        else {
+            return
+        }
+
+        let textLength = sourceCharacters.length
+        let location = min(range.location, textLength)
+        textView.setSelectedRange(NSRange(
+            location: location,
+            length: min(range.length, textLength - location)
+        ))
+    }
+
     func setPreviewActive(_ isActive: Bool) {
         if isActive {
             proofreadingPresenter.dismissPopup()
@@ -299,7 +320,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     func focus() {
-        window?.makeFirstResponder(textView)
+        guard window?.makeFirstResponder(textView) == true else {
+            return
+        }
+
+        textView.scrollRangeToVisible(textView.selectedRange())
     }
 
     func applyParsedStyles(

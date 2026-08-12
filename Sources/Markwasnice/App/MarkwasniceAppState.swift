@@ -787,14 +787,16 @@ final class MarkwasniceAppState: ObservableObject {
         fileURL: URL?,
         isEdited: Bool,
         fileRevision: FileIO.Revision? = nil,
-        registeredDocumentURL: URL? = nil
+        registeredDocumentURL: URL? = nil,
+        selectedRange: NSRange? = nil
     ) -> EditorDocumentSession {
         let session = EditorDocumentSession(
             text: text,
             fileURL: fileURL,
             isEdited: isEdited,
             settings: settings,
-            fileRevision: fileRevision
+            fileRevision: fileRevision,
+            selectedRange: selectedRange
         ) { [weak self] in
             self?.scheduleAutosave()
         }
@@ -864,7 +866,8 @@ final class MarkwasniceAppState: ObservableObject {
             fileURL: draft.fileURL,
             isEdited: isEdited,
             fileRevision: fileRevision,
-            registeredDocumentURL: registeredDocumentURL
+            registeredDocumentURL: registeredDocumentURL,
+            selectedRange: draft.selection?.range
         )
         if let descriptor = draft.windowFrame {
             let frame = NSRectFromString(descriptor)

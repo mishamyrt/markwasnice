@@ -81,4 +81,41 @@ struct AutosavePayloadTests {
         #expect(draft.text != nil)
         #expect(draft.text?.isEmpty == true)
     }
+
+    @Test
+    func draftCapturesSelectionAndRequestsAutosaveWhenItChanges() {
+        var autosaveRequestCount = 0
+        let session = EditorDocumentSession(
+            text: "selection",
+            fileURL: nil,
+            isEdited: false,
+            settings: Self.settings
+        ) {
+            autosaveRequestCount += 1
+        }
+        let initialRequestCount = autosaveRequestCount
+
+        session.editorView.textView.setSelectedRange(
+            NSRange(location: 2, length: 4)
+        )
+        let draft = session.autosavedDraft(windowID: nil, windowFrame: nil)
+
+        #expect(draft.selection == AutosavedTextSelection(location: 2, length: 4))
+        #expect(autosaveRequestCount > initialRequestCount)
+    }
+
+    @Test
+    func sessionRestoresSelectionBoundedToCurrentText() {
+        let session = EditorDocumentSession(
+            text: "short",
+            fileURL: nil,
+            isEdited: false,
+            settings: Self.settings,
+            selectedRange: NSRange(location: 3, length: 20)
+        ) {}
+
+        #expect(
+            session.editorView.selectedRange == NSRange(location: 3, length: 2)
+        )
+    }
 }

@@ -46,7 +46,8 @@ struct AutosaveStoreTests {
                 text: "hello",
                 fileURL: nil,
                 windowID: UUID(),
-                windowFrame: nil
+                windowFrame: nil,
+                selection: AutosavedTextSelection(location: 3, length: 1)
             ),
             AutosavedDraft(text: "world", fileURL: nil, windowID: nil, windowFrame: nil),
         ])
@@ -58,6 +59,10 @@ struct AutosaveStoreTests {
             return
         }
         #expect(loadedSession.drafts.map(\.text) == ["hello", "world"])
+        #expect(
+            loadedSession.drafts.first?.selection
+                == AutosavedTextSelection(location: 3, length: 1)
+        )
     }
 
     @Test

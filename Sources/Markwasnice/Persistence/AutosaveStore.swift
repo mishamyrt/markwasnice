@@ -1,5 +1,23 @@
 import Foundation
 
+struct AutosavedTextSelection: Codable, Equatable, Sendable {
+    var location: Int
+    var length: Int
+
+    init(location: Int, length: Int) {
+        self.location = location
+        self.length = length
+    }
+
+    init(_ range: NSRange) {
+        self.init(location: range.location, length: range.length)
+    }
+
+    var range: NSRange {
+        NSRange(location: location, length: length)
+    }
+}
+
 struct AutosavedDraft: Codable, Sendable {
     /// Recovery payload. Clean file-backed documents omit it and are read
     /// from their file on launch; untitled and edited documents always keep
@@ -14,6 +32,23 @@ struct AutosavedDraft: Codable, Sendable {
     /// share the frame of the group's selected window. Absent for
     /// fullscreen windows.
     var windowFrame: String?
+    /// UTF-16 selection range, matching NSTextView's coordinate space. Older
+    /// recovery files omit it and reopen at the start of the document.
+    var selection: AutosavedTextSelection?
+
+    init(
+        text: String?,
+        fileURL: URL?,
+        windowID: UUID?,
+        windowFrame: String?,
+        selection: AutosavedTextSelection? = nil
+    ) {
+        self.text = text
+        self.fileURL = fileURL
+        self.windowID = windowID
+        self.windowFrame = windowFrame
+        self.selection = selection
+    }
 
     var hasRestorableContent: Bool {
         text != nil || fileURL != nil

@@ -321,6 +321,13 @@ private final class WindowLifecycleView: NSView {
             didConfigureWindow = true
             placeWindow(window, session: session, appState: appState, attempt: 0)
             appState.revealPendingDocument(of: session, in: window)
+            DispatchQueue.main.async { [weak window, weak session] in
+                guard session?.editorView.window === window else {
+                    return
+                }
+
+                session?.editorView.focus()
+            }
         }
     }
 

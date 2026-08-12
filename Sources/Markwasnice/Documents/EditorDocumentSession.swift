@@ -65,6 +65,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         isEdited: Bool,
         settings: EditorSettings,
         fileRevision: FileIO.Revision? = nil,
+        selectedRange: NSRange? = nil,
         onAutosaveNeeded: @escaping () -> Void
     ) {
         self.text = text
@@ -133,6 +134,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.delegate = self
         editorView.documentURL = fileURL
         editorView.setString(text, clearsUndo: true)
+        editorView.restoreSelectedRange(selectedRange)
         applyChromeInsets(isFullScreen: false)
         stylingController.scheduleParse(text: text)
         // didSet observers don't fire during init.
@@ -172,6 +174,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         didChangeSelectionText selectedText: String?
     ) {
         shellState.selectionStatistics = selectedText.map(Self.statistics(in:))
+        onAutosaveNeeded()
     }
 
     func markdownEditorViewDidScroll(_: MarkdownEditorView) {
@@ -424,7 +427,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 : text,
             fileURL: fileURL,
             windowID: windowID,
-            windowFrame: windowFrame
+            windowFrame: windowFrame,
+            selection: AutosavedTextSelection(editorView.selectedRange)
         )
     }
 
