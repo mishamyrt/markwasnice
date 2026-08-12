@@ -6,26 +6,133 @@ import Markdown
 /// this type, so the conversion path is shared by Pages, browsers, and other
 /// native text editors.
 enum RichTextMarkdownConverter {
+    enum PastePlan: Sendable {
+        case immediate(String)
+        case deferred(DeferredPaste)
+    }
+
+    struct DeferredPaste: Sendable {
+        let plainText: String?
+        let representations: [RichTextRepresentation]
+    }
+
+    struct RichTextRepresentation: Sendable {
+        enum Format: Equatable, Sendable {
+            case html
+            case rtfd
+            case rtf
+
+            var documentType: NSAttributedString.DocumentType {
+                switch self {
+                case .html:
+                    .html
+                case .rtfd:
+                    .rtfd
+                case .rtf:
+                    .rtf
+                }
+            }
+        }
+
+        let data: Data
+        let format: Format
+    }
+
+    static let largePasteByteThreshold = 64 * 1024
+
     private static let markdownPasteboardType = NSPasteboard.PasteboardType(
         "net.daringfireball.markdown"
     )
 
-    static func pasteText(from pasteboard: NSPasteboard) -> String? {
+    @MainActor
+    static func pastePlan(
+        from pasteboard: NSPasteboard,
+        threshold: Int = largePasteByteThreshold
+    ) -> PastePlan? {
         let markdownText = pasteboard.string(forType: markdownPasteboardType)
             ?? pasteboard.data(forType: markdownPasteboardType)
             .flatMap { String(data: $0, encoding: .utf8) }
         if let markdownText {
-            return preferredText(
+            return .immediate(preferredText(
                 markdownText: markdownText,
                 plainText: nil,
                 richText: nil
-            )
+            ) ?? markdownText)
         }
 
-        return preferredText(
-            plainText: pasteboard.string(forType: .string),
-            richText: attributedString(from: pasteboard)
-        )
+        let plainText = pasteboard.string(forType: .string)
+        let hasLargePlainText = plainText.map { $0.utf8.count > threshold } ?? false
+
+        let formats: [(NSPasteboard.PasteboardType, RichTextRepresentation.Format)] = [
+            (.html, .html),
+            (.rtfd, .rtfd),
+            (.rtf, .rtf),
+        ]
+        let availableFormats = formats.filter { pasteboardType, _ in
+            pasteboard.availableType(from: [pasteboardType]) != nil
+        }
+        guard !availableFormats.isEmpty else {
+            return plainText.map(normalizeLineSeparators).map(PastePlan.immediate)
+        }
+
+        var largeHTMLRepresentation: RichTextRepresentation?
+        for (pasteboardType, format) in availableFormats {
+            // A large HTML payload has a safe, equivalent plain fallback and
+            // cannot be decoded off-main. Avoid copying its bytes unless a
+            // background-safe rich representation is unavailable.
+            if format == .html,
+               hasLargePlainText
+            {
+                continue
+            }
+            guard let data = pasteboard.data(forType: pasteboardType) else {
+                continue
+            }
+            let representation = RichTextRepresentation(data: data, format: format)
+            if data.count > threshold || hasLargePlainText {
+                if format == .html {
+                    largeHTMLRepresentation = representation
+                    continue
+                }
+                return .deferred(DeferredPaste(
+                    plainText: plainText,
+                    representations: [representation]
+                ))
+            }
+
+            if let richText = attributedString(from: [representation]) {
+                return preferredText(
+                    plainText: plainText,
+                    richText: richText
+                ).map(PastePlan.immediate)
+            }
+        }
+
+        // AppKit explicitly forbids decoding HTML through NSAttributedString
+        // on a background thread. If no background-safe representation is
+        // usable, large HTML takes its plain text. HTML-only paste keeps its
+        // old synchronous behavior instead of dropping clipboard contents.
+        if let plainText {
+            return .immediate(normalizeLineSeparators(plainText))
+        }
+        if largeHTMLRepresentation == nil,
+           let htmlType = availableFormats.first(where: { $0.1 == .html })?.0,
+           let data = pasteboard.data(forType: htmlType)
+        {
+            largeHTMLRepresentation = RichTextRepresentation(
+                data: data,
+                format: .html
+            )
+        }
+        if let largeHTMLRepresentation,
+           let richText = attributedString(from: [largeHTMLRepresentation])
+        {
+            return preferredText(
+                plainText: nil,
+                richText: richText
+            ).map(PastePlan.immediate)
+        }
+        return nil
     }
 
     static func preferredText(
@@ -50,21 +157,35 @@ enum RichTextMarkdownConverter {
         return converted.isEmpty ? plainText : converted
     }
 
-    static func attributedString(from pasteboard: NSPasteboard) -> NSAttributedString? {
-        let formats: [(NSPasteboard.PasteboardType, NSAttributedString.DocumentType)] = [
-            (.html, .html),
-            (.rtfd, .rtfd),
-            (.rtf, .rtf),
-        ]
+    nonisolated static func convertDeferredPaste(_ paste: DeferredPaste) -> String? {
+        guard !Task.isCancelled else {
+            return nil
+        }
 
-        for (pasteboardType, documentType) in formats {
-            guard let data = pasteboard.data(forType: pasteboardType) else {
-                continue
-            }
+        let plainText = paste.plainText.map(normalizeLineSeparators)
+        if let plainText, containsMarkdownSyntax(plainText) {
+            return plainText
+        }
+        guard !Task.isCancelled,
+              let richText = attributedString(from: paste.representations)
+        else {
+            return plainText
+        }
+        guard !Task.isCancelled else {
+            return nil
+        }
 
+        let converted = convert(richText)
+        return converted.isEmpty ? plainText : converted
+    }
+
+    nonisolated private static func attributedString(
+        from representations: [RichTextRepresentation]
+    ) -> NSAttributedString? {
+        for representation in representations {
             if let attributedString = try? NSAttributedString(
-                data: data,
-                options: [.documentType: documentType],
+                data: representation.data,
+                options: [.documentType: representation.format.documentType],
                 documentAttributes: nil
             ), attributedString.length > 0 {
                 return attributedString

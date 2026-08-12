@@ -4,6 +4,167 @@ import Testing
 
 @MainActor
 struct RichTextMarkdownConverterTests {
+    @Test func largePlainTextUsesImmediatePlan() throws {
+        let pasteboard = makePasteboard()
+        let plainText = String(repeating: "plain ", count: 10)
+        pasteboard.setString(plainText, forType: .string)
+        pasteboard.setData(Data("<b>rich</b>".utf8), forType: .html)
+
+        let plan = RichTextMarkdownConverter.pastePlan(
+            from: pasteboard,
+            threshold: 8
+        )
+        guard case let .immediate(text) = try #require(plan) else {
+            Issue.record("expected an immediate plain-text paste")
+            return
+        }
+
+        #expect(text == plainText)
+    }
+
+    @Test func largeHTMLUsesPlainFallbackInsteadOfDeferredImporter() throws {
+        let pasteboard = makePasteboard()
+        pasteboard.setString("plain", forType: .string)
+        pasteboard.setData(
+            Data(String(repeating: "<b>x</b>", count: 10).utf8),
+            forType: .html
+        )
+
+        let plan = RichTextMarkdownConverter.pastePlan(
+            from: pasteboard,
+            threshold: 5
+        )
+        guard case let .immediate(text) = try #require(plan) else {
+            Issue.record("expected the HTML plain-text fallback")
+            return
+        }
+
+        #expect(text == "plain")
+    }
+
+    @Test func largeRTFProducesDeferredSendablePayload() throws {
+        let pasteboard = makePasteboard()
+        pasteboard.setString("plain", forType: .string)
+        pasteboard.setData(Data("{\\rtf1 rich}".utf8), forType: .rtf)
+
+        let plan = RichTextMarkdownConverter.pastePlan(
+            from: pasteboard,
+            threshold: 5
+        )
+        guard case let .deferred(paste) = try #require(plan) else {
+            Issue.record("expected deferred RTF conversion")
+            return
+        }
+
+        #expect(paste.plainText == "plain")
+        #expect(paste.representations.count == 1)
+        #expect(paste.representations.first?.format == .rtf)
+    }
+
+    @Test func largeRTFPreservesRichConversionWithLargePlainFallback() throws {
+        let pasteboard = makePasteboard()
+        let plainText = String(repeating: "plain ", count: 10)
+        pasteboard.setString(plainText, forType: .string)
+        pasteboard.setData(Data("{\\rtf1 rich}".utf8), forType: .rtf)
+
+        let plan = RichTextMarkdownConverter.pastePlan(
+            from: pasteboard,
+            threshold: 8
+        )
+        guard case let .deferred(paste) = try #require(plan) else {
+            Issue.record("expected deferred RTF conversion")
+            return
+        }
+
+        #expect(paste.plainText == plainText)
+        #expect(paste.representations.first?.format == .rtf)
+    }
+
+    @Test func largeHTMLWithoutPlainTextIsNotDropped() throws {
+        let pasteboard = makePasteboard()
+        pasteboard.setData(Data("<b>rich</b>".utf8), forType: .html)
+
+        let plan = RichTextMarkdownConverter.pastePlan(
+            from: pasteboard,
+            threshold: 1
+        )
+        guard case let .immediate(text) = try #require(plan) else {
+            Issue.record("expected synchronous HTML fallback")
+            return
+        }
+
+        #expect(text == "**rich**")
+    }
+
+    @Test func largeHTMLPrefersDeferredRTFOverPlainFallback() throws {
+        let pasteboard = makePasteboard()
+        pasteboard.setString("plain", forType: .string)
+        pasteboard.setData(Data("<b>rich</b>".utf8), forType: .html)
+        pasteboard.setData(Data("{\\rtf1 rich}".utf8), forType: .rtf)
+
+        let plan = RichTextMarkdownConverter.pastePlan(
+            from: pasteboard,
+            threshold: 1
+        )
+        guard case let .deferred(paste) = try #require(plan) else {
+            Issue.record("expected background-safe RTF conversion")
+            return
+        }
+
+        #expect(paste.representations.first?.format == .rtf)
+    }
+
+    @Test func invalidHTMLFallsBackToRTF() throws {
+        let pasteboard = makePasteboard()
+        pasteboard.setString("plain", forType: .string)
+        pasteboard.setData(Data(), forType: .html)
+        let rich = NSMutableAttributedString(string: "rich")
+        rich.addAttribute(
+            .font,
+            value: NSFont.boldSystemFont(ofSize: 13),
+            range: NSRange(location: 0, length: rich.length)
+        )
+        let rtfData = try rich.data(
+            from: NSRange(location: 0, length: rich.length),
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        )
+        pasteboard.setData(rtfData, forType: .rtf)
+
+        let plan = RichTextMarkdownConverter.pastePlan(
+            from: pasteboard,
+            threshold: rtfData.count + 1
+        )
+        guard case let .immediate(text) = try #require(plan) else {
+            Issue.record("expected synchronous RTF fallback")
+            return
+        }
+
+        #expect(text == "**rich**")
+    }
+
+    @Test func convertsDeferredRTFOffTheMainActor() async throws {
+        let source = NSMutableAttributedString(string: "bold")
+        source.addAttribute(
+            .font,
+            value: NSFont.boldSystemFont(ofSize: 13),
+            range: NSRange(location: 0, length: source.length)
+        )
+        let data = try source.data(
+            from: NSRange(location: 0, length: source.length),
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+        )
+        let paste = RichTextMarkdownConverter.DeferredPaste(
+            plainText: "bold",
+            representations: [.init(data: data, format: .rtf)]
+        )
+
+        let converted = await Task.detached {
+            RichTextMarkdownConverter.convertDeferredPaste(paste)
+        }.value
+
+        #expect(converted == "**bold**")
+    }
+
     @Test func prefersDeclaredMarkdownPasteboardContent() {
         #expect(RichTextMarkdownConverter.preferredText(
             markdownText: "# Markdown\u{2028}body",
@@ -209,5 +370,13 @@ struct RichTextMarkdownConverterTests {
 
     private func range(of substring: String, in string: String) -> NSRange {
         (string as NSString).range(of: substring)
+    }
+
+    private func makePasteboard() -> NSPasteboard {
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("RichTextMarkdownConverterTests-\(UUID())")
+        )
+        pasteboard.clearContents()
+        return pasteboard
     }
 }

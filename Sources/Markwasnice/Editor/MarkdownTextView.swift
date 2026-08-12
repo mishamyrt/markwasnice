@@ -29,6 +29,24 @@ final class MarkdownTextView: NSTextView {
     var topChromeRectProvider: (() -> NSRect?)?
     var onMouseDown: (() -> Void)?
     var onScrollWheel: ((NSEvent) -> Void)?
+    var pasteboardForPaste: () -> NSPasteboard = { .general }
+    var convertDeferredPaste: @Sendable (
+        RichTextMarkdownConverter.DeferredPaste
+    ) async -> String? = { paste in
+        let task = Task.detached(priority: .userInitiated) {
+            RichTextMarkdownConverter.convertDeferredPaste(paste)
+        }
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private var deferredPasteTask: Task<Void, Never>?
+    private var pasteRequestGeneration = 0
+    private var contentRevision = 0
+    private var selectionRevision = 0
 
     private static let codeCornerRadius: CGFloat = 3
     private static let codeHorizontalPaddingRatio: CGFloat = 0.02
@@ -833,13 +851,93 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func paste(_ sender: Any?) {
-        let pasteboard = NSPasteboard.general
-        if let text = RichTextMarkdownConverter.pasteText(from: pasteboard) {
-            super.insertText(text, replacementRange: selectedRange())
+        invalidateDeferredPaste()
+        guard let plan = RichTextMarkdownConverter.pastePlan(
+            from: pasteboardForPaste()
+        ) else {
+            super.paste(sender)
             return
         }
 
-        super.paste(sender)
+        switch plan {
+        case let .immediate(text):
+            commitPaste(text, replacementRange: selectedRange())
+        case let .deferred(paste):
+            startDeferredPaste(paste, replacementRange: selectedRange())
+        }
+    }
+
+    override func didChangeText() {
+        contentRevision &+= 1
+        if deferredPasteTask != nil {
+            invalidateDeferredPaste()
+        }
+        super.didChangeText()
+    }
+
+    override func setSelectedRanges(
+        _ ranges: [NSValue],
+        affinity: NSSelectionAffinity,
+        stillSelecting stillSelectingFlag: Bool
+    ) {
+        let previousRanges = selectedRanges
+        super.setSelectedRanges(
+            ranges,
+            affinity: affinity,
+            stillSelecting: stillSelectingFlag
+        )
+        guard selectedRanges != previousRanges else {
+            return
+        }
+
+        selectionRevision &+= 1
+        if deferredPasteTask != nil {
+            invalidateDeferredPaste()
+        }
+    }
+
+    private func startDeferredPaste(
+        _ paste: RichTextMarkdownConverter.DeferredPaste,
+        replacementRange: NSRange
+    ) {
+        let requestGeneration = pasteRequestGeneration
+        let expectedRevision = contentRevision
+        let expectedSelectionRevision = selectionRevision
+        let converter = convertDeferredPaste
+        deferredPasteTask = Task { @MainActor [weak self] in
+            let text = await converter(paste)
+            guard let self,
+                  !Task.isCancelled,
+                  pasteRequestGeneration == requestGeneration,
+                  contentRevision == expectedRevision,
+                  selectionRevision == expectedSelectionRevision,
+                  selectedRange() == replacementRange
+            else {
+                return
+            }
+
+            deferredPasteTask = nil
+            pasteRequestGeneration &+= 1
+            guard let text else {
+                NSSound.beep()
+                return
+            }
+            commitPaste(text, replacementRange: replacementRange)
+        }
+    }
+
+    private func invalidateDeferredPaste() {
+        deferredPasteTask?.cancel()
+        deferredPasteTask = nil
+        pasteRequestGeneration &+= 1
+    }
+
+    private func commitPaste(_ text: String, replacementRange: NSRange) {
+        super.insertText(text, replacementRange: replacementRange)
+    }
+
+    isolated deinit {
+        deferredPasteTask?.cancel()
     }
 
     /// AppKit disables responsive (asynchronous, pre-rendered) scrolling for
