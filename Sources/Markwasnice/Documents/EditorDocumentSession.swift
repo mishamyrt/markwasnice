@@ -415,7 +415,9 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     func autosavedDraft(windowID: UUID?, windowFrame: String?) -> AutosavedDraft {
         AutosavedDraft(
-            text: text,
+            text: fileURL != nil && fileRevision != nil && !hasUnsavedFileChanges
+                ? nil
+                : text,
             fileURL: fileURL,
             windowID: windowID,
             windowFrame: windowFrame

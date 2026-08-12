@@ -1,7 +1,10 @@
 import Foundation
 
 struct AutosavedDraft: Codable, Sendable {
-    var text: String
+    /// Recovery payload. Clean file-backed documents omit it and are read
+    /// from their file on launch; untitled and edited documents always keep
+    /// a value, including an explicitly empty string.
+    var text: String?
     var fileURL: URL?
     /// Drafts sharing a window identifier were tabs of one window; the value
     /// itself is regenerated on every save and only the grouping matters.
@@ -11,6 +14,10 @@ struct AutosavedDraft: Codable, Sendable {
     /// share the frame of the group's selected window. Absent for
     /// fullscreen windows.
     var windowFrame: String?
+
+    var hasRestorableContent: Bool {
+        text != nil || fileURL != nil
+    }
 }
 
 struct AutosavedSession: Codable, Sendable {
@@ -57,11 +64,15 @@ actor AutosaveStore {
         }
 
         let decoder = JSONDecoder()
-        if let session = try? decoder.decode(AutosavedSession.self, from: data) {
+        if let session = try? decoder.decode(AutosavedSession.self, from: data),
+           session.drafts.allSatisfy(\.hasRestorableContent)
+        {
             return .loaded(session)
         }
 
-        if let draft = try? decoder.decode(AutosavedDraft.self, from: data) {
+        if let draft = try? decoder.decode(AutosavedDraft.self, from: data),
+           draft.hasRestorableContent
+        {
             return .loaded(AutosavedSession(drafts: [draft]))
         }
 

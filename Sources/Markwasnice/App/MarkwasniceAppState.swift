@@ -26,6 +26,10 @@ final class MarkwasniceAppState: ObservableObject {
     /// flush counts as success because the newer flush covers it.
     private var autosaveTask: Task<Bool, Never>?
     private var autosaveGeneration: UInt64 = 0
+    /// Clean documents that could not be reopened at launch. They carry no
+    /// text, but their manifest entries must survive subsequent autosaves so
+    /// a transiently unavailable volume does not silently lose the tab.
+    private var unresolvedAutosavedDrafts: [AutosavedDraft] = []
     /// An unexpected recovery read/quarantine failure must not be followed by
     /// a successful overwrite of the file we could not inspect.
     private var areAutosaveWritesBlocked = false
@@ -86,14 +90,21 @@ final class MarkwasniceAppState: ObservableObject {
 
         didCreateInitialSessions = true
         isResolvingInitialSessions = true
+        defer {
+            isResolvingInitialSessions = false
+            scheduleAutosave()
+        }
         let autosaved = await loadAutosavedSession()
-        isResolvingInitialSessions = false
 
         if let autosaved, !autosaved.drafts.isEmpty {
             let drafts = deduplicatedDrafts(autosaved.drafts)
-            let restoredSessions = restoredSessions(from: drafts)
+            let restoredSessions = await restoredSessions(from: drafts)
+            guard let firstRestoredSession = restoredSessions.first else {
+                return newSession().id
+            }
+
             var leadSessionIDs: [UUID: EditorDocumentSession.ID] = [:]
-            for (draft, session) in zip(drafts, restoredSessions) {
+            for (draft, session) in restoredSessions {
                 guard let windowID = draft.windowID else {
                     continue
                 }
@@ -103,8 +114,10 @@ final class MarkwasniceAppState: ObservableObject {
                     leadSessionIDs[windowID] = session.id
                 }
             }
-            pendingWindowIDs.append(contentsOf: restoredSessions.dropFirst().map(\.id))
-            return restoredSessions[0].id
+            pendingWindowIDs.append(
+                contentsOf: restoredSessions.dropFirst().map(\.session.id)
+            )
+            return firstRestoredSession.session.id
         }
 
         return newSession().id
@@ -148,7 +161,7 @@ final class MarkwasniceAppState: ObservableObject {
 
     private func deduplicatedDrafts(_ drafts: [AutosavedDraft]) -> [AutosavedDraft] {
         var documentURLs: Set<URL> = []
-        return drafts.map { draft in
+        return drafts.compactMap { draft in
             guard let fileURL = draft.fileURL else {
                 return draft
             }
@@ -159,9 +172,12 @@ final class MarkwasniceAppState: ObservableObject {
                 return draft
             }
 
-            // Older builds could autosave two editors for one URL. Restore
-            // every text, but detach later copies from the file so enforcing
-            // the new ownership invariant never discards recovery data.
+            // Older builds could autosave two editors for one URL. Preserve a
+            // later recovery payload as an untitled document. A clean entry
+            // has no second copy of the text to preserve and can be skipped.
+            guard draft.text != nil else {
+                return nil
+            }
             var recoveredCopy = draft
             recoveredCopy.fileURL = nil
             return recoveredCopy
@@ -382,6 +398,12 @@ final class MarkwasniceAppState: ObservableObject {
     /// and warn about the failure in their own words (the terminate path);
     /// two alerts about the same failed write would stack up.
     func flushAutosave(force: Bool = false, reportsFailure: Bool = true) {
+        // The recovery manifest is incomplete while clean file-backed tabs
+        // are being reopened. A reentrant external open must not overwrite it
+        // with only the sessions materialized so far.
+        guard !isResolvingInitialSessions else {
+            return
+        }
         guard force || !sessions.isEmpty else {
             return
         }
@@ -516,6 +538,16 @@ final class MarkwasniceAppState: ObservableObject {
                 windowFrame: session.restoredWindowFrame.map(NSStringFromRect)
             ))
         }
+
+        unresolvedAutosavedDrafts.removeAll { draft in
+            guard let fileURL = draft.fileURL else {
+                return true
+            }
+            return documentRegistry.sessionID(
+                for: FileIO.canonicalDocumentURL(for: fileURL)
+            ) != nil
+        }
+        drafts.append(contentsOf: unresolvedAutosavedDrafts)
         return drafts
     }
 
@@ -795,12 +827,17 @@ final class MarkwasniceAppState: ObservableObject {
 
     private func makeSession(
         from draft: AutosavedDraft,
-        isEdited: Bool
+        text: String,
+        isEdited: Bool,
+        fileRevision: FileIO.Revision? = nil,
+        registeredDocumentURL: URL? = nil
     ) -> EditorDocumentSession {
         let session = makeSession(
-            text: draft.text,
+            text: text,
             fileURL: draft.fileURL,
-            isEdited: isEdited
+            isEdited: isEdited,
+            fileRevision: fileRevision,
+            registeredDocumentURL: registeredDocumentURL
         )
         if let descriptor = draft.windowFrame {
             let frame = NSRectFromString(descriptor)
@@ -811,25 +848,119 @@ final class MarkwasniceAppState: ObservableObject {
         return session
     }
 
-    /// Sessions are created immediately with a provisional edited flag so
-    /// the first window never waits on file reads; drafts backed by a file
-    /// get the exact flag refined asynchronously.
+    /// Recovery payloads are materialized before the first suspension so an
+    /// external open cannot claim their URLs while clean documents are read.
+    /// Clean file-backed entries are then populated from their source files;
+    /// no temporary empty session is exposed to the user.
     private func restoredSessions(
         from drafts: [AutosavedDraft]
-    ) -> [EditorDocumentSession] {
-        drafts.map { draft in
+    ) async -> [(draft: AutosavedDraft, session: EditorDocumentSession)] {
+        var sessionsByDraftIndex: [Int: EditorDocumentSession] = [:]
+        var restoredDraftsByIndex: [Int: AutosavedDraft] = [:]
+        unresolvedAutosavedDrafts = []
+
+        for (index, draft) in drafts.enumerated() {
+            guard let recoveryText = draft.text else {
+                continue
+            }
+
+            var restoredDraft = draft
+            var registeredDocumentURL: URL?
+            if let fileURL = draft.fileURL {
+                let documentURL = FileIO.canonicalDocumentURL(for: fileURL)
+                if documentRegistry.beginOpening(documentURL) {
+                    registeredDocumentURL = documentURL
+                } else {
+                    // A document opened while the autosave file was loading.
+                    // Keep the recovery payload as an untitled document rather
+                    // than crashing registration or discarding either text.
+                    restoredDraft.fileURL = nil
+                }
+            }
+
             let session = makeSession(
-                from: draft,
-                isEdited: draft.fileURL == nil && !draft.text.isEmpty
+                from: restoredDraft,
+                text: recoveryText,
+                // File-backed recovery stays edited until its contents and
+                // revision have been verified against disk. Detached conflict
+                // copies stay edited even when their recovery text is empty.
+                isEdited: draft.fileURL != nil || !recoveryText.isEmpty,
+                registeredDocumentURL: registeredDocumentURL
             )
-            refineRestoredEditedState(of: session, from: draft)
-            return session
+            if let registeredDocumentURL {
+                documentRegistry.finishOpening(registeredDocumentURL)
+                refineRestoredEditedState(
+                    of: session,
+                    from: restoredDraft,
+                    recoveryText: recoveryText,
+                    documentURL: registeredDocumentURL
+                )
+            }
+            sessionsByDraftIndex[index] = session
+            restoredDraftsByIndex[index] = restoredDraft
+        }
+
+        var cleanDocumentURLs: [Int: URL] = [:]
+        for (index, draft) in drafts.enumerated() where draft.text == nil {
+            guard let fileURL = draft.fileURL else {
+                continue
+            }
+            let documentURL = FileIO.canonicalDocumentURL(for: fileURL)
+            if documentRegistry.sessionID(for: documentURL) != nil {
+                continue
+            }
+            guard documentRegistry.beginOpening(documentURL) else {
+                unresolvedAutosavedDrafts.append(draft)
+                continue
+            }
+            cleanDocumentURLs[index] = documentURL
+        }
+        defer {
+            for documentURL in cleanDocumentURLs.values {
+                documentRegistry.finishOpening(documentURL)
+            }
+        }
+
+        for (index, draft) in drafts.enumerated() where draft.text == nil {
+            guard let fileURL = draft.fileURL,
+                  let documentURL = cleanDocumentURLs[index]
+            else {
+                continue
+            }
+
+            do {
+                let snapshot = try await FileIO.readUTF8Snapshot(
+                    from: fileURL,
+                    resolvingTo: documentURL
+                )
+                sessionsByDraftIndex[index] = makeSession(
+                    from: draft,
+                    text: snapshot.text,
+                    isEdited: false,
+                    fileRevision: snapshot.revision,
+                    registeredDocumentURL: documentURL
+                )
+                restoredDraftsByIndex[index] = draft
+            } catch {
+                unresolvedAutosavedDrafts.append(draft)
+                Self.autosaveLogger.error(
+                    "Could not reopen clean document at \(fileURL.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+
+        return drafts.indices.compactMap { index in
+            sessionsByDraftIndex[index].map {
+                (restoredDraftsByIndex[index] ?? drafts[index], $0)
+            }
         }
     }
 
     private func refineRestoredEditedState(
         of session: EditorDocumentSession,
-        from draft: AutosavedDraft
+        from draft: AutosavedDraft,
+        recoveryText: String,
+        documentURL: URL
     ) {
         // Without a backing file the provisional flag is already exact. An
         // empty draft still has to be compared: deleting the whole contents
@@ -841,10 +972,13 @@ final class MarkwasniceAppState: ObservableObject {
 
         Task { [weak session] in
             do {
-                let snapshot = try await FileIO.readUTF8Snapshot(from: fileURL)
+                let snapshot = try await FileIO.readUTF8Snapshot(
+                    from: fileURL,
+                    resolvingTo: documentURL
+                )
                 session?.applyRestoredEditedState(
-                    snapshot.text != draft.text,
-                    expectedText: draft.text,
+                    snapshot.text != recoveryText,
+                    expectedText: recoveryText,
                     expectedFileURL: fileURL,
                     fileRevision: snapshot.revision
                 )
@@ -853,7 +987,7 @@ final class MarkwasniceAppState: ObservableObject {
                 // recovery text is safe to discard.
                 session?.applyRestoredEditedState(
                     true,
-                    expectedText: draft.text,
+                    expectedText: recoveryText,
                     expectedFileURL: fileURL
                 )
             }

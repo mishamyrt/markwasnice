@@ -87,4 +87,110 @@ struct AppTerminationPolicyTests {
 
         #expect(session.shellState.isEdited)
     }
+
+    @Test
+    func restoresPayloadlessFileBackedDraftFromCurrentFileContents() async throws {
+        let (state, directory) = try makeAppState()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fileURL = directory.appendingPathComponent("note.md")
+        try "when autosaved".write(
+            to: fileURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        let autosaved = AutosavedSession(drafts: [
+            AutosavedDraft(
+                text: nil,
+                fileURL: fileURL,
+                windowID: nil,
+                windowFrame: nil
+            ),
+        ])
+        try JSONEncoder().encode(autosaved).write(
+            to: directory.appendingPathComponent("AutosavedDraft.json")
+        )
+        try "changed outside the app".write(
+            to: fileURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let id = await state.initialSessionID()
+        let session = try #require(state.session(for: id))
+
+        #expect(session.editorView.string == "changed outside the app")
+        #expect(!session.shellState.isEdited)
+    }
+
+    @Test
+    func skipsPayloadlessDraftWhenBackingFileIsMissing() async throws {
+        let (state, directory) = try makeAppState()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let missingURL = directory.appendingPathComponent("missing.md")
+        let autosaved = AutosavedSession(drafts: [
+            AutosavedDraft(
+                text: nil,
+                fileURL: missingURL,
+                windowID: nil,
+                windowFrame: nil
+            ),
+        ])
+        try JSONEncoder().encode(autosaved).write(
+            to: directory.appendingPathComponent("AutosavedDraft.json")
+        )
+
+        let id = await state.initialSessionID()
+        let session = try #require(state.session(for: id))
+
+        #expect(state.sessions.count == 1)
+        #expect(session.fileURL == nil)
+        #expect(session.editorView.string.isEmpty)
+        #expect(!session.shellState.isEdited)
+
+        #expect(await state.flushAutosaveAndWait(force: true))
+        let store = AutosaveStore(
+            fileURL: directory.appendingPathComponent("AutosavedDraft.json")
+        )
+        let loaded = try await store.loadSession()
+        guard case let .loaded(savedSession) = loaded else {
+            Issue.record("expected the unresolved manifest to be preserved")
+            return
+        }
+        #expect(savedSession.drafts.contains { draft in
+            draft.fileURL == missingURL && draft.text == nil
+        })
+    }
+
+    @Test
+    func forcedAutosaveWaitsUntilInitialRecoveryFinishes() async throws {
+        let (state, directory) = try makeAppState()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("note.md")
+        try Data("on disk".utf8).write(to: fileURL)
+        let autosaveURL = directory.appendingPathComponent("AutosavedDraft.json")
+        let original = AutosavedSession(drafts: [
+            AutosavedDraft(
+                text: nil,
+                fileURL: fileURL,
+                windowID: nil,
+                windowFrame: nil
+            ),
+        ])
+        try JSONEncoder().encode(original).write(to: autosaveURL)
+
+        let initialID = Task { await state.initialSessionID() }
+        await Task.yield()
+        #expect(await state.flushAutosaveAndWait(force: true))
+        _ = await initialID.value
+
+        let loaded = try await AutosaveStore(fileURL: autosaveURL).loadSession()
+        guard case let .loaded(savedSession) = loaded else {
+            Issue.record("expected the recovery manifest to remain readable")
+            return
+        }
+        #expect(savedSession.drafts.count == 1)
+        #expect(savedSession.drafts[0].fileURL == fileURL)
+    }
 }

@@ -3,6 +3,17 @@ import Testing
 @testable import Markwasnice
 
 struct AutosaveStoreTests {
+    private struct LegacyAutosavedDraft: Codable {
+        var text: String
+        var fileURL: URL?
+        var windowID: UUID?
+        var windowFrame: String?
+    }
+
+    private struct LegacyAutosavedSession: Codable {
+        var drafts: [LegacyAutosavedDraft]
+    }
+
     private final class FailingMoveFileManager: FileManager, @unchecked Sendable {
         enum Failure: Error {
             case moveRejected
@@ -54,7 +65,7 @@ struct AutosaveStoreTests {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("AutosavedDraft.json")
-        let draft = AutosavedDraft(
+        let draft = LegacyAutosavedDraft(
             text: "legacy",
             fileURL: nil,
             windowID: nil,
@@ -69,6 +80,75 @@ struct AutosaveStoreTests {
             return
         }
         #expect(loadedSession.drafts.map(\.text) == ["legacy"])
+    }
+
+    @Test
+    func loadsLegacySessionWithRequiredTextPayloads() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("AutosavedDraft.json")
+        let session = LegacyAutosavedSession(drafts: [
+            LegacyAutosavedDraft(
+                text: "legacy session",
+                fileURL: URL(fileURLWithPath: "/tmp/legacy.md"),
+                windowID: nil,
+                windowFrame: nil
+            ),
+        ])
+        try JSONEncoder().encode(session).write(to: fileURL)
+
+        let store = AutosaveStore(fileURL: fileURL)
+        let loaded = try await store.loadSession()
+        guard case let .loaded(loadedSession) = loaded else {
+            Issue.record("expected a migrated legacy session")
+            return
+        }
+
+        #expect(loadedSession.drafts.map(\.text) == ["legacy session"])
+    }
+
+    @Test
+    func omitsAbsentRecoveryTextFromJSON() throws {
+        let draft = AutosavedDraft(
+            text: nil,
+            fileURL: URL(fileURLWithPath: "/tmp/clean.md"),
+            windowID: nil,
+            windowFrame: nil
+        )
+
+        let data = try JSONEncoder().encode(draft)
+        let object = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+
+        #expect(object["text"] == nil)
+        #expect(object["fileURL"] != nil)
+    }
+
+    @Test
+    func quarantinesDraftWithoutTextOrBackingFile() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("AutosavedDraft.json")
+        let invalidSession = AutosavedSession(drafts: [
+            AutosavedDraft(
+                text: nil,
+                fileURL: nil,
+                windowID: nil,
+                windowFrame: nil
+            ),
+        ])
+        try JSONEncoder().encode(invalidSession).write(to: fileURL)
+
+        let store = AutosaveStore(fileURL: fileURL)
+        let loaded = try await store.loadSession()
+        guard case let .corruptFileQuarantined(backupURL) = loaded else {
+            Issue.record("expected an invalid draft to be quarantined")
+            return
+        }
+
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(FileManager.default.fileExists(atPath: backupURL.path))
     }
 
     @Test

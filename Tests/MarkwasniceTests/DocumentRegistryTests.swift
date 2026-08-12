@@ -202,6 +202,50 @@ struct DocumentOpenRegistryTests {
     }
 
     @Test
+    func recoveryConflictingWithLiveOpenBecomesUntitled() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ConcurrentRecoveryTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let documentURL = directory.appendingPathComponent("document.md")
+        try Data("current disk text".utf8).write(to: documentURL)
+        let store = AutosaveStore(
+            fileURL: directory.appendingPathComponent("AutosavedDraft.json")
+        )
+        try await store.saveSession(
+            AutosavedSession(drafts: [
+                AutosavedDraft(
+                    text: "recovered text",
+                    fileURL: documentURL,
+                    windowID: nil,
+                    windowFrame: nil
+                ),
+            ]),
+            generation: 1
+        )
+        let state = MarkwasniceAppState(autosaveStore: store)
+
+        await state.openDocument(documentURL)
+        _ = await state.initialSessionID()
+
+        #expect(state.sessions.count == 2)
+        #expect(state.sessions.values.compactMap(\.fileURL).count == 1)
+        #expect(
+            Set(state.sessions.values.map(\.editorView.string))
+                == ["current disk text", "recovered text"]
+        )
+        let recovered = try #require(
+            state.sessions.values.first { $0.editorView.string == "recovered text" }
+        )
+        #expect(recovered.fileURL == nil)
+        #expect(recovered.shellState.isEdited)
+    }
+
+    @Test
     func rapidConsecutiveSavesUseTheRevisionProducedByThePreviousSave() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ConsecutiveSaveTests-\(UUID().uuidString)")
