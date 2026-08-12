@@ -530,6 +530,7 @@ final class MarkwasniceAppState: ObservableObject {
 
             let windowID = UUID()
             let windowFrame = windowFrameDescriptor(for: window)
+            let selectedWindow = window.tabGroup?.selectedWindow ?? window
             for tabWindow in groupWindows {
                 guard let tabSession = session(of: tabWindow),
                       savedSessionIDs.insert(tabSession.id).inserted
@@ -538,7 +539,8 @@ final class MarkwasniceAppState: ObservableObject {
                 }
                 drafts.append(tabSession.autosavedDraft(
                     windowID: windowID,
-                    windowFrame: windowFrame
+                    windowFrame: windowFrame,
+                    isSelectedTab: tabWindow === selectedWindow
                 ))
             }
         }
@@ -550,7 +552,8 @@ final class MarkwasniceAppState: ObservableObject {
         for session in sessions.values where !savedSessionIDs.contains(session.id) {
             drafts.append(session.autosavedDraft(
                 windowID: nil,
-                windowFrame: session.restoredWindowFrame.map(NSStringFromRect)
+                windowFrame: session.restoredWindowFrame.map(NSStringFromRect),
+                isSelectedTab: session.restoredTabSelection ?? true
             ))
         }
 
@@ -599,6 +602,10 @@ final class MarkwasniceAppState: ObservableObject {
     /// Window move/resize only changes the frames stored alongside the
     /// drafts; reuse the debounced autosave so live drags coalesce.
     func noteWindowLayoutChanged() {
+        scheduleAutosave()
+    }
+
+    func noteSelectedTabChanged() {
         scheduleAutosave()
     }
 
@@ -788,7 +795,8 @@ final class MarkwasniceAppState: ObservableObject {
         isEdited: Bool,
         fileRevision: FileIO.Revision? = nil,
         registeredDocumentURL: URL? = nil,
-        selectedRange: NSRange? = nil
+        selectedRange: NSRange? = nil,
+        restoredTabSelection: Bool? = nil
     ) -> EditorDocumentSession {
         let session = EditorDocumentSession(
             text: text,
@@ -796,7 +804,8 @@ final class MarkwasniceAppState: ObservableObject {
             isEdited: isEdited,
             settings: settings,
             fileRevision: fileRevision,
-            selectedRange: selectedRange
+            selectedRange: selectedRange,
+            restoredTabSelection: restoredTabSelection
         ) { [weak self] in
             self?.scheduleAutosave()
         }
@@ -867,7 +876,8 @@ final class MarkwasniceAppState: ObservableObject {
             isEdited: isEdited,
             fileRevision: fileRevision,
             registeredDocumentURL: registeredDocumentURL,
-            selectedRange: draft.selection?.range
+            selectedRange: draft.selection?.range,
+            restoredTabSelection: draft.isSelectedTab
         )
         if let descriptor = draft.windowFrame {
             let frame = NSRectFromString(descriptor)

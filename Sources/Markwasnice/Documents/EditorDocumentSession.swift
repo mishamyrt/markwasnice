@@ -43,6 +43,9 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private var saveTask: Task<Void, Never>?
     private var searchMatches: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
+    /// False only for a tab restored as inactive. Nil keeps normal and legacy
+    /// window creation behavior unchanged.
+    let restoredTabSelection: Bool?
 
     /// These observers are the single title-update mechanism: assign `text`
     /// first when it changes, and don't call updateTitle() after assignments
@@ -66,11 +69,13 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         settings: EditorSettings,
         fileRevision: FileIO.Revision? = nil,
         selectedRange: NSRange? = nil,
+        restoredTabSelection: Bool? = nil,
         onAutosaveNeeded: @escaping () -> Void
     ) {
         self.text = text
         self.fileURL = fileURL
         self.fileRevision = fileRevision
+        self.restoredTabSelection = restoredTabSelection
         hasUnsavedFileChanges = isEdited
         self.onAutosaveNeeded = onAutosaveNeeded
         editorView = MarkdownEditorView(settings: settings)
@@ -420,7 +425,11 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         hasUnsavedFileChanges = isEdited
     }
 
-    func autosavedDraft(windowID: UUID?, windowFrame: String?) -> AutosavedDraft {
+    func autosavedDraft(
+        windowID: UUID?,
+        windowFrame: String?,
+        isSelectedTab: Bool = true
+    ) -> AutosavedDraft {
         AutosavedDraft(
             text: fileURL != nil && fileRevision != nil && !hasUnsavedFileChanges
                 ? nil
@@ -428,7 +437,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             fileURL: fileURL,
             windowID: windowID,
             windowFrame: windowFrame,
-            selection: AutosavedTextSelection(editorView.selectedRange)
+            selection: AutosavedTextSelection(editorView.selectedRange),
+            isSelectedTab: isSelectedTab
         )
     }
 

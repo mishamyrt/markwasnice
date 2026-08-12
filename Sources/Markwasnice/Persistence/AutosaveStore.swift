@@ -35,19 +35,24 @@ struct AutosavedDraft: Codable, Sendable {
     /// UTF-16 selection range, matching NSTextView's coordinate space. Older
     /// recovery files omit it and reopen at the start of the document.
     var selection: AutosavedTextSelection?
+    /// Whether this window was the selected tab in its group. Nil identifies
+    /// recovery files written before tab selection was persisted.
+    var isSelectedTab: Bool?
 
     init(
         text: String?,
         fileURL: URL?,
         windowID: UUID?,
         windowFrame: String?,
-        selection: AutosavedTextSelection? = nil
+        selection: AutosavedTextSelection? = nil,
+        isSelectedTab: Bool? = nil
     ) {
         self.text = text
         self.fileURL = fileURL
         self.windowID = windowID
         self.windowFrame = windowFrame
         self.selection = selection
+        self.isSelectedTab = isSelectedTab
     }
 
     var hasRestorableContent: Bool {

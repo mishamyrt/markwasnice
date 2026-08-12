@@ -47,7 +47,8 @@ struct AutosaveStoreTests {
                 fileURL: nil,
                 windowID: UUID(),
                 windowFrame: nil,
-                selection: AutosavedTextSelection(location: 3, length: 1)
+                selection: AutosavedTextSelection(location: 3, length: 1),
+                isSelectedTab: true
             ),
             AutosavedDraft(text: "world", fileURL: nil, windowID: nil, windowFrame: nil),
         ])
@@ -63,6 +64,7 @@ struct AutosaveStoreTests {
             loadedSession.drafts.first?.selection
                 == AutosavedTextSelection(location: 3, length: 1)
         )
+        #expect(loadedSession.drafts.first?.isSelectedTab == true)
     }
 
     @Test
@@ -85,6 +87,7 @@ struct AutosaveStoreTests {
             return
         }
         #expect(loadedSession.drafts.map(\.text) == ["legacy"])
+        #expect(loadedSession.drafts.first?.isSelectedTab == nil)
     }
 
     @Test

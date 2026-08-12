@@ -184,7 +184,9 @@ private struct EditorWindowView: View {
                 }
             )
             .onAppear {
-                appState.activate(session)
+                if session.restoredTabSelection != false {
+                    appState.activate(session)
+                }
             }
     }
 }
@@ -346,8 +348,13 @@ private final class WindowLifecycleView: NSView {
             if target.styleMask.contains(.fullScreen) {
                 window.setFrame(target.frame, display: false)
             }
+            let previouslySelectedWindow = target.tabGroup?.selectedWindow ?? target
             target.addTabbedWindow(window, ordered: .above)
-            window.makeKeyAndOrderFront(nil)
+            if session.restoredTabSelection == false {
+                previouslySelectedWindow.makeKeyAndOrderFront(nil)
+            } else {
+                window.makeKeyAndOrderFront(nil)
+            }
 
             // A window attached to a fullscreen group becomes fullscreen
             // instantly, without the windowWillEnterFullScreen transition,
@@ -726,6 +733,7 @@ private final class WindowDelegateProxy: NSObject, NSWindowDelegate {
         }
 
         appState?.activate(session)
+        appState?.noteSelectedTabChanged()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

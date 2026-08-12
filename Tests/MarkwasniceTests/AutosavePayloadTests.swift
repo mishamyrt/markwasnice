@@ -98,9 +98,14 @@ struct AutosavePayloadTests {
         session.editorView.textView.setSelectedRange(
             NSRange(location: 2, length: 4)
         )
-        let draft = session.autosavedDraft(windowID: nil, windowFrame: nil)
+        let draft = session.autosavedDraft(
+            windowID: nil,
+            windowFrame: nil,
+            isSelectedTab: false
+        )
 
         #expect(draft.selection == AutosavedTextSelection(location: 2, length: 4))
+        #expect(draft.isSelectedTab == false)
         #expect(autosaveRequestCount > initialRequestCount)
     }
 
