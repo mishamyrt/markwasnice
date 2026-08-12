@@ -184,6 +184,61 @@ struct ProofreadingPresenterDecorationTests {
     }
 
     @Test
+    func sweepLayoutHandlesLargeDisjointIssueSets() {
+        let ranges = (0 ..< 20000).map {
+            NSRange(location: $0 * 2, length: 1)
+        }
+
+        let segments = ProofreadingPresenter.underlineSegments(
+            forDrawOrderedRanges: ranges
+        )
+
+        #expect(segments == ranges.map { [$0] })
+    }
+
+    @Test
+    func sweepLayoutRemovesInactiveRangesBuriedInHeap() {
+        let segments = ProofreadingPresenter.underlineSegments(
+            forDrawOrderedRanges: [
+                NSRange(location: 0, length: 10),
+                NSRange(location: 2, length: 2),
+                NSRange(location: 5, length: 10),
+            ]
+        )
+
+        #expect(segments == [
+            [NSRange(location: 0, length: 10)],
+            [],
+            [NSRange(location: 10, length: 5)],
+        ])
+    }
+
+    @Test
+    func sweepLayoutKeepsRangesThatMeetAtBoundaries() {
+        let ranges = [
+            NSRange(location: 2, length: 2),
+            NSRange(location: 0, length: 2),
+            NSRange(location: 4, length: 2),
+        ]
+
+        let segments = ProofreadingPresenter.underlineSegments(
+            forDrawOrderedRanges: ranges
+        )
+
+        #expect(segments == ranges.map { [$0] })
+    }
+
+    @Test
+    func teardownInvalidatesRunLoopOwnedFadeTimer() throws {
+        var fixture: (ProofreadingPresenter, DrawLog)? = makePresenter()
+        let timer = try #require(fixture?.0.startFadeTimerForTesting())
+
+        fixture = nil
+
+        #expect(!timer.isValid)
+    }
+
+    @Test
     func drawOrderIsMostSpecificFirstAndRepeatsIdenticallyOnRefresh() {
         let (presenter, log) = makePresenter()
         presenter.setIssues(Self.overlappingIssues)

@@ -27,6 +27,12 @@ final class ProofreadingPresenter {
         let underlineSegments: [[NSRange]]
     }
 
+    private struct RangeBoundary {
+        let location: Int
+        let rangeIndex: Int
+        let startsRange: Bool
+    }
+
     private static let hoverDwellSeconds: TimeInterval = 0.15
     private static let lightHighlightAlpha: CGFloat = 0.16
     private static let darkHighlightAlpha: CGFloat = 0.26
@@ -67,9 +73,20 @@ final class ProofreadingPresenter {
         }
     }
 
-    // No deinit invalidation needed: both timers hold self weakly (the dwell
-    // timer fires once, the fade timer stops itself once every fade settles),
-    // and the presenter lives as long as the editor view anyway.
+    isolated deinit {
+        // RunLoop retains scheduled timers. Their weak callbacks do not keep
+        // the presenter alive, but without explicit invalidation an orphaned
+        // repeating fade timer would continue waking the main run loop.
+        dwellTimer?.invalidate()
+        fadeTimer?.invalidate()
+    }
+
+    /// Internal lifecycle seam for verifying that teardown invalidates the
+    /// RunLoop-owned animation timer without opening a UI popover.
+    func startFadeTimerForTesting() -> Timer? {
+        startFadeTimer()
+        return fadeTimer
+    }
 
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else {
@@ -353,26 +370,122 @@ final class ProofreadingPresenter {
     static func underlineSegments(
         forDrawOrderedRanges ranges: [NSRange]
     ) -> [[NSRange]] {
-        var segments: [[NSRange]] = []
-        segments.reserveCapacity(ranges.count)
-        var claimedRanges: [NSRange] = []
-        for range in ranges {
-            // Subtract only actually overlapping claims: overlaps are rare,
-            // and unconditional subtraction would allocate O(n²) arrays here
-            // on every rebuild with many issues.
-            var visibleSegments = [range]
-            for claimed in claimedRanges
-                where NSIntersectionRange(claimed, range).length > 0
-            {
-                visibleSegments = visibleSegments.flatMap {
-                    MarkdownStylingEngine.subtract(claimed, from: $0)
-                }
+        var segments = Array(repeating: [NSRange](), count: ranges.count)
+        var boundaries: [RangeBoundary] = []
+        boundaries.reserveCapacity(ranges.count * 2)
+        for (index, range) in ranges.enumerated() {
+            guard range.location >= 0,
+                  range.location != NSNotFound,
+                  range.length > 0,
+                  range.location <= Int.max - range.length
+            else {
+                continue
             }
-            segments.append(visibleSegments)
-            claimedRanges.append(range)
+
+            boundaries.append(.init(
+                location: range.location,
+                rangeIndex: index,
+                startsRange: true
+            ))
+            boundaries.append(.init(
+                location: range.location + range.length,
+                rangeIndex: index,
+                startsRange: false
+            ))
+        }
+        boundaries.sort { lhs, rhs in
+            lhs.location < rhs.location
+        }
+
+        // Sweep all endpoints once. The minimum active draw-order index owns
+        // each interval; a lazy min-heap makes overlap resolution O(n log n)
+        // instead of testing every issue against every earlier issue.
+        var active = Array(repeating: false, count: ranges.count)
+        var activeHeap: [Int] = []
+        var boundaryIndex = 0
+        var previousLocation = boundaries.first?.location
+        while boundaryIndex < boundaries.count {
+            let location = boundaries[boundaryIndex].location
+            removeInactiveRanges(from: &activeHeap, active: active)
+            if let previousLocation,
+               previousLocation < location,
+               let owner = activeHeap.first
+            {
+                appendUnderlineSegment(
+                    NSRange(
+                        location: previousLocation,
+                        length: location - previousLocation
+                    ),
+                    to: &segments[owner]
+                )
+            }
+
+            while boundaryIndex < boundaries.count,
+                  boundaries[boundaryIndex].location == location
+            {
+                let boundary = boundaries[boundaryIndex]
+                active[boundary.rangeIndex] = boundary.startsRange
+                if boundary.startsRange {
+                    heapInsert(boundary.rangeIndex, into: &activeHeap)
+                }
+                boundaryIndex += 1
+            }
+            previousLocation = location
         }
 
         return segments
+    }
+
+    private static func appendUnderlineSegment(
+        _ segment: NSRange,
+        to segments: inout [NSRange]
+    ) {
+        if let last = segments.last, NSMaxRange(last) == segment.location {
+            segments[segments.count - 1].length += segment.length
+        } else {
+            segments.append(segment)
+        }
+    }
+
+    private static func heapInsert(_ value: Int, into heap: inout [Int]) {
+        heap.append(value)
+        var index = heap.count - 1
+        while index > 0 {
+            let parent = (index - 1) / 2
+            guard heap[index] < heap[parent] else {
+                return
+            }
+            heap.swapAt(index, parent)
+            index = parent
+        }
+    }
+
+    private static func removeInactiveRanges(
+        from heap: inout [Int],
+        active: [Bool]
+    ) {
+        while let first = heap.first, !active[first] {
+            let last = heap.removeLast()
+            guard !heap.isEmpty else {
+                continue
+            }
+            heap[0] = last
+            var index = 0
+            while true {
+                let left = index * 2 + 1
+                guard left < heap.count else {
+                    break
+                }
+                let right = left + 1
+                let child = right < heap.count && heap[right] < heap[left]
+                    ? right : left
+                guard heap[child] < heap[index] else {
+                    break
+                }
+                heap.swapAt(index, child)
+                index = child
+            }
+        }
     }
 
     // MARK: - Highlight crossfade
