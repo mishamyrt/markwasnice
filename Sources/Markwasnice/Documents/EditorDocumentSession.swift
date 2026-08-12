@@ -23,6 +23,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     /// Opens files dropped onto this session's window; wired by the app state,
     /// which owns the session registry and the open flow.
     var onOpenFiles: (([URL], NSWindow?) -> Void)?
+    var onFocusModeEnabledChanged: ((Bool) -> Void)?
+    var onProofreadingEnabledChanged: ((Bool) -> Void)?
     /// App-level URL reservation keeps two sessions from saving to the same
     /// canonical document. Standalone sessions used by focused UI tests can
     /// leave these callbacks unset.
@@ -85,6 +87,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
         shellState.onFocusModeEnabledChanged = { [weak self] isEnabled in
             self?.editorView.setFocusModeEnabled(isEnabled)
+            self?.onFocusModeEnabledChanged?(isEnabled)
         }
         shellState.onFocusModeSelected = { [weak self] mode in
             self?.editorView.setFocusMode(mode)
@@ -94,6 +97,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             // before the first check result arrives.
             self?.editorView.setProofreadingEnabled(isEnabled)
             self?.stylingController.setProofreadingEnabled(isEnabled)
+            self?.onProofreadingEnabledChanged?(isEnabled)
         }
         shellState.onSearchPresentationChanged = { [weak self] isPresented in
             self?.handleSearchPresentationChanged(isPresented)

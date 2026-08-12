@@ -232,6 +232,12 @@ private struct EditorTopBarFocusModeButton: View {
                         }
                     }
                 }
+
+                Divider()
+
+                Button(state.styleCheckToggleTitle) {
+                    state.toggleProofreading()
+                }
             } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 12, weight: .regular))

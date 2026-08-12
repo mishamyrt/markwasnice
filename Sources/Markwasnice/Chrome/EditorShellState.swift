@@ -89,6 +89,14 @@ final class EditorShellState: ObservableObject {
             : "\(displayedSentenceCount) sentences"
     }
 
+    var focusModeToggleTitle: String {
+        isFocusModeEnabled ? "Disable Focus Mode" : "Enable Focus Mode"
+    }
+
+    var styleCheckToggleTitle: String {
+        isProofreadingEnabled ? "Disable Style Check" : "Enable Style Check"
+    }
+
     var readingTimeText: String {
         durationText(
             wordsPerMinute: readingWordsPerMinute,

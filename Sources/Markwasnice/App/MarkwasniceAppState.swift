@@ -44,7 +44,7 @@ final class MarkwasniceAppState: ObservableObject {
     /// Set while the launch-time sessions are being read back from autosave:
     /// for that moment the app has neither a session nor a window.
     private var isResolvingInitialSessions = false
-    private var activeSessionID: EditorDocumentSession.ID?
+    @Published private var activeSessionID: EditorDocumentSession.ID?
     /// Externally opened documents whose window has not materialized yet: they
     /// still owe the app an activation (see `revealDocument`).
     private var sessionsAwaitingActivation: Set<EditorDocumentSession.ID> = []
@@ -355,8 +355,16 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.shellState.toggleFocusMode()
     }
 
+    var focusModeToggleTitle: String {
+        activeSession?.shellState.focusModeToggleTitle ?? "Enable Focus Mode"
+    }
+
     func toggleProofreading() {
         activeSession?.shellState.toggleProofreading()
+    }
+
+    var styleCheckToggleTitle: String {
+        activeSession?.shellState.styleCheckToggleTitle ?? "Enable Style Check"
     }
 
     func increaseTextSize() {
@@ -793,6 +801,18 @@ final class MarkwasniceAppState: ObservableObject {
         }
 
         let sessionID = session.id
+        session.onFocusModeEnabledChanged = { [weak self] _ in
+            guard self?.activeSessionID == sessionID else {
+                return
+            }
+            self?.objectWillChange.send()
+        }
+        session.onProofreadingEnabledChanged = { [weak self] _ in
+            guard self?.activeSessionID == sessionID else {
+                return
+            }
+            self?.objectWillChange.send()
+        }
         session.reserveSaveDestination = { [weak self] url in
             guard let self else {
                 throw CancellationError()
@@ -1134,12 +1154,12 @@ struct MarkwasniceCommands: Commands {
             }
             .keyboardShortcut("f", modifiers: [.command, .control])
 
-            Button("Focus Mode") {
+            Button(appState.focusModeToggleTitle) {
                 appState.toggleFocusMode()
             }
             .keyboardShortcut("d")
 
-            Button("Proofreading") {
+            Button(appState.styleCheckToggleTitle) {
                 appState.toggleProofreading()
             }
             .keyboardShortcut("r")
