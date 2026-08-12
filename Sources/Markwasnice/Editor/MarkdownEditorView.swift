@@ -2,6 +2,13 @@
 
 protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
+    /// A confirmed editor text change. The generation is strictly increasing
+    /// for the lifetime of the view, so consumers can trust the notification
+    /// without comparing two full-document String snapshots.
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        didChangeTextAt generation: Int
+    )
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
         didChangeSelectionText selectedText: String?
@@ -17,6 +24,17 @@ protocol MarkdownEditorViewDelegate: AnyObject {
         _ editorView: MarkdownEditorView,
         requestOpenFileURLs urls: [URL]
     )
+}
+
+extension MarkdownEditorViewDelegate {
+    /// Compatibility bridge for delegates that have not adopted edit
+    /// generations yet. MarkdownEditorView calls only this entry point.
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        didChangeTextAt _: Int
+    ) {
+        markdownEditorViewDidChangeText(editorView)
+    }
 }
 
 /// Environment-driven kill switches for the styling pipeline, used to bisect
@@ -129,6 +147,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var isApplyingStyles = false
     private var isSettingTextProgrammatically = false
     private var isNormalizingEditedText = false
+    private var textChangeGeneration = 0
     // Asymmetric set-here-consume-there protocol, deliberately not scoped:
     // hasRecentLargeEdit is raised by the large-edit path in
     // textStorage(_:didProcessEditing:…) and consumed by the next
@@ -926,7 +945,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         }
 
         focusModeController.updateForSelection()
-        delegate?.markdownEditorViewDidChangeText(self)
+        textChangeGeneration += 1
+        delegate?.markdownEditorView(
+            self,
+            didChangeTextAt: textChangeGeneration
+        )
     }
 
     func textStorage(
@@ -995,9 +1018,8 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             sourceLength: textStorage.length
         )
 
-        // One acquisition of the backing string for the whole pass: every
-        // helper below used to reach for textView.string itself, and each of
-        // those reads copies the document.
+        // Share one mutable-string view of the backing storage across the
+        // local styling pass instead of making each helper fetch it again.
         let characters = textStorage.mutableString
         let dirtyRange = MarkdownStylingEngine.editDirtyRange(
             editedRange: editedRange,

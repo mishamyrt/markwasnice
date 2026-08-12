@@ -1,6 +1,6 @@
 import Foundation
 
-struct AutosavedDraft: Codable {
+struct AutosavedDraft: Codable, Sendable {
     var text: String
     var fileURL: URL?
     /// Drafts sharing a window identifier were tabs of one window; the value
@@ -13,14 +13,23 @@ struct AutosavedDraft: Codable {
     var windowFrame: String?
 }
 
-struct AutosavedSession: Codable {
+struct AutosavedSession: Codable, Sendable {
     var drafts: [AutosavedDraft]
 }
 
 actor AutosaveStore {
+    enum LoadResult: Sendable {
+        case missing
+        case loaded(AutosavedSession)
+        case corruptFileQuarantined(backupURL: URL)
+    }
+
     private let fileURL: URL
+    private let fileManager: FileManager
+    private var latestAcceptedGeneration: UInt64?
 
     init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
         let directory = fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -30,37 +39,52 @@ actor AutosaveStore {
         fileURL = directory.appendingPathComponent("AutosavedDraft.json")
     }
 
-    init(fileURL: URL) {
+    init(fileURL: URL, fileManager: FileManager = .default) {
         self.fileURL = fileURL
+        self.fileManager = fileManager
     }
 
-    func loadSession() -> AutosavedSession? {
-        guard let data = try? Data(contentsOf: fileURL) else {
-            return nil
+    func loadSession() throws -> LoadResult {
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            guard Self.isFileNotFound(error) else {
+                throw error
+            }
+
+            return .missing
         }
 
         let decoder = JSONDecoder()
         if let session = try? decoder.decode(AutosavedSession.self, from: data) {
-            return session
+            return .loaded(session)
         }
 
         if let draft = try? decoder.decode(AutosavedDraft.self, from: data) {
-            return AutosavedSession(drafts: [draft])
+            return .loaded(AutosavedSession(drafts: [draft]))
         }
 
         // The file exists but is undecodable; move it aside so the next
         // autosave cannot overwrite the only copy of whatever it contains.
-        quarantineCorruptFile()
-        return nil
+        return try .corruptFileQuarantined(backupURL: quarantineCorruptFile())
     }
 
-    func saveSession(_ session: AutosavedSession) throws {
+    func saveSession(_ session: AutosavedSession, generation: UInt64) throws {
+        // Actor isolation serializes writes but does not order the detached
+        // tasks that arrive here. Claim the generation before doing I/O so an
+        // older task can never write after a newer one, even if the newer write
+        // itself fails. The same generation remains retryable.
+        if let latestAcceptedGeneration, generation < latestAcceptedGeneration {
+            return
+        }
+        latestAcceptedGeneration = generation
+
         let data = try JSONEncoder().encode(session)
         try data.write(to: fileURL, options: .atomic)
     }
 
-    private func quarantineCorruptFile() {
-        let fileManager = FileManager.default
+    private func quarantineCorruptFile() throws -> URL {
         var backupURL = fileURL.appendingPathExtension("corrupt")
         if fileManager.fileExists(atPath: backupURL.path) {
             // Never clobber an earlier quarantined copy; a timestamped name
@@ -69,6 +93,26 @@ actor AutosaveStore {
                 "corrupt-\(UInt64(Date().timeIntervalSince1970))"
             )
         }
-        try? fileManager.moveItem(at: fileURL, to: backupURL)
+        try fileManager.moveItem(at: fileURL, to: backupURL)
+        return backupURL
+    }
+
+    nonisolated private static func isFileNotFound(_ error: Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain,
+           error.code == NSFileReadNoSuchFileError
+        {
+            return true
+        }
+        if error.domain == NSPOSIXErrorDomain,
+           error.code == Int(POSIXErrorCode.ENOENT.rawValue)
+        {
+            return true
+        }
+
+        guard let underlying = error.userInfo[NSUnderlyingErrorKey] as? Error else {
+            return false
+        }
+        return isFileNotFound(underlying)
     }
 }

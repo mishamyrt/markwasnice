@@ -20,10 +20,15 @@ final class MarkwasniceAppState: ObservableObject {
 
     private let settingsStore: EditorSettingsStore
     private let autosaveStore: AutosaveStore
+    private var documentRegistry = DocumentRegistry()
     private var autosaveWorkItem: DispatchWorkItem?
     /// Resolves to false when the write failed; a cancelled (superseded)
     /// flush counts as success because the newer flush covers it.
     private var autosaveTask: Task<Bool, Never>?
+    private var autosaveGeneration: UInt64 = 0
+    /// An unexpected recovery read/quarantine failure must not be followed by
+    /// a successful overwrite of the file we could not inspect.
+    private var areAutosaveWritesBlocked = false
     /// The failure alert is shown at most once per launch; a session that
     /// cannot autosave has already been told, and repeating it on every
     /// later failure would only get in the way of saving files by hand.
@@ -81,11 +86,11 @@ final class MarkwasniceAppState: ObservableObject {
 
         didCreateInitialSessions = true
         isResolvingInitialSessions = true
-        let autosaved = await autosaveStore.loadSession()
+        let autosaved = await loadAutosavedSession()
         isResolvingInitialSessions = false
 
         if let autosaved, !autosaved.drafts.isEmpty {
-            let drafts = autosaved.drafts
+            let drafts = deduplicatedDrafts(autosaved.drafts)
             let restoredSessions = restoredSessions(from: drafts)
             var leadSessionIDs: [UUID: EditorDocumentSession.ID] = [:]
             for (draft, session) in zip(drafts, restoredSessions) {
@@ -103,6 +108,64 @@ final class MarkwasniceAppState: ObservableObject {
         }
 
         return newSession().id
+    }
+
+    private func loadAutosavedSession() async -> AutosavedSession? {
+        do {
+            switch try await autosaveStore.loadSession() {
+            case .missing:
+                return nil
+            case let .loaded(session):
+                return session
+            case let .corruptFileQuarantined(backupURL):
+                Self.autosaveLogger.error(
+                    "Quarantined an unreadable autosave at \(backupURL.path, privacy: .public)"
+                )
+                return nil
+            }
+        } catch {
+            // Keep the recovery file untouched for this launch. A later write
+            // becoming possible must not destroy data that a transient read
+            // or quarantine failure prevented us from inspecting.
+            areAutosaveWritesBlocked = true
+            isAutosaveFailing = true
+            didReportAutosaveFailure = true
+            Self.autosaveLogger.error(
+                "Failed to read autosaved session: \(error.localizedDescription, privacy: .public)"
+            )
+
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "Autosaved drafts could not be read."
+            alert.informativeText =
+                "Markwasnice will not overwrite its recovery file during this "
+                    + "launch. \(error.localizedDescription)"
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return nil
+        }
+    }
+
+    private func deduplicatedDrafts(_ drafts: [AutosavedDraft]) -> [AutosavedDraft] {
+        var documentURLs: Set<URL> = []
+        return drafts.map { draft in
+            guard let fileURL = draft.fileURL else {
+                return draft
+            }
+
+            guard !documentURLs.insert(
+                FileIO.canonicalDocumentURL(for: fileURL)
+            ).inserted else {
+                return draft
+            }
+
+            // Older builds could autosave two editors for one URL. Restore
+            // every text, but detach later copies from the file so enforcing
+            // the new ownership invariant never discards recovery data.
+            var recoveredCopy = draft
+            recoveredCopy.fileURL = nil
+            return recoveredCopy
+        }
     }
 
     @discardableResult
@@ -189,6 +252,12 @@ final class MarkwasniceAppState: ObservableObject {
         queueOpen(url, placement: .frontmostTab)
     }
 
+    /// Awaitable open entry point used by callers that need the document
+    /// registry transaction to finish before continuing.
+    func openDocument(_ url: URL) async {
+        await open(url, queuesWindow: false)
+    }
+
     private func queueOpen(_ url: URL, placement: OpenPlacement) {
         Task {
             await open(url, queuesWindow: true, placement: placement)
@@ -225,6 +294,7 @@ final class MarkwasniceAppState: ObservableObject {
     }
 
     func remove(_ session: EditorDocumentSession) {
+        documentRegistry.removeSession(session.id)
         sessions[session.id] = nil
         sessionsAwaitingActivation.remove(session.id)
         if activeSessionID == session.id {
@@ -315,18 +385,28 @@ final class MarkwasniceAppState: ObservableObject {
         guard force || !sessions.isEmpty else {
             return
         }
+        guard !areAutosaveWritesBlocked else {
+            isAutosaveFailing = true
+            return
+        }
 
         autosaveWorkItem?.cancel()
         autosaveWorkItem = nil
         autosaveTask?.cancel()
+        autosaveGeneration += 1
+        let generation = autosaveGeneration
         let session = AutosavedSession(drafts: autosavedDrafts())
-        let task = Task.detached(priority: .utility) { [autosaveStore, session] in
+        let task = Task.detached(priority: .utility) {
+            [autosaveStore, generation, session] in
             guard !Task.isCancelled else {
                 return true
             }
 
             do {
-                try await autosaveStore.saveSession(session)
+                try await autosaveStore.saveSession(
+                    session,
+                    generation: generation
+                )
                 return true
             } catch {
                 Self.autosaveLogger.error(
@@ -458,6 +538,9 @@ final class MarkwasniceAppState: ObservableObject {
     /// can warn before drafts are discarded.
     @discardableResult
     func flushAutosaveAndWait(force: Bool = false) async -> Bool {
+        guard !areAutosaveWritesBlocked else {
+            return false
+        }
         flushAutosave(force: force, reportsFailure: false)
         guard let autosaveTask else {
             return true
@@ -545,26 +628,61 @@ final class MarkwasniceAppState: ObservableObject {
             && window.tabbingIdentifier == EditorWindowTabbing.identifier
     }
 
+    private func revealRegisteredDocument(
+        at documentURL: URL,
+        queuesWindow: Bool,
+        placement: OpenPlacement
+    ) -> Bool {
+        guard let sessionID = documentRegistry.sessionID(for: documentURL) else {
+            return false
+        }
+        guard let existing = sessions[sessionID] else {
+            documentRegistry.removeSession(sessionID)
+            return false
+        }
+
+        activate(existing)
+        if existing.editorView.window != nil {
+            revealDocument(of: existing, activatesApp: placement.isFrontmostTab)
+        } else if queuesWindow, !pendingWindowIDs.contains(existing.id) {
+            pendingWindowIDs.append(existing.id)
+        }
+        return true
+    }
+
     private func open(
         _ url: URL,
         queuesWindow: Bool,
         placement: OpenPlacement = .window(nil)
     ) async {
-        if let existing = sessions.values.first(where: { $0.fileURL == url }) {
-            activate(existing)
-            // Already on screen: selecting the window (its tab, when it is
-            // tabbed) is what reopening a file should do, and asking SwiftUI
-            // to open a scene for a value it already presents would not.
-            if existing.editorView.window != nil {
-                revealDocument(of: existing, activatesApp: placement.isFrontmostTab)
-            } else if queuesWindow {
-                pendingWindowIDs.append(existing.id)
-            }
+        let documentURL = FileIO.canonicalDocumentURL(for: url)
+        if revealRegisteredDocument(
+            at: documentURL,
+            queuesWindow: queuesWindow,
+            placement: placement
+        ) {
             return
         }
+        // This claim spans the suspension in FileIO. MainActor isolation alone
+        // does not make the check/read/register sequence atomic.
+        guard documentRegistry.beginOpening(documentURL) else {
+            return
+        }
+        defer { documentRegistry.finishOpening(documentURL) }
 
         do {
-            let text = try await FileIO.readUTF8(from: url)
+            let snapshot = try await FileIO.readUTF8Snapshot(
+                from: url,
+                resolvingTo: documentURL
+            )
+            if revealRegisteredDocument(
+                at: documentURL,
+                queuesWindow: queuesWindow,
+                placement: placement
+            ) {
+                return
+            }
+
             // Resolved only now: an external open can arrive mid-launch,
             // before the first editor window has been configured.
             let tabTarget = tabTarget(for: placement)
@@ -577,14 +695,32 @@ final class MarkwasniceAppState: ObservableObject {
                let active = activeSession,
                active.isEmptyDocument
             {
-                active.adoptFile(url: url, text: text)
+                guard documentRegistry.register(documentURL, to: active.id) else {
+                    _ = revealRegisteredDocument(
+                        at: documentURL,
+                        queuesWindow: queuesWindow,
+                        placement: placement
+                    )
+                    return
+                }
+                active.adoptFile(
+                    url: url,
+                    text: snapshot.text,
+                    revision: snapshot.revision
+                )
                 NSDocumentController.shared.noteNewRecentDocumentURL(url)
                 scheduleAutosave()
                 revealDocument(of: active, activatesApp: placement.isFrontmostTab)
                 return
             }
 
-            let session = makeSession(text: text, fileURL: url, isEdited: false)
+            let session = makeSession(
+                text: snapshot.text,
+                fileURL: url,
+                isEdited: false,
+                fileRevision: snapshot.revision,
+                registeredDocumentURL: documentURL
+            )
             activate(session)
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             scheduleAutosave()
@@ -602,15 +738,51 @@ final class MarkwasniceAppState: ObservableObject {
     private func makeSession(
         text: String,
         fileURL: URL?,
-        isEdited: Bool
+        isEdited: Bool,
+        fileRevision: FileIO.Revision? = nil,
+        registeredDocumentURL: URL? = nil
     ) -> EditorDocumentSession {
         let session = EditorDocumentSession(
             text: text,
             fileURL: fileURL,
             isEdited: isEdited,
-            settings: settings
+            settings: settings,
+            fileRevision: fileRevision
         ) { [weak self] in
             self?.scheduleAutosave()
+        }
+        if let fileURL {
+            let didRegister = documentRegistry.register(
+                registeredDocumentURL
+                    ?? FileIO.canonicalDocumentURL(for: fileURL),
+                to: session.id
+            )
+            precondition(didRegister, "A document URL must have exactly one session")
+        }
+
+        let sessionID = session.id
+        session.reserveSaveDestination = { [weak self] url in
+            guard let self else {
+                throw CancellationError()
+            }
+            return try documentRegistry.reserveSave(
+                to: FileIO.canonicalDocumentURL(for: url),
+                for: sessionID
+            )
+        }
+        session.finishSaveDestination = {
+            [weak self] claim, previousDocumentURL, succeeded in
+            guard let self else {
+                return
+            }
+            // A write may finish after its window was closed. Release its
+            // claim, but never resurrect ownership for a removed session.
+            let shouldCommitOwnership = succeeded && sessions[sessionID] != nil
+            documentRegistry.finishSave(
+                claim,
+                previousDocumentURL: previousDocumentURL,
+                succeeded: shouldCommitOwnership
+            )
         }
         session.onOpenFiles = { [weak self] urls, window in
             for url in urls {
@@ -668,11 +840,23 @@ final class MarkwasniceAppState: ObservableObject {
         }
 
         Task { [weak session] in
-            let isEdited = await FileIO.hasDifferentUTF8Contents(
-                at: fileURL,
-                from: draft.text
-            )
-            session?.applyRestoredEditedState(isEdited, expectedText: draft.text)
+            do {
+                let snapshot = try await FileIO.readUTF8Snapshot(from: fileURL)
+                session?.applyRestoredEditedState(
+                    snapshot.text != draft.text,
+                    expectedText: draft.text,
+                    expectedFileURL: fileURL,
+                    fileRevision: snapshot.revision
+                )
+            } catch {
+                // A missing/unreadable backing file is never proof that the
+                // recovery text is safe to discard.
+                session?.applyRestoredEditedState(
+                    true,
+                    expectedText: draft.text,
+                    expectedFileURL: fileURL
+                )
+            }
         }
     }
 

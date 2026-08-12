@@ -23,6 +23,11 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     /// Opens files dropped onto this session's window; wired by the app state,
     /// which owns the session registry and the open flow.
     var onOpenFiles: (([URL], NSWindow?) -> Void)?
+    /// App-level URL reservation keeps two sessions from saving to the same
+    /// canonical document. Standalone sessions used by focused UI tests can
+    /// leave these callbacks unset.
+    var reserveSaveDestination: ((URL) throws -> DocumentRegistry.SaveClaim)?
+    var finishSaveDestination: ((DocumentRegistry.SaveClaim, URL?, Bool) -> Void)?
 
     private let stylingController: MarkdownStylingController
     private let onAutosaveNeeded: () -> Void
@@ -32,6 +37,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private(set) var isTabBarTemporarilyHidden = false
     private weak var hiddenTabBarAccessory: NSTitlebarAccessoryViewController?
     private var text: String
+    private var fileRevision: FileIO.Revision?
     private var saveTask: Task<Void, Never>?
     private var searchMatches: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
@@ -56,10 +62,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         fileURL: URL?,
         isEdited: Bool,
         settings: EditorSettings,
+        fileRevision: FileIO.Revision? = nil,
         onAutosaveNeeded: @escaping () -> Void
     ) {
         self.text = text
         self.fileURL = fileURL
+        self.fileRevision = fileRevision
         hasUnsavedFileChanges = isEdited
         self.onAutosaveNeeded = onAutosaveNeeded
         editorView = MarkdownEditorView(settings: settings)
@@ -129,13 +137,21 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView) {
-        // Each editorView.string access bridges the whole backing store into
-        // a fresh String; read it once per change.
-        let newText = editorView.string
-        guard newText != text else {
-            return
-        }
+        handleConfirmedTextChange(in: editorView)
+    }
 
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        didChangeTextAt _: Int
+    ) {
+        handleConfirmedTextChange(in: editorView)
+    }
+
+    private func handleConfirmedTextChange(in editorView: MarkdownEditorView) {
+        // Read the current value once for all downstream consumers. The editor
+        // generation already proves that characters changed, so an O(n)
+        // comparison with the previous document would only repeat that work.
+        let newText = editorView.string
         text = newText
         if !hasUnsavedFileChanges {
             hasUnsavedFileChanges = true
@@ -248,9 +264,14 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         fileURL == nil && editorView.string.isEmpty
     }
 
-    func adoptFile(url: URL, text: String) {
+    func adoptFile(
+        url: URL,
+        text: String,
+        revision: FileIO.Revision? = nil
+    ) {
         self.text = text
         fileURL = url
+        fileRevision = revision
         hasUnsavedFileChanges = false
         editorView.documentURL = url
         editorView.setString(text, clearsUndo: true)
@@ -370,7 +391,21 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     /// Applies the asynchronously refined edited flag computed during launch
     /// restore. Ignored once the user has changed the text, so a slow file
     /// read can never clear an edit made in the meantime.
-    func applyRestoredEditedState(_ isEdited: Bool, expectedText: String) {
+    func applyRestoredEditedState(
+        _ isEdited: Bool,
+        expectedText: String,
+        expectedFileURL: URL,
+        fileRevision: FileIO.Revision? = nil
+    ) {
+        guard let fileURL,
+              fileURL.standardizedFileURL == expectedFileURL.standardizedFileURL
+        else {
+            // Save As completed while the launch-time read was in flight;
+            // its revision belongs to the new file and must win.
+            return
+        }
+
+        self.fileRevision = fileRevision
         guard text == expectedText, hasUnsavedFileChanges != isEdited else {
             return
         }
@@ -421,15 +456,48 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         to url: URL,
         onCompletion: ((Bool) -> Void)? = nil
     ) {
+        let previousURL = fileURL
+        // Capture identity before any suspension. The user-visible URL may be
+        // a symlink whose target changes while the write is queued.
+        let previousDocumentURL = previousURL.map {
+            FileIO.canonicalDocumentURL(for: $0)
+        }
+        let isSameRequestedURL = previousURL.map {
+            $0.standardizedFileURL == url.standardizedFileURL
+        } ?? false
+        let isCurrentDocument = isSameRequestedURL
+            || previousDocumentURL == FileIO.canonicalDocumentURL(for: url)
+        if isCurrentDocument, fileRevision == nil {
+            NSAlert(
+                error: FileIO.ConditionalWriteError.revisionUnavailable(url)
+            ).runModal()
+            onCompletion?(false)
+            return
+        }
+
+        let claim: DocumentRegistry.SaveClaim?
+        do {
+            claim = try reserveSaveDestination?(url)
+        } catch {
+            NSAlert(error: error).runModal()
+            onCompletion?(false)
+            return
+        }
+
         let savedText = text
         let previousSaveTask = saveTask
+        let finishSaveDestination = finishSaveDestination
         previousSaveTask?.cancel()
         saveTask = Task { [weak self, savedText, url] in
             // Every exit has to answer, or a caller waiting on the outcome
             // waits forever: the close prompt keeps its window hostage that
             // way, since an unanswered prompt refuses to close.
             var didReportOutcome = false
+            var didFinishClaim = false
             defer {
+                if let claim, !didFinishClaim {
+                    finishSaveDestination?(claim, previousDocumentURL, false)
+                }
                 if !didReportOutcome {
                     onCompletion?(false)
                 }
@@ -439,9 +507,51 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             // wait for it so two quick saves to the same URL cannot land
             // with the older content last.
             await previousSaveTask?.value
+            // If another save superseded us while we were only queued, no
+            // bytes from this snapshot have started moving yet. Skip it so a
+            // burst of saves coalesces to the in-flight and latest versions.
+            guard !Task.isCancelled else {
+                return
+            }
 
+            let expectedRevision: FileIO.Revision?
+            if isCurrentDocument {
+                // A superseded save still writes before this task starts. Use
+                // the revision it produced, rather than the revision captured
+                // before waiting, or our own write looks externally modified.
+                guard let revision = self?.fileRevision else {
+                    guard !Task.isCancelled else {
+                        return
+                    }
+                    NSAlert(
+                        error: FileIO.ConditionalWriteError.revisionUnavailable(url)
+                    ).runModal()
+                    didReportOutcome = true
+                    onCompletion?(false)
+                    return
+                }
+                expectedRevision = revision
+            } else {
+                expectedRevision = nil
+            }
+
+            let savedRevision: FileIO.Revision
             do {
-                try await FileIO.writeUTF8(savedText, to: url)
+                if let expectedRevision {
+                    savedRevision = try await FileIO.writeUTF8(
+                        savedText,
+                        to: url,
+                        ifUnmodifiedSince: expectedRevision
+                    )
+                } else if let claimedDocumentURL = claim?.documentURL {
+                    savedRevision = try await FileIO.writeUTF8(
+                        savedText,
+                        to: url,
+                        resolvingTo: claimedDocumentURL
+                    )
+                } else {
+                    savedRevision = try await FileIO.writeUTF8(savedText, to: url)
+                }
             } catch {
                 // A superseded save must not alert: the newer save owns
                 // the outcome the user will see.
@@ -455,6 +565,13 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 return
             }
 
+            // A newer save may have cancelled this task but is deliberately
+            // waiting for its uninterruptible write. Publish the resulting
+            // baseline so that newer conditional write can continue safely.
+            if isCurrentDocument {
+                self?.fileRevision = savedRevision
+            }
+
             guard !Task.isCancelled else {
                 return
             }
@@ -463,7 +580,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 return
             }
 
+            if let claim {
+                finishSaveDestination?(claim, previousDocumentURL, true)
+                didFinishClaim = true
+            }
             fileURL = url
+            fileRevision = savedRevision
             editorView.documentURL = url
             let didSaveCurrentText = text == savedText
             hasUnsavedFileChanges = !didSaveCurrentText
