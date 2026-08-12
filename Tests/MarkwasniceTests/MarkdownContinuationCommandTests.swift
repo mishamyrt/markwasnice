@@ -35,6 +35,16 @@ struct MarkdownContinuationCommandTests {
         #expect(edit.replacementString == "\n4) ")
     }
 
+    @Test func maximumOrderedMarkerContinuesWithoutOverflow() throws {
+        let text = "\(Int.max). item"
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text as NSString,
+            selectedRange: NSRange(location: (text as NSString).length, length: 0)
+        ))
+
+        #expect(edit.replacementString == "\n\(Int.max). ")
+    }
+
     @Test func preservesIndentation() throws {
         let text = "  - nested"
         let edit = try #require(MarkdownContinuationCommand.edit(

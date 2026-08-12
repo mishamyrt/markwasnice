@@ -198,6 +198,10 @@ enum MarkdownContinuationCommand {
         }
 
         let suffix = (marker as NSString).substring(with: match.range(at: 2))
-        return "\(number + 1)\(suffix)"
+        let (nextNumber, didOverflow) = number.addingReportingOverflow(1)
+        guard !didOverflow else {
+            return marker
+        }
+        return "\(nextNumber)\(suffix)"
     }
 }
