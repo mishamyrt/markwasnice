@@ -170,10 +170,16 @@ final class MarkdownStyleApplier {
                 Self.listMarkerRegex,
                 range: range,
                 string: string,
-                hangingIndentCharacterCount: 3
+                hangingIndentCharacterCount: 3,
+                checkboxCaptureGroup: 1
             )
         case .unorderedList:
-            applyLineMarkerStyle(Self.listMarkerRegex, range: range, string: string)
+            applyLineMarkerStyle(
+                Self.listMarkerRegex,
+                range: range,
+                string: string,
+                checkboxCaptureGroup: 1
+            )
         case .taskCheckbox:
             // Same colour a list marker gets, so "[ ] a" and "- [ ] a" read
             // alike; the span already covers just the brackets.
@@ -209,7 +215,7 @@ final class MarkdownStyleApplier {
     /// whole instead of leaving brackets in the body colour.
     private static let listMarkerRegex = try! NSRegularExpression(
         pattern: "^\\s*\(MarkdownLineGrammar.listMarker)\\s+"
-            + "(?:\(MarkdownLineGrammar.checkbox)\\s+)?",
+            + "(?:(\(MarkdownLineGrammar.checkbox))\\s+)?",
         options: [.anchorsMatchLines]
     )
     private func applyHeadingStyle(range: NSRange, string: NSString) {
@@ -318,7 +324,8 @@ final class MarkdownStyleApplier {
         range: NSRange,
         string: NSString,
         markerCaptureGroup: Int? = nil,
-        hangingIndentCharacterCount: Int = 2
+        hangingIndentCharacterCount: Int = 2,
+        checkboxCaptureGroup: Int? = nil
     ) {
         // Scanned over the extracted span text for the same reason as the
         // heading markers above: the regex needs a Swift String, and the
@@ -359,9 +366,20 @@ final class MarkdownStyleApplier {
                 range: markerRange
             )
 
+            var indentCharacterCount = hangingIndentCharacterCount
+            if let checkboxCaptureGroup,
+               checkboxCaptureGroup < match.numberOfRanges
+            {
+                let checkboxRange = match.range(at: checkboxCaptureGroup)
+                if checkboxRange.location != NSNotFound {
+                    // The capture excludes the separating space after `[ ]`.
+                    indentCharacterCount += checkboxRange.length + 1
+                }
+            }
+
             applyMarkerHangingIndent(
                 to: string.lineRange(for: markerRange),
-                characterCount: hangingIndentCharacterCount
+                characterCount: indentCharacterCount
             )
         }
     }

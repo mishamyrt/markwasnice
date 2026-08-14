@@ -280,6 +280,42 @@ struct MarkdownStyleApplierTests {
         #expect(storage.string == text)
     }
 
+    @Test(arguments: ["- [ ] todo", "- [x] done"])
+    func taskListMarkerIncludesCheckboxInHangingIndent(_ text: String) throws {
+        let (applier, storage) = makeApplier(text: text)
+
+        applier.applyStyle(
+            .unorderedList,
+            range: NSRange(location: 0, length: storage.length),
+            string: storage.mutableString
+        )
+
+        let style = try #require(paragraphStyle(in: storage, at: 0))
+        let expectedIndent = Self.paragraphGutter
+            + 6 * (applier.characterWidth() + applier.baseLetterSpacing)
+        #expect(style.firstLineHeadIndent == Self.paragraphGutter)
+        #expect(style.headIndent == expectedIndent)
+        #expect(storage.string == text)
+    }
+
+    @Test func orderedTaskListIncludesCheckboxInHangingIndent() throws {
+        let text = "1. [x] done"
+        let (applier, storage) = makeApplier(text: text)
+
+        applier.applyStyle(
+            .orderedList,
+            range: NSRange(location: 0, length: storage.length),
+            string: storage.mutableString
+        )
+
+        let style = try #require(paragraphStyle(in: storage, at: 0))
+        let expectedIndent = Self.paragraphGutter
+            + 7 * (applier.characterWidth() + applier.baseLetterSpacing)
+        #expect(style.firstLineHeadIndent == Self.paragraphGutter)
+        #expect(style.headIndent == expectedIndent)
+        #expect(storage.string == text)
+    }
+
     @Test func quoteMarkerGivesWrappedLinesATwoCharacterHangingIndent() throws {
         let text = "> a long quote\n> another long quote"
         let (applier, storage) = makeApplier(text: text)
