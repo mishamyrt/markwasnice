@@ -309,12 +309,28 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.applyMarkup(command)
     }
 
+    func applyBlockCommand(_ command: MarkdownBlockCommand) {
+        guard !shellState.isPreviewActive else {
+            return
+        }
+
+        editorView.applyBlockCommand(command)
+    }
+
     func moveLines(_ command: MarkdownLineMoveCommand) {
         guard !shellState.isPreviewActive else {
             return
         }
 
         editorView.moveLines(command)
+    }
+
+    func applyIndent(_ command: MarkdownIndentCommand) {
+        guard !shellState.isPreviewActive else {
+            return
+        }
+
+        editorView.applyIndent(command)
     }
 
     func requestInsertTable() {

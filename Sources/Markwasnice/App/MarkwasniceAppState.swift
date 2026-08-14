@@ -335,8 +335,16 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.applyMarkup(command)
     }
 
+    func applyBlockCommand(_ command: MarkdownBlockCommand) {
+        activeSession?.applyBlockCommand(command)
+    }
+
     func moveLines(_ command: MarkdownLineMoveCommand) {
         activeSession?.moveLines(command)
+    }
+
+    func applyIndent(_ command: MarkdownIndentCommand) {
+        activeSession?.applyIndent(command)
     }
 
     func insertTable() {
@@ -1240,6 +1248,29 @@ struct MarkwasniceCommands: Commands {
                 "Code Block", .codeBlock,
                 keyEquivalent: "j", modifiers: [.command, .shift]
             )
+            blockCommand("Blockquote", .blockquote, keyEquivalent: ">")
+            Menu("Lists") {
+                blockCommand("List", .list, keyEquivalent: "l")
+                blockCommand(
+                    "Task List", .taskList,
+                    keyEquivalent: "l", modifiers: [.command, .option]
+                )
+                blockCommand(
+                    "Ordered List", .orderedList,
+                    keyEquivalent: "l", modifiers: [.command, .shift]
+                )
+                blockCommand(
+                    "Ordered Task List", .orderedTaskList,
+                    keyEquivalent: "l", modifiers: [.command, .option, .shift]
+                )
+
+                Divider()
+
+                blockCommand(
+                    "Mark Task as Completed", .markTaskCompleted,
+                    keyEquivalent: "x", modifiers: [.command, .option]
+                )
+            }
 
             Divider()
             Menu("Heading") {
@@ -1269,6 +1300,16 @@ struct MarkwasniceCommands: Commands {
                 )
             }
             Menu("Structure") {
+                Button("Indent") {
+                    appState.applyIndent(.indent)
+                }
+
+                Button("Outdent") {
+                    appState.applyIndent(.outdent)
+                }
+
+                Divider()
+
                 Button("Move Line Up") {
                     appState.moveLines(.up)
                 }
@@ -1294,6 +1335,18 @@ struct MarkwasniceCommands: Commands {
     ) -> some View {
         Button(title) {
             appState.applyMarkup(command)
+        }
+        .keyboardShortcut(keyEquivalent, modifiers: modifiers)
+    }
+
+    private func blockCommand(
+        _ title: String,
+        _ command: MarkdownBlockCommand,
+        keyEquivalent: KeyEquivalent,
+        modifiers: EventModifiers = .command
+    ) -> some View {
+        Button(title) {
+            appState.applyBlockCommand(command)
         }
         .keyboardShortcut(keyEquivalent, modifiers: modifiers)
     }

@@ -768,6 +768,21 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
+    func applyBlockCommand(_ command: MarkdownBlockCommand) {
+        guard let edit = command.edit(
+            in: sourceCharacters,
+            selectedRange: textView.selectedRange()
+        ) else {
+            return
+        }
+
+        replaceText(
+            in: edit.replacementRange,
+            with: edit.replacementString,
+            selectedRange: edit.selectedRange
+        )
+    }
+
     func moveLines(_ command: MarkdownLineMoveCommand) {
         guard let edit = command.edit(
             in: sourceCharacters,
@@ -861,7 +876,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         moveLines(command)
     }
 
-    private func applyIndent(_ command: MarkdownIndentCommand) {
+    func applyIndent(_ command: MarkdownIndentCommand) {
         let indentUnit: String
         switch settings.tabInsertionMode {
         case .spaces:

@@ -42,13 +42,24 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
         // SwiftUI disables automatic window tabbing for its scenes, which
         // also disables dragging a tab into another window's tab bar.
         NSWindow.allowsAutomaticWindowTabbing = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(menuDidAddItem(_:)),
+            name: NSMenu.didAddItemNotification,
+            object: nil
+        )
         installOpenDocumentsHandler()
     }
 
     func applicationDidFinishLaunching(_: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        SystemMenuCustomization.hideDefaultTabCommands(in: NSApp.mainMenu)
         ensureInitialSceneWindow(attempt: 0)
+    }
+
+    @objc private func menuDidAddItem(_: Notification) {
+        SystemMenuCustomization.hideDefaultTabCommands(in: NSApp.mainMenu)
     }
 
     /// The WindowGroup normally materializes its first window before the app
@@ -211,6 +222,24 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
         pendingOpenURLs = []
         for url in urls {
             appState.queueExternalOpen(url)
+        }
+    }
+}
+
+@MainActor
+enum SystemMenuCustomization {
+    static func hideDefaultTabCommands(in menu: NSMenu?) {
+        guard let menu else {
+            return
+        }
+
+        for item in menu.items {
+            if item.action == #selector(NSWindow.toggleTabBar(_:))
+                || item.action == #selector(NSWindow.toggleTabOverview(_:))
+            {
+                item.isHidden = true
+            }
+            hideDefaultTabCommands(in: item.submenu)
         }
     }
 }
