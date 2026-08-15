@@ -19,8 +19,8 @@ final class EditorShellState: ObservableObject {
     /// The hairline marking the bottom edge of the top chrome. Drawn twice —
     /// by the in-content band in SwiftUI and by the fullscreen toolbar window
     /// in AppKit — so the two cannot drift apart.
-    static let topChromeSeparatorThickness: CGFloat = 0.67
-    static let topChromeSeparatorOpacity: CGFloat = 0.05
+    static let topChromeSeparatorThickness: CGFloat = 0.5
+    static let topChromeSeparatorOpacity: CGFloat = 0.1
 
     @Published var title = "Untitled"
     @Published var isEdited = false
@@ -188,6 +188,14 @@ final class EditorShellState: ObservableObject {
     /// one band with the toolbar; it gets a band of its own below the tabs.
     var isSearchBandDetached: Bool {
         isTabBarVisible && isSearchPresented
+    }
+
+    var usesProgressiveToolbarBlur: Bool {
+        !isTabBarVisible && !isSearchPresented
+    }
+
+    var currentTopChromeSeparatorOpacity: CGFloat {
+        Self.topChromeSeparatorOpacity
     }
 
     /// The band ends tight above the tab capsules there, so a hairline would

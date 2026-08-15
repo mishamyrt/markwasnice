@@ -65,14 +65,17 @@ struct EditorShellView: View {
         // was not animated anyway, so conditional mounting looks identical.
         ZStack(alignment: .top) {
             if state.isToolbarVisible {
-                BackdropBlurOverlay()
-                    .frame(height: state.topChromeBackgroundHeight)
-                    .overlay(alignment: .bottom) {
-                        topChromeSeparator(
-                            isVisible: state.isTopChromeSeparatorVisible
-                        )
-                    }
-                    .allowsHitTesting(false)
+                BackdropBlurOverlay(
+                    usesProgressiveBlur: state.usesProgressiveToolbarBlur
+                )
+                .frame(height: state.topChromeBackgroundHeight)
+                .overlay(alignment: .bottom) {
+                    topChromeSeparator(
+                        isVisible: state.isTopChromeSeparatorVisible,
+                        opacity: state.currentTopChromeSeparatorOpacity
+                    )
+                }
+                .allowsHitTesting(false)
 
                 // The tab row between the two bands stays clear on purpose,
                 // so the text scrolls on behind the capsules.
@@ -80,7 +83,10 @@ struct EditorShellView: View {
                     BackdropBlurOverlay()
                         .frame(height: state.searchBarHeight)
                         .overlay(alignment: .bottom) {
-                            topChromeSeparator(isVisible: state.isContentScrolled)
+                            topChromeSeparator(
+                                isVisible: state.isContentScrolled,
+                                opacity: state.currentTopChromeSeparatorOpacity
+                            )
                         }
                         .offset(y: state.tabBarTopInset)
                         .allowsHitTesting(false)
@@ -92,12 +98,12 @@ struct EditorShellView: View {
 
     /// Only marks the chrome edge once content has moved under it; at the
     /// top of the document the band and the text share one flat surface.
-    private func topChromeSeparator(isVisible: Bool) -> some View {
+    private func topChromeSeparator(
+        isVisible: Bool,
+        opacity: CGFloat
+    ) -> some View {
         Rectangle()
-            .fill(
-                Color.primary
-                    .opacity(EditorShellState.topChromeSeparatorOpacity)
-            )
+            .fill(Color.primary.opacity(opacity))
             .frame(height: EditorShellState.topChromeSeparatorThickness)
             .opacity(isVisible ? 1 : 0)
             .animation(.easeInOut(duration: 0.1), value: isVisible)
@@ -456,11 +462,18 @@ extension EditorShellView {
 }
 
 private struct BackdropBlurOverlay: NSViewRepresentable {
+    var usesProgressiveBlur = false
+
     func makeNSView(context _: Context) -> BackdropBlurView {
-        BackdropBlurView(frame: .zero)
+        BackdropBlurView(
+            frame: .zero,
+            usesProgressiveBlur: usesProgressiveBlur
+        )
     }
 
-    func updateNSView(_: BackdropBlurView, context _: Context) {}
+    func updateNSView(_ view: BackdropBlurView, context _: Context) {
+        view.usesProgressiveBlur = usesProgressiveBlur
+    }
 }
 
 private struct EditorToolbarButton: View {

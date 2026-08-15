@@ -14,9 +14,10 @@ final class FullScreenToolbarController: NSObject {
     private weak var observedToolbarWindow: NSWindow?
     private var toolbarAppearanceObservation: NSKeyValueObservation?
     private var toolbarEffectiveAppearanceObservation: NSKeyValueObservation?
-    private weak var separatorView: NSView?
-    private var separatorVisibilityCancellable: AnyCancellable?
+    private weak var separatorView: FullScreenToolbarSeparatorView?
+    private var separatorAppearanceCancellable: AnyCancellable?
     private var isSeparatorVisible = false
+    private var separatorOpacity = EditorShellState.topChromeSeparatorOpacity
     private weak var backdropView: NSView?
     /// The chrome views the backdrop is stacked against, kept between
     /// notifications: `installBackdrop` runs on every move of the reveal
@@ -80,9 +81,9 @@ final class FullScreenToolbarController: NSObject {
         self.editorWindow = editorWindow
         self.session = session
         if didChangeSession {
-            separatorVisibilityCancellable = nil
+            separatorAppearanceCancellable = nil
             if let session {
-                observeSeparatorVisibility(of: session)
+                observeSeparatorAppearance(of: session)
             }
         }
 
@@ -375,6 +376,7 @@ final class FullScreenToolbarController: NSObject {
         // runs again per reveal: the fresh separator has to start at the
         // visibility the content is already in, without animating into it.
         separator.alphaValue = isSeparatorVisible ? 1 : 0
+        separator.separatorOpacity = separatorOpacity
         contentView.addSubview(separator)
         separatorView = separator
 
@@ -406,22 +408,36 @@ final class FullScreenToolbarController: NSObject {
     /// this keeps the hairline while the tab bar is up — the toolbar window
     /// carries the accessory row's bottom padding, so its edge stays clear of
     /// the tab capsules instead of cutting through them.
-    private func observeSeparatorVisibility(of session: EditorDocumentSession) {
-        // @Published emits in willSet, so the sunk value is the new one while
-        // the state object still reads stale; drive the update from it.
-        separatorVisibilityCancellable = session.shellState.$isContentScrolled
-            .sink { [weak self] isContentScrolled in
-                self?.setSeparatorVisible(isContentScrolled)
-            }
+    private func observeSeparatorAppearance(of session: EditorDocumentSession) {
+        // @Published emits in willSet, so the sunk values are the new ones
+        // while the state object still reads stale; drive the update from
+        // the combined values rather than reading the state again.
+        let state = session.shellState
+        separatorAppearanceCancellable = Publishers.CombineLatest3(
+            state.$isContentScrolled,
+            state.$isTabBarVisible,
+            state.$isSearchPresented
+        )
+        .sink { [weak self] values in
+            let (isContentScrolled, isTabBarVisible, isSearchPresented) = values
+            let opacity = EditorShellState.topChromeSeparatorOpacity
+            self?.setSeparatorAppearance(
+                isVisible: isContentScrolled,
+                opacity: opacity
+            )
+        }
     }
 
-    private func setSeparatorVisible(_ isVisible: Bool) {
-        guard isSeparatorVisible != isVisible else {
-            return
-        }
-
+    private func setSeparatorAppearance(
+        isVisible: Bool,
+        opacity: CGFloat
+    ) {
+        let visibilityChanged = isSeparatorVisible != isVisible
         isSeparatorVisible = isVisible
-        guard let separatorView else {
+        separatorOpacity = opacity
+        separatorView?.separatorOpacity = opacity
+
+        guard visibilityChanged, let separatorView else {
             return
         }
 
@@ -897,11 +913,21 @@ final class FullScreenToolbarController: NSObject {
     }
 }
 
-/// Matches the status bar separator: 1pt of the primary color at 8%.
+/// Matches the in-content chrome separator, including its stronger plain-
+/// toolbar treatment when neither tabs nor search are open.
 private final class FullScreenToolbarSeparatorView: NSView {
+    var separatorOpacity = EditorShellState.topChromeSeparatorOpacity {
+        didSet {
+            guard separatorOpacity != oldValue else {
+                return
+            }
+            needsDisplay = true
+        }
+    }
+
     override func draw(_: NSRect) {
         NSColor.labelColor
-            .withAlphaComponent(EditorShellState.topChromeSeparatorOpacity)
+            .withAlphaComponent(separatorOpacity)
             .setFill()
         bounds.fill()
     }

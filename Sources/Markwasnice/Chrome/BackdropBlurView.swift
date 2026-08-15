@@ -1,16 +1,34 @@
 @preconcurrency import AppKit
+import CoreImage.CIFilterBuiltins
 import ObjectiveC
 
 final class BackdropBlurView: NSView {
     private static let blurRadius: CGFloat = 5
-    private static let backgroundAlpha: CGFloat = 0.86
+    private static let maximumProgressiveBlurRadius: CGFloat = 2
+    private static let minimumProgressiveBlurRadius: CGFloat = 0.4
+    private static let uniformBackgroundAlpha: CGFloat = 0.86
+    private static let progressiveBackgroundAlpha: CGFloat = 0.8
 
     private let containerLayer = CALayer()
     private let backgroundLayer = CALayer()
     private let backdropLayer: CALayer
+    private lazy var progressiveBlurMask = Self.makeProgressiveBlurMask()
+    var usesProgressiveBlur: Bool {
+        didSet {
+            guard usesProgressiveBlur != oldValue else {
+                return
+            }
 
-    override init(frame frameRect: NSRect) {
+            withoutImplicitAnimations {
+                configureBackdropFilter()
+                updateBackgroundColor()
+            }
+        }
+    }
+
+    init(frame frameRect: NSRect, usesProgressiveBlur: Bool = false) {
         backdropLayer = Self.makeBackdropLayer()
+        self.usesProgressiveBlur = usesProgressiveBlur
         super.init(frame: frameRect)
         configureView()
     }
@@ -73,6 +91,10 @@ final class BackdropBlurView: NSView {
     }
 
     private func configureBackdropFilter() {
+        if usesProgressiveBlur, configureProgressiveBackdropFilter() {
+            return
+        }
+
         guard let blur = Self.makeCAFilter(named: "gaussianBlur") else {
             backdropLayer.filters = nil
             return
@@ -86,13 +108,62 @@ final class BackdropBlurView: NSView {
         backdropLayer.filters = [blur]
     }
 
+    private func configureProgressiveBackdropFilter() -> Bool {
+        guard let blur = Self.makeCAFilter(named: "variableBlur"),
+              let progressiveBlurMask
+        else {
+            return false
+        }
+
+        blur.setValue(Self.blurRadius, forKey: "inputRadius")
+        blur.setValue(progressiveBlurMask, forKey: "inputMaskImage")
+        blur.setValue(true, forKey: "inputNormalizeEdges")
+        backdropLayer.filters = [blur]
+        return true
+    }
+
+    /// `variableBlur` multiplies its maximum radius by the mask alpha. A
+    /// bottom alpha of 1/5 therefore starts the band at a 1pt radius, while
+    /// the opaque top reaches the full 5pt radius.
+    private static func makeProgressiveBlurMask(
+        width: CGFloat = 64,
+        height: CGFloat = 64
+    ) -> CGImage? {
+        let gradient = CIFilter.linearGradient()
+        let minimumAlpha = minimumProgressiveBlurRadius / maximumProgressiveBlurRadius
+        gradient.color0 = CIColor(red: 0, green: 0, blue: 0, alpha: 1)
+        gradient.color1 = CIColor(
+            red: 0,
+            green: 0,
+            blue: 0,
+            alpha: minimumAlpha
+        )
+        gradient.point0 = CGPoint(x: 0, y: height)
+        gradient.point1 = .zero
+
+        guard let image = gradient.outputImage else {
+            return nil
+        }
+
+        return CIContext().createCGImage(
+            image,
+            from: CGRect(x: 0, y: 0, width: width, height: height)
+        )
+    }
+
     private func updateBackgroundColor() {
         let background = EditorThemeColors.default
             .variant(for: effectiveAppearance)
             .background
         backgroundLayer.backgroundColor = background
-            .withAlphaComponent(Self.backgroundAlpha)
+            .withAlphaComponent(backgroundAlpha)
             .cgColor
+    }
+
+    private var backgroundAlpha: CGFloat {
+        usesProgressiveBlur
+            ? Self.progressiveBackgroundAlpha
+            : Self.uniformBackgroundAlpha
     }
 
     private static func makeBackdropLayer() -> CALayer {

@@ -59,6 +59,18 @@ struct TopChromeBandGeometryTests {
         )
     }
 
+    @Test func progressiveBlurIsLimitedToThePlainToolbar() {
+        let state = EditorShellState()
+        #expect(state.usesProgressiveToolbarBlur)
+
+        state.isSearchPresented = true
+        #expect(!state.usesProgressiveToolbarBlur)
+
+        state.isSearchPresented = false
+        state.isTabBarVisible = true
+        #expect(!state.usesProgressiveToolbarBlur)
+    }
+
     /// The hairline would cut between the toolbar and the tabs; with the tab
     /// bar up the detached search band carries it instead.
     @Test func separatorStaysHiddenBehindTheTabBar() {
