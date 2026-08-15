@@ -1,5 +1,5 @@
 # Environment paths
-XCODE_DIR := /Applications/Xcode.app
+XCODE_DIR := /Applications/Xcode-beta.app
 XCODE_CONTENTS_DIR := $(XCODE_DIR)/Contents
 
 # Repository paths
