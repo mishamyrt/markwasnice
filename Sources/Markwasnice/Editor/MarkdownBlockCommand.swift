@@ -7,7 +7,7 @@ enum MarkdownBlockCommand {
     case taskList
     case orderedList
     case orderedTaskList
-    case markTaskCompleted
+    case toggleTaskCompletion
 
     func edit(
         in nsString: NSString,
@@ -30,7 +30,7 @@ enum MarkdownBlockCommand {
             transformations = blockquoteTransformations(for: lines)
         case .list, .taskList, .orderedList, .orderedTaskList:
             transformations = listTransformations(for: lines)
-        case .markTaskCompleted:
+        case .toggleTaskCompletion:
             transformations = taskCompletionTransformations(for: lines)
         }
 
@@ -131,7 +131,7 @@ enum MarkdownBlockCommand {
             case .orderedList, .orderedTaskList:
                 marker = "\(orderedIndex). "
                 orderedIndex += 1
-            case .blockquote, .markTaskCompleted:
+            case .blockquote, .toggleTaskCompletion:
                 preconditionFailure("Not a list command")
             }
 
@@ -141,7 +141,7 @@ enum MarkdownBlockCommand {
                 checkbox = "[\(existing.checkboxState ?? " ")] "
             case .list, .orderedList:
                 checkbox = ""
-            case .blockquote, .markTaskCompleted:
+            case .blockquote, .toggleTaskCompletion:
                 preconditionFailure("Not a list command")
             }
 
@@ -159,19 +159,18 @@ enum MarkdownBlockCommand {
     ) -> [BlockLineTransformation] {
         lines.map { line in
             let prefix = listPrefix(in: line.body)
-            guard prefix.checkboxState == " ",
-                  let stateLocation = prefix.checkboxStateLocation
-            else {
+            guard let checkboxState = prefix.checkboxState,
+                  let stateLocation = prefix.checkboxStateLocation else {
                 return line.unchangedTransformation
             }
 
             let body = line.body as NSString
-            let completedBody = body.replacingCharacters(
+            let toggledBody = body.replacingCharacters(
                 in: NSRange(location: stateLocation, length: 1),
-                with: "x"
+                with: checkboxState == " " ? "x" : " "
             )
             return line.transformation(
-                body: completedBody,
+                body: toggledBody,
                 oldPrefixLength: line.leadingLength + prefix.contentOffset,
                 newPrefixLength: line.leadingLength + prefix.contentOffset
             )
@@ -242,7 +241,7 @@ private struct MarkdownListPrefix {
             marker == .ordered && checkboxState == nil
         case .orderedTaskList:
             marker == .ordered && checkboxState != nil
-        case .blockquote, .markTaskCompleted:
+        case .blockquote, .toggleTaskCompletion:
             false
         }
     }

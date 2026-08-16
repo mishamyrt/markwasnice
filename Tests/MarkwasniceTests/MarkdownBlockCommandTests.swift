@@ -125,23 +125,23 @@ struct MarkdownBlockCommandTests {
         ))
     }
 
-    @Test func marksUncheckedTasksCompletedWithoutChangingCompletedTasks() {
-        let edit = MarkdownBlockCommand.markTaskCompleted.edit(
-            in: "- [ ] todo\n- [x] done" as NSString,
-            selectedRange: NSRange(location: 0, length: 21)
+    @Test func togglesTaskCompletion() {
+        let edit = MarkdownBlockCommand.toggleTaskCompletion.edit(
+            in: "- [ ] todo\n- [x] done\n- [X] also done" as NSString,
+            selectedRange: NSRange(location: 0, length: 37)
         )
 
         #expect(edit == MarkdownMarkupEdit(
-            replacementRange: NSRange(location: 0, length: 21),
-            replacementString: "- [x] todo\n- [x] done",
-            selectedRange: NSRange(location: 0, length: 21)
+            replacementRange: NSRange(location: 0, length: 37),
+            replacementString: "- [x] todo\n- [ ] done\n- [ ] also done",
+            selectedRange: NSRange(location: 0, length: 37)
         ))
     }
 
-    @Test func completedTaskCommandDoesNothingOutsideUncheckedTask() {
-        let edit = MarkdownBlockCommand.markTaskCompleted.edit(
-            in: "plain\n- [x] done" as NSString,
-            selectedRange: NSRange(location: 0, length: 17)
+    @Test func taskCompletionToggleDoesNothingOutsideTask() {
+        let edit = MarkdownBlockCommand.toggleTaskCompletion.edit(
+            in: "plain" as NSString,
+            selectedRange: NSRange(location: 0, length: 5)
         )
 
         #expect(edit == nil)

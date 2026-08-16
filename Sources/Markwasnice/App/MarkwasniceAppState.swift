@@ -1267,7 +1267,7 @@ struct MarkwasniceCommands: Commands {
                 Divider()
 
                 blockCommand(
-                    "Mark Task as Completed", .markTaskCompleted,
+                    "Toggle Task Completion", .toggleTaskCompletion,
                     keyEquivalent: "x", modifiers: [.command, .option]
                 )
             }
