@@ -5,6 +5,12 @@ import UniformTypeIdentifiers
 final class EditorDocumentSession: ObservableObject, Identifiable,
     @preconcurrency MarkdownEditorViewDelegate
 {
+    enum FileConflictResolution {
+        case discardLocalChanges
+        case overwriteFile
+        case cancel
+    }
+
     static let editorTopInset: CGFloat = 0
     static let editorBottomInset: CGFloat = 72
 
@@ -30,6 +36,9 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     /// leave these callbacks unset.
     var reserveSaveDestination: ((URL) throws -> DocumentRegistry.SaveClaim)?
     var finishSaveDestination: ((DocumentRegistry.SaveClaim, URL?, Bool) -> Void)?
+    /// Override used by focused tests. Production sessions present the native
+    /// conflict alert when this callback is nil.
+    var resolveFileConflict: ((URL) -> FileConflictResolution)?
 
     private let stylingController: MarkdownStylingController
     private let onAutosaveNeeded: () -> Void
@@ -41,6 +50,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private var text: String
     private var fileRevision: FileIO.Revision?
     private var saveTask: Task<Void, Never>?
+    private var fileReloadTask: Task<Void, Never>?
+    private var filePresenter: DocumentFilePresenter?
     private var searchMatches: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
     /// False only for a tab restored as inactive. Nil keeps normal and legacy
@@ -145,6 +156,11 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         // didSet observers don't fire during init.
         updateTitle()
         scheduleStatistics(text: text)
+        observeFileChanges()
+    }
+
+    deinit {
+        filePresenter?.invalidate()
     }
 
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView) {
@@ -291,6 +307,39 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         scheduleStatistics(text: text)
         refreshSearchMatches(selectsFirstMatch: false)
         onAutosaveNeeded()
+        observeFileChanges()
+    }
+
+    /// Re-reads a presented file only while the editor still matches the
+    /// revision from which the read began. User edits and overlapping saves
+    /// always win over an asynchronous external-change notification.
+    func reloadFromDiskIfClean() async {
+        guard !hasUnsavedFileChanges,
+              let fileURL,
+              let fileRevision
+        else {
+            return
+        }
+
+        let expectedURL = fileURL
+        guard let expectedDocumentURL = filePresenter?.presentedItemURL else {
+            return
+        }
+        let expectedRevision = fileRevision
+        guard let snapshot = try? await FileIO.readUTF8Snapshot(
+            from: expectedURL,
+            resolvingTo: expectedDocumentURL
+        ),
+            !Task.isCancelled,
+            self.fileURL?.standardizedFileURL == expectedURL.standardizedFileURL,
+            !hasUnsavedFileChanges,
+            self.fileRevision == expectedRevision,
+            snapshot.revision != expectedRevision
+        else {
+            return
+        }
+
+        applyExternalSnapshot(snapshot)
     }
 
     func pasteAsLink() {
@@ -588,6 +637,75 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 } else {
                     savedRevision = try await FileIO.writeUTF8(savedText, to: url)
                 }
+            } catch FileIO.ConditionalWriteError.modifiedExternally
+                where isCurrentDocument
+            {
+                // A superseded save must not alert: the newer save owns
+                // the outcome the user will see.
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                let resolution: FileConflictResolution
+                if let self,
+                   !hasUnsavedFileChanges,
+                   text == savedText
+                {
+                    // Save raced the presenter's notification. There is no
+                    // local work to resolve, so adopt the disk version just
+                    // as the normal clean-document reload would.
+                    resolution = .discardLocalChanges
+                } else {
+                    resolution = self?.fileConflictResolution(for: url) ?? .cancel
+                }
+
+                switch resolution {
+                case .discardLocalChanges:
+                    do {
+                        let snapshot = try await FileIO.readUTF8Snapshot(
+                            from: url,
+                            resolvingTo: previousDocumentURL ?? url
+                        )
+                        guard !Task.isCancelled,
+                              let self,
+                              text == savedText
+                        else {
+                            return
+                        }
+
+                        applyExternalSnapshot(snapshot)
+                        didReportOutcome = true
+                        onCompletion?(true)
+                    } catch {
+                        guard !Task.isCancelled else {
+                            return
+                        }
+                        NSAlert(error: error).runModal()
+                        didReportOutcome = true
+                        onCompletion?(false)
+                    }
+                    return
+                case .overwriteFile:
+                    do {
+                        savedRevision = try await FileIO.writeUTF8(
+                            savedText,
+                            to: url,
+                            resolvingTo: previousDocumentURL ?? url
+                        )
+                    } catch {
+                        guard !Task.isCancelled else {
+                            return
+                        }
+                        NSAlert(error: error).runModal()
+                        didReportOutcome = true
+                        onCompletion?(false)
+                        return
+                    }
+                case .cancel:
+                    didReportOutcome = true
+                    onCompletion?(false)
+                    return
+                }
             } catch {
                 // A superseded save must not alert: the newer save owns
                 // the outcome the user will see.
@@ -623,12 +741,74 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             fileURL = url
             fileRevision = savedRevision
             editorView.documentURL = url
+            observeFileChanges()
             let didSaveCurrentText = text == savedText
             hasUnsavedFileChanges = !didSaveCurrentText
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             onAutosaveNeeded()
             didReportOutcome = true
             onCompletion?(didSaveCurrentText)
+        }
+    }
+
+    private func observeFileChanges() {
+        fileReloadTask?.cancel()
+        filePresenter?.invalidate()
+        filePresenter = fileURL.map { url in
+            DocumentFilePresenter(
+                url: FileIO.canonicalDocumentURL(for: url)
+            ) { [weak self] in
+                self?.scheduleExternalFileReload()
+            }
+        }
+    }
+
+    private func scheduleExternalFileReload() {
+        fileReloadTask?.cancel()
+        fileReloadTask = Task { [weak self] in
+            // Coalesce the attribute and content notifications produced by
+            // atomic replacement into one read of the final file.
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else {
+                return
+            }
+            await self?.reloadFromDiskIfClean()
+        }
+    }
+
+    private func applyExternalSnapshot(_ snapshot: FileIO.UTF8Snapshot) {
+        text = snapshot.text
+        fileRevision = snapshot.revision
+        hasUnsavedFileChanges = false
+        editorView.setString(snapshot.text, clearsUndo: true)
+        stylingController.scheduleParse(text: snapshot.text)
+        scheduleStatistics(text: snapshot.text)
+        refreshSearchMatches(selectsFirstMatch: false)
+        onAutosaveNeeded()
+    }
+
+    private func fileConflictResolution(for url: URL) -> FileConflictResolution {
+        if let resolveFileConflict {
+            return resolveFileConflict(url)
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "\(url.lastPathComponent) was changed by another app."
+        alert.informativeText =
+            "Reload the version on disk and discard your changes, or overwrite "
+                + "the file with the version in Markwasnice."
+        alert.addButton(withTitle: "Reload from Disk")
+        alert.addButton(withTitle: "Overwrite File")
+        alert.addButton(withTitle: "Cancel")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .discardLocalChanges
+        case .alertSecondButtonReturn:
+            return .overwriteFile
+        default:
+            return .cancel
         }
     }
 

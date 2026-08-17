@@ -160,7 +160,8 @@ enum MarkdownBlockCommand {
         lines.map { line in
             let prefix = listPrefix(in: line.body)
             guard let checkboxState = prefix.checkboxState,
-                  let stateLocation = prefix.checkboxStateLocation else {
+                  let stateLocation = prefix.checkboxStateLocation
+            else {
                 return line.unchangedTransformation
             }
 
