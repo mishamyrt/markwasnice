@@ -36,10 +36,23 @@ struct EditorThemeColors: Equatable {
         blue: 0.102,
         alpha: 1
     )
+    static let lightBackground = NSColor(
+        calibratedRed: 0.975,
+        green: 0.975,
+        blue: 0.975,
+        alpha: 1
+    )
+
     static let darkForeground = NSColor(
         calibratedRed: 0.8,
         green: 0.8,
         blue: 0.8,
+        alpha: 1
+    )
+    static let darkBackground = NSColor(
+        calibratedRed: 0.08,
+        green: 0.08,
+        blue: 0.08,
         alpha: 1
     )
 
@@ -65,8 +78,11 @@ struct EditorThemeColors: Equatable {
                 blue: 0.937,
                 alpha: 1.00
             ),
-            punctuation: lightForeground.withAlphaComponent(0.32),
-            underline: lightForeground.withAlphaComponent(0.25),
+            punctuation: lightForeground.blended(
+                withFraction: 0.68,
+                of: lightBackground
+            )!,
+            underline: lightForeground.blended(withFraction: 0.75, of: lightBackground)!,
             thematicBreak: NSColor(
                 calibratedRed: 0.62,
                 green: 0.60,
@@ -74,7 +90,7 @@ struct EditorThemeColors: Equatable {
                 alpha: 1
             ),
             listMarker: lightForeground.withAlphaComponent(0.4),
-            frontmatter: lightForeground.withAlphaComponent(0.5),
+            frontmatter: lightForeground.blended(withFraction: 0.5, of: lightBackground)!,
             proofreadingLow: NSColor(
                 calibratedRed: 0.22,
                 green: 0.60,
@@ -111,8 +127,8 @@ struct EditorThemeColors: Equatable {
                 blue: 0.153,
                 alpha: 1.00
             ),
-            punctuation: darkForeground.withAlphaComponent(0.54),
-            underline: darkForeground.withAlphaComponent(0.33),
+            punctuation: darkForeground.blended(withFraction: 0.46, of: darkBackground)!,
+            underline: darkForeground.blended(withFraction: 0.67, of: darkBackground)!,
             thematicBreak: NSColor(
                 calibratedRed: 0.48,
                 green: 0.46,
@@ -120,7 +136,7 @@ struct EditorThemeColors: Equatable {
                 alpha: 1
             ),
             listMarker: NSColor(calibratedRed: 0.48, green: 0.46, blue: 0.41, alpha: 1),
-            frontmatter: darkForeground.withAlphaComponent(0.5),
+            frontmatter: darkForeground.blended(withFraction: 0.46, of: darkBackground)!,
             proofreadingLow: NSColor(
                 calibratedRed: 0.36,
                 green: 0.72,
