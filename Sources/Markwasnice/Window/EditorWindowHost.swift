@@ -252,6 +252,7 @@ private final class WindowLifecycleView: NSView {
     private var contentLayoutObservation: NSKeyValueObservation?
     private var titleCancellable: AnyCancellable?
     private var isTabChromeRefreshPending = false
+    private var isHiddenWhileRestoringTab = false
     private weak var unclippedAccessoryContainer: NSView?
 
     override func viewDidMoveToWindow() {
@@ -321,6 +322,10 @@ private final class WindowLifecycleView: NSView {
 
         if !didConfigureWindow {
             didConfigureWindow = true
+            if appState.hasPendingRestoreTabLead(for: session.id) {
+                isHiddenWhileRestoringTab = true
+                window.alphaValue = 0
+            }
             placeWindow(window, session: session, appState: appState, attempt: 0)
             appState.revealPendingDocument(of: session, in: window)
             DispatchQueue.main.async { [weak window, weak session] in
@@ -350,6 +355,7 @@ private final class WindowLifecycleView: NSView {
             }
             let previouslySelectedWindow = target.tabGroup?.selectedWindow ?? target
             target.addTabbedWindow(window, ordered: .above)
+            revealRestoredTabWindow(window)
             if session.restoredTabSelection == false {
                 previouslySelectedWindow.makeKeyAndOrderFront(nil)
             } else {
@@ -375,6 +381,7 @@ private final class WindowLifecycleView: NSView {
             guard attempt < 20 else {
                 appState.abandonRestoreTabLead(for: session.id)
                 placeStandaloneWindow(window, session: session)
+                revealRestoredTabWindow(window)
                 return
             }
 
@@ -395,6 +402,15 @@ private final class WindowLifecycleView: NSView {
         }
 
         placeStandaloneWindow(window, session: session)
+    }
+
+    private func revealRestoredTabWindow(_ window: NSWindow) {
+        guard isHiddenWhileRestoringTab else {
+            return
+        }
+
+        isHiddenWhileRestoringTab = false
+        window.alphaValue = 1
     }
 
     private func placeStandaloneWindow(

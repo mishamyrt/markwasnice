@@ -237,14 +237,28 @@ final class MarkwasniceAppState: ObservableObject {
             return window
         }
 
-        if let leadID = restoreTabLeads[id],
-           let leadWindow = sessions[leadID]?.editorView.window
+        if let leadID = takeRestoreTabLead(for: id, ifReady: { leadID in
+            sessions[leadID]?.editorView.window?.isVisible == true
+        }),
+            let leadWindow = sessions[leadID]?.editorView.window
         {
-            restoreTabLeads[id] = nil
             return leadWindow
         }
 
         return nil
+    }
+
+    /// Keeps the follower mapping intact until its lead window is ready for attachment.
+    func takeRestoreTabLead(
+        for id: EditorDocumentSession.ID,
+        ifReady: (EditorDocumentSession.ID) -> Bool
+    ) -> EditorDocumentSession.ID? {
+        guard let leadID = restoreTabLeads[id], ifReady(leadID) else {
+            return nil
+        }
+
+        restoreTabLeads[id] = nil
+        return leadID
     }
 
     /// True while a restored tab group still waits for its lead window to
