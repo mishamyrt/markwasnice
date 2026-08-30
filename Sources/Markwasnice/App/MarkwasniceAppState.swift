@@ -351,8 +351,8 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.requestInsertTable()
     }
 
-    func fixTypography() {
-        activeSession?.fixTypography()
+    func fixTypography(in window: NSWindow?) {
+        session(in: window)?.fixTypography()
     }
 
     func showSearch() {
@@ -619,6 +619,19 @@ final class MarkwasniceAppState: ObservableObject {
 
     private var activeSession: EditorDocumentSession? {
         activeSessionID.flatMap { sessions[$0] }
+    }
+
+    /// Menu commands are application-wide, so route them from the window that
+    /// received the shortcut instead of trusting asynchronously updated scene
+    /// state. The fallback covers launch and tab-transition moments where the
+    /// editor window is temporarily unavailable.
+    private func session(in window: NSWindow?) -> EditorDocumentSession? {
+        guard let window else {
+            return activeSession
+        }
+
+        return sessions.values.first { $0.editorView.window === window }
+            ?? activeSession
     }
 
     /// Brings a freshly opened document to the front, and the app with it when
@@ -1219,7 +1232,7 @@ struct MarkwasniceCommands: Commands {
             .keyboardShortcut("v", modifiers: [.command, .shift])
 
             Button("Fix Typography") {
-                appState.fixTypography()
+                appState.fixTypography(in: NSApp.keyWindow ?? NSApp.mainWindow)
             }
             .keyboardShortcut("f", modifiers: [.command, .option])
         }
