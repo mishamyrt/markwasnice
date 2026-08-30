@@ -24,7 +24,7 @@ struct EditorSettings: Equatable {
     static let defaultMaxTextColumns = 64
     static let defaultTabInsertionMode = TabInsertionMode.spaces
     static let defaultTabWidth = 4
-    static let defaultTypographyLocale = TypographyLocale.russian
+    static let defaultTypographyLocales = [TypographyLocale.russian]
     static let defaultReadingWordsPerMinute = 200
     static let defaultSpeakingWordsPerMinute = 130
 
@@ -32,7 +32,7 @@ struct EditorSettings: Equatable {
     var maxTextColumns: Int
     var tabInsertionMode: TabInsertionMode
     var tabWidth: Int
-    var typographyLocale: TypographyLocale = Self.defaultTypographyLocale
+    var typographyLocales: [TypographyLocale] = Self.defaultTypographyLocales
     var readingWordsPerMinute = Self.defaultReadingWordsPerMinute
     var speakingWordsPerMinute = Self.defaultSpeakingWordsPerMinute
 
@@ -52,6 +52,7 @@ final class EditorSettingsStore {
         static let tabInsertionMode = "editor.tabInsertionMode"
         static let tabWidth = "editor.tabWidth"
         static let typographyLocale = "editor.typographyLocale"
+        static let typographyLocales = "editor.typographyLocales"
         static let readingWordsPerMinute = "editor.readingWordsPerMinute"
         static let speakingWordsPerMinute = "editor.speakingWordsPerMinute"
     }
@@ -81,11 +82,19 @@ final class EditorSettingsStore {
             EditorSettings.tabWidthOptions.contains(storedTabWidth)
                 ? storedTabWidth
                 : EditorSettings.defaultTabWidth
-        let storedTypographyLocale = defaults.string(forKey: Key.typographyLocale)
-        let typographyLocale =
-            storedTypographyLocale
-                .flatMap(EditorSettings.TypographyLocale.init(rawValue:))
-                ?? EditorSettings.defaultTypographyLocale
+        let storedTypographyLocales = defaults.stringArray(
+            forKey: Key.typographyLocales
+        )?.compactMap(EditorSettings.TypographyLocale.init(rawValue:)) ?? []
+        let legacyTypographyLocale = defaults.string(forKey: Key.typographyLocale)
+            .flatMap(EditorSettings.TypographyLocale.init(rawValue:))
+        let typographyLocales = storedTypographyLocales.isEmpty
+            ? legacyTypographyLocale.map { [$0] }
+            ?? EditorSettings.defaultTypographyLocales
+            : storedTypographyLocales.reduce(into: []) { locales, locale in
+                if !locales.contains(locale) {
+                    locales.append(locale)
+                }
+            }
         let storedReadingWordsPerMinute = defaults.integer(
             forKey: Key.readingWordsPerMinute
         )
@@ -106,7 +115,7 @@ final class EditorSettingsStore {
             maxTextColumns: maxTextColumns,
             tabInsertionMode: tabInsertionMode,
             tabWidth: tabWidth,
-            typographyLocale: typographyLocale,
+            typographyLocales: typographyLocales,
             readingWordsPerMinute: readingWordsPerMinute,
             speakingWordsPerMinute: speakingWordsPerMinute
         )
@@ -117,7 +126,10 @@ final class EditorSettingsStore {
         defaults.set(settings.maxTextColumns, forKey: Key.maxTextColumns)
         defaults.set(settings.tabInsertionMode.rawValue, forKey: Key.tabInsertionMode)
         defaults.set(settings.tabWidth, forKey: Key.tabWidth)
-        defaults.set(settings.typographyLocale.rawValue, forKey: Key.typographyLocale)
+        defaults.set(
+            settings.typographyLocales.map(\.rawValue),
+            forKey: Key.typographyLocales
+        )
         defaults.set(
             settings.readingWordsPerMinute,
             forKey: Key.readingWordsPerMinute

@@ -9,7 +9,7 @@ ASSETS_MANIFEST_PATH := $(ASSETS_DIR)/Info.plist
 CLI_SCRIPT_PATH := scripts/markwasnice
 
 # Distribution paths
-RELEASE_DIR := .build/arm64-apple-macosx/release
+RELEASE_DIR := .build/release
 RESOURCES_DIR := $(RELEASE_DIR)/Resources
 # SwiftPM emits the target's declared resources here, beside the executable
 # rather than inside RESOURCES_DIR, so it needs copying in explicitly.

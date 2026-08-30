@@ -3,6 +3,32 @@ import Testing
 @testable import Markwasnice
 
 struct EditorSettingsStoreTests {
+    @Test func typographyLocalesRoundTrip() throws {
+        let suiteName = "EditorSettingsStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = EditorSettingsStore(defaults: defaults)
+        var settings = store.load()
+
+        #expect(settings.typographyLocales == [.russian])
+
+        settings.typographyLocales = [.english, .russian]
+        store.save(settings)
+
+        #expect(store.load().typographyLocales == [.english, .russian])
+    }
+
+    @Test func legacyTypographyLocaleMigratesToLocales() throws {
+        let suiteName = "EditorSettingsStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("english", forKey: "editor.typographyLocale")
+
+        let settings = EditorSettingsStore(defaults: defaults).load()
+
+        #expect(settings.typographyLocales == [.english])
+    }
+
     @Test func readingAndSpeakingSpeedsRoundTrip() throws {
         let suiteName = "EditorSettingsStoreTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

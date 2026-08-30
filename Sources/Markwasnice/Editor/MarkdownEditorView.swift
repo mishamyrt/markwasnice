@@ -832,7 +832,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let replacements = MarkdownTypographyCommand.replacements(
             in: textView.string,
             selectedRange: selectedRange,
-            locale: settings.typographyLocale,
+            locales: settings.typographyLocales,
             spans: spans
         )
         guard performBatchReplacements(

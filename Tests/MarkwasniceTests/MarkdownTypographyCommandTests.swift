@@ -7,12 +7,12 @@ struct MarkdownTypographyCommandTests {
     private func apply(
         _ text: String,
         selectedRange: NSRange? = nil,
-        locale: EditorSettings.TypographyLocale = .russian
+        locales: [EditorSettings.TypographyLocale] = [.russian]
     ) -> String {
         let replacements = MarkdownTypographyCommand.replacements(
             in: text,
             selectedRange: selectedRange ?? NSRange(location: 0, length: 0),
-            locale: locale
+            locales: locales
         )
         let result = NSMutableString(string: text)
         for replacement in replacements.reversed() {
@@ -89,9 +89,17 @@ struct MarkdownTypographyCommandTests {
     @Test func appliesEnglishRules() {
         let result = normalized(apply(
             "He said \"hello\" to me...",
-            locale: .english
+            locales: [.english]
         ))
         #expect(result == "He said “hello” to me…")
+    }
+
+    @Test func appliesCharacterRulesForMultipleLanguages() {
+        let result = normalized(apply(
+            "\"Title\" O'Connor и д'Арк",
+            locales: [.english, .russian]
+        ))
+        #expect(result == "“Title” O’Connor и д’Арк")
     }
 
     @Test func adjustsCaretAfterReplacements() {
@@ -100,7 +108,7 @@ struct MarkdownTypographyCommandTests {
         let replacements = MarkdownTypographyCommand.replacements(
             in: text,
             selectedRange: NSRange(location: 0, length: 0),
-            locale: .russian
+            locales: [.russian]
         )
         let adjusted = MarkdownTypographyCommand.adjustedSelection(
             caret,
@@ -116,7 +124,7 @@ struct MarkdownTypographyCommandTests {
         let replacements = MarkdownTypographyCommand.replacements(
             in: text,
             selectedRange: selection,
-            locale: .russian
+            locales: [.russian]
         )
         let result = apply(text, selectedRange: selection)
         let adjusted = MarkdownTypographyCommand.adjustedSelection(
@@ -133,7 +141,7 @@ struct MarkdownTypographyCommandTests {
         #expect(MarkdownTypographyCommand.replacements(
             in: "Совершенно обычный текст",
             selectedRange: NSRange(location: 0, length: 0),
-            locale: .russian
+            locales: [.russian]
         ).isEmpty)
     }
 
@@ -145,7 +153,7 @@ struct MarkdownTypographyCommandTests {
         #expect(MarkdownTypographyCommand.replacements(
             in: processed,
             selectedRange: NSRange(location: 0, length: 0),
-            locale: .russian
+            locales: [.russian]
         ).isEmpty)
     }
 
@@ -179,12 +187,12 @@ struct MarkdownTypographyCommandTests {
         #expect(MarkdownTypographyCommand.replacements(
             in: text,
             selectedRange: selection,
-            locale: .russian,
+            locales: [.russian],
             spans: spans
         ) == MarkdownTypographyCommand.replacements(
             in: text,
             selectedRange: selection,
-            locale: .russian
+            locales: [.russian]
         ))
     }
 
@@ -195,7 +203,7 @@ struct MarkdownTypographyCommandTests {
         let replacements = MarkdownTypographyCommand.replacements(
             in: text,
             selectedRange: NSRange(location: 0, length: 0),
-            locale: .russian,
+            locales: [.russian],
             spans: nil
         )
         let codeRange = (text as NSString).range(of: "`код - внутри`")

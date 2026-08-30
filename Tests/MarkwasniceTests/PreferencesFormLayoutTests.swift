@@ -32,7 +32,11 @@ struct PreferencesFormLayoutTests {
     }
 
     private func makeController(
-        _ fixture: Fixture
+        _ fixture: Fixture,
+        onChange: @escaping (
+            EditorSettings,
+            PreferencesWindowController.ChangePhase
+        ) -> Void = { _, _ in }
     ) -> PreferencesWindowController {
         PreferencesWindowController(
             settings: EditorSettings(
@@ -41,8 +45,50 @@ struct PreferencesFormLayoutTests {
                 tabInsertionMode: EditorSettings.defaultTabInsertionMode,
                 tabWidth: EditorSettings.defaultTabWidth
             ),
-            cliHelperInstaller: fixture.installer
-        ) { _, _ in }
+            cliHelperInstaller: fixture.installer,
+            onChange: onChange
+        )
+    }
+
+    @Test func typographyPopupAllowsMultipleLanguagesButNotNone() throws {
+        let fixture = try makeFixture(hasHelper: true)
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        var changes: [EditorSettings] = []
+        let controller = makeController(fixture) { settings, _ in
+            changes.append(settings)
+        }
+        let contentView = try #require(controller.window?.contentView)
+        let form = try #require(contentView.subviews.first as? NSGridView)
+        let controls = try #require(
+            form.row(at: 4).cell(at: 1).contentView as? NSStackView
+        )
+        let popup = try #require(controls.views.first as? NSPopUpButton)
+        let menu = try #require(popup.menu)
+        let russian = try #require(menu.item(at: 1))
+        let english = try #require(menu.item(at: 2))
+
+        #expect(popup.itemTitle(at: 0) == "Russian")
+        #expect(russian.title == "Russian — Primary")
+        #expect(russian.state == .on)
+        #expect(!russian.isEnabled)
+        #expect(english.title == "English")
+        #expect(english.state == .off)
+        #expect(english.isEnabled)
+
+        menu.performActionForItem(at: 2)
+        #expect(changes.last?.typographyLocales == [.russian, .english])
+        #expect(popup.itemTitle(at: 0) == "Russian, English")
+        #expect(russian.isEnabled)
+
+        menu.performActionForItem(at: 1)
+        #expect(changes.last?.typographyLocales == [.english])
+        #expect(english.title == "English — Primary")
+        #expect(!english.isEnabled)
+
+        let changeCount = changes.count
+        menu.performActionForItem(at: 2)
+        #expect(english.state == .on)
+        #expect(changes.count == changeCount)
     }
 
     /// Everything the form asks for has to fit: a window sized from a stale

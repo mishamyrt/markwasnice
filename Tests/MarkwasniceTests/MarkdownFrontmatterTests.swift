@@ -102,12 +102,12 @@ struct FrontmatterTypographyTests {
     private func apply(
         _ text: String,
         selectedRange: NSRange? = nil,
-        locale: EditorSettings.TypographyLocale = .russian
+        locales: [EditorSettings.TypographyLocale] = [.russian]
     ) -> String {
         let replacements = MarkdownTypographyCommand.replacements(
             in: text,
             selectedRange: selectedRange ?? NSRange(location: 0, length: 0),
-            locale: locale
+            locales: locales
         )
         let result = NSMutableString(string: text)
         for replacement in replacements.reversed() {
@@ -154,7 +154,7 @@ struct FrontmatterTypographyTests {
 
     @Test func appliesEnglishRulesInsideQuotedValue() {
         let text = "---\ntitle: \"He said \"hello\" to me...\"\n---\n"
-        let result = normalized(apply(text, locale: .english))
+        let result = normalized(apply(text, locales: [.english]))
         #expect(result == "---\ntitle: \"He said “hello” to me…\"\n---\n")
     }
 
@@ -232,7 +232,7 @@ struct FrontmatterTypographyTests {
         #expect(MarkdownTypographyCommand.replacements(
             in: processed,
             selectedRange: NSRange(location: 0, length: 0),
-            locale: .russian
+            locales: [.russian]
         ).isEmpty)
     }
 }

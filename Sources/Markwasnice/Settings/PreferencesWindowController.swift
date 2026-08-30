@@ -13,6 +13,7 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         static let labelColumnWidth: CGFloat = 110
         static let popupWidth: CGFloat = 90
         static let widePopupWidth: CGFloat = 120
+        static let typographyPopupWidth: CGFloat = 160
     }
 
     /// Whether more values of the same interaction are still coming. An
@@ -38,7 +39,8 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
     private let widthPopup = NSPopUpButton()
     private let tabModePopup = NSPopUpButton()
     private let tabWidthPopup = NSPopUpButton()
-    private let typographyPopup = NSPopUpButton()
+    private let typographyPopup = NSPopUpButton(frame: .zero, pullsDown: true)
+    private var typographyMenuItems: [NSMenuItem] = []
     private let readingSpeedField = NSTextField()
     private let speakingSpeedField = NSTextField()
     private let cliHelperLabel = NSTextField(labelWithString: "CLI Helper")
@@ -88,7 +90,7 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         widthPopup.selectItem(withTitle: String(settings.maxTextColumns))
         tabModePopup.selectItem(withTitle: title(for: settings.tabInsertionMode))
         tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
-        typographyPopup.selectItem(withTitle: title(for: settings.typographyLocale))
+        updateTypographyPopup()
         readingSpeedField.integerValue = settings.readingWordsPerMinute
         speakingSpeedField.integerValue = settings.speakingWordsPerMinute
         // The link can come and go behind the app's back (removed manually,
@@ -149,15 +151,23 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         onChange(settings, .committed)
     }
 
-    @objc private func typographyChanged(_ sender: NSPopUpButton) {
-        // The popup is populated from allCases in configureControls; decode
-        // the selection through the same list.
-        let locales = EditorSettings.TypographyLocale.allCases
-        guard locales.indices.contains(sender.indexOfSelectedItem) else {
+    @objc private func typographyChanged(_ sender: NSMenuItem) {
+        guard let index = typographyMenuItems.firstIndex(where: { $0 === sender })
+        else {
             return
         }
+        let locale = EditorSettings.TypographyLocale.allCases[index]
 
-        settings.typographyLocale = locales[sender.indexOfSelectedItem]
+        if settings.typographyLocales.contains(locale) {
+            guard settings.typographyLocales.count > 1 else {
+                return
+            }
+            settings.typographyLocales.removeAll { $0 == locale }
+        } else {
+            settings.typographyLocales.append(locale)
+        }
+
+        updateTypographyPopup()
         onChange(settings, .committed)
     }
 
@@ -284,12 +294,19 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         tabWidthPopup.action = #selector(tabWidthChanged(_:))
         tabWidthPopup.selectItem(withTitle: String(settings.tabWidth))
 
-        for locale in EditorSettings.TypographyLocale.allCases {
-            typographyPopup.addItem(withTitle: title(for: locale))
+        typographyPopup.addItem(withTitle: "")
+        typographyPopup.menu?.autoenablesItems = false
+        typographyMenuItems = EditorSettings.TypographyLocale.allCases.map { locale in
+            let item = NSMenuItem(
+                title: title(for: locale),
+                action: #selector(typographyChanged(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            typographyPopup.menu?.addItem(item)
+            return item
         }
-        typographyPopup.target = self
-        typographyPopup.action = #selector(typographyChanged(_:))
-        typographyPopup.selectItem(withTitle: title(for: settings.typographyLocale))
+        updateTypographyPopup()
 
         configureSpeedField(
             field: readingSpeedField,
@@ -322,7 +339,7 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
                 tabWidthPopup, width: Layout.popupWidth, caption: "characters"
             )],
             [typographyLabel, popupRow(
-                typographyPopup, width: Layout.widePopupWidth
+                typographyPopup, width: Layout.typographyPopupWidth
             )],
             [readingSpeedLabel, speedFieldRow(readingSpeedField)],
             [speakingSpeedLabel, speedFieldRow(speakingSpeedField)],
@@ -411,6 +428,25 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         stack.alignment = .centerY
         stack.spacing = 6
         return stack
+    }
+
+    private func updateTypographyPopup() {
+        typographyPopup.item(at: 0)?.title = settings.typographyLocales
+            .map(title(for:))
+            .joined(separator: ", ")
+        typographyPopup.synchronizeTitleAndSelectedItem()
+
+        for (locale, item) in zip(
+            EditorSettings.TypographyLocale.allCases,
+            typographyMenuItems
+        ) {
+            let isSelected = settings.typographyLocales.contains(locale)
+            item.title = locale == settings.typographyLocales.first
+                ? "\(title(for: locale)) — Primary"
+                : title(for: locale)
+            item.state = isSelected ? .on : .off
+            item.isEnabled = !isSelected || settings.typographyLocales.count > 1
+        }
     }
 
     /// Install button and installed-state lines share the row: whichever the

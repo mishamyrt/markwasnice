@@ -18,7 +18,7 @@ enum MarkdownTypographyCommand {
     static func replacements(
         in text: String,
         selectedRange: NSRange,
-        locale: EditorSettings.TypographyLocale,
+        locales: [EditorSettings.TypographyLocale],
         spans: [ResolvedMarkdownStyleSpan]? = nil
     ) -> [MarkdownTypographyReplacement] {
         let nsString = text as NSString
@@ -65,7 +65,7 @@ enum MarkdownTypographyCommand {
                 .sorted { $0.location < $1.location }
         }
 
-        let typograf = Typograf(configuration: configuration(for: locale))
+        let typograf = Typograf(configuration: configuration(for: locales))
         var replacements: [MarkdownTypographyReplacement] = []
         for segment in segments {
             let original = nsString.substring(with: segment)
@@ -129,11 +129,14 @@ enum MarkdownTypographyCommand {
     }
 
     private static func configuration(
-        for locale: EditorSettings.TypographyLocale
+        for locales: [EditorSettings.TypographyLocale]
     ) -> TypografConfiguration {
-        var configuration = TypografConfiguration(
-            locale: locale == .russian ? .russian : .englishUS
-        )
+        let selectedLocales = locales.isEmpty
+            ? EditorSettings.defaultTypographyLocales
+            : locales
+        var configuration = TypografConfiguration(locales: selectedLocales.map {
+            $0 == .russian ? .russian : .englishUS
+        })
         configuration.disabledRules.formUnion([
             // Markdown gives structural meaning to whitespace: tabs and
             // leading spaces nest lists, two trailing spaces are a hard line
@@ -183,7 +186,7 @@ enum MarkdownTypographyCommand {
             case .frontmatter:
                 // Excluded from the generic pass as a whole; string values
                 // inside it are re-added as dedicated segments by
-                // FrontmatterValueScanner in replacements(in:selectedRange:locale:).
+                // FrontmatterValueScanner in replacements(in:selectedRange:locales:).
                 structure.append(span.range)
             default:
                 break
