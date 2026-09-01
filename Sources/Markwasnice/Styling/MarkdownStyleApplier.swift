@@ -97,6 +97,9 @@ final class MarkdownStyleApplier {
         paragraphStyle.firstLineHeadIndent = paragraphGutter
         paragraphStyle.headIndent = paragraphGutter
         paragraphStyle.tailIndent = -paragraphGutter
+        paragraphStyle.tabStops = []
+        paragraphStyle.defaultTabInterval = CGFloat(settings.tabWidth)
+            * (characterWidth() + baseLetterSpacing)
         return paragraphStyle
     }
 
@@ -109,6 +112,22 @@ final class MarkdownStyleApplier {
     /// the editor gutter, including the spacing applied to every glyph.
     private func markerPrefixWidth(characterCount: Int) -> CGFloat {
         CGFloat(characterCount) * (characterWidth() + baseLetterSpacing)
+    }
+
+    private func markerPrefixCharacterCount(
+        in string: NSString,
+        range: NSRange
+    ) -> Int {
+        let tabWidth = max(1, settings.tabWidth)
+        var characterCount = 0
+        for offset in 0 ..< range.length {
+            if string.character(at: range.location + offset) == 0x09 { // '\t'
+                characterCount += tabWidth - characterCount % tabWidth
+            } else {
+                characterCount += 1
+            }
+        }
+        return characterCount
     }
 
     // MARK: Attribute application
@@ -163,23 +182,11 @@ final class MarkdownStyleApplier {
                 Self.blockQuoteMarkerRegex,
                 range: range,
                 string: string,
-                markerCaptureGroup: 1
+                markerCaptureGroup: 1,
+                hangingIndentCharacterCount: 2
             )
-        case .orderedList:
-            applyLineMarkerStyle(
-                Self.listMarkerRegex,
-                range: range,
-                string: string,
-                hangingIndentCharacterCount: 3,
-                checkboxCaptureGroup: 1
-            )
-        case .unorderedList:
-            applyLineMarkerStyle(
-                Self.listMarkerRegex,
-                range: range,
-                string: string,
-                checkboxCaptureGroup: 1
-            )
+        case .orderedList, .unorderedList:
+            applyLineMarkerStyle(Self.listMarkerRegex, range: range, string: string)
         case .taskCheckbox:
             // Same colour a list marker gets, so "[ ] a" and "- [ ] a" read
             // alike; the span already covers just the brackets.
@@ -214,8 +221,8 @@ final class MarkdownStyleApplier {
     /// The task checkbox counts as part of the marker, so "- [x] " dims as a
     /// whole instead of leaving brackets in the body colour.
     private static let listMarkerRegex = try! NSRegularExpression(
-        pattern: "^\\s*\(MarkdownLineGrammar.listMarker)\\s+"
-            + "(?:(\(MarkdownLineGrammar.checkbox))\\s+)?",
+        pattern: "^[ \\t]*\(MarkdownLineGrammar.listMarker)[ \\t]+"
+            + "(?:\(MarkdownLineGrammar.checkbox)[ \\t]+)?",
         options: [.anchorsMatchLines]
     )
     private func applyHeadingStyle(range: NSRange, string: NSString) {
@@ -324,14 +331,15 @@ final class MarkdownStyleApplier {
         range: NSRange,
         string: NSString,
         markerCaptureGroup: Int? = nil,
-        hangingIndentCharacterCount: Int = 2,
-        checkboxCaptureGroup: Int? = nil
+        hangingIndentCharacterCount: Int? = nil
     ) {
         // Scanned over the extracted span text for the same reason as the
         // heading markers above: the regex needs a Swift String, and the
         // whole-document bridge is a copy per styled list and quote.
+        let span = string.substring(with: range)
+        let spanCharacters = span as NSString
         expression.enumerateMatches(
-            in: string.substring(with: range),
+            in: span,
             range: NSRange(location: 0, length: range.length)
         ) { match, _, _ in
             guard let match else {
@@ -366,16 +374,11 @@ final class MarkdownStyleApplier {
                 range: markerRange
             )
 
-            var indentCharacterCount = hangingIndentCharacterCount
-            if let checkboxCaptureGroup,
-               checkboxCaptureGroup < match.numberOfRanges
-            {
-                let checkboxRange = match.range(at: checkboxCaptureGroup)
-                if checkboxRange.location != NSNotFound {
-                    // The capture excludes the separating space after `[ ]`.
-                    indentCharacterCount += checkboxRange.length + 1
-                }
-            }
+            let indentCharacterCount = hangingIndentCharacterCount
+                ?? markerPrefixCharacterCount(
+                    in: spanCharacters,
+                    range: match.range
+                )
 
             applyMarkerHangingIndent(
                 to: string.lineRange(for: markerRange),

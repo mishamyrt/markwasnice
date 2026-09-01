@@ -316,6 +316,33 @@ struct MarkdownStyleApplierTests {
         #expect(storage.string == text)
     }
 
+    @Test func nestedListsIncludeTheirLeadingIndentInWrappedLines() throws {
+        let cases: [(String, MarkdownStyleKind, Int)] = [
+            ("    - nested", .unorderedList, 6),
+            ("    12. nested", .orderedList, 8),
+            ("    - [ ] nested task", .unorderedList, 10),
+            ("    12. [x] nested task", .orderedList, 12),
+            ("\t- tab-indented", .unorderedList, 6),
+        ]
+
+        for (text, kind, prefixWidth) in cases {
+            let (applier, storage) = makeApplier(text: text)
+            applier.applyStyle(
+                kind,
+                range: NSRange(location: 0, length: storage.length),
+                string: storage.mutableString
+            )
+
+            let style = try #require(paragraphStyle(in: storage, at: 0))
+            let expectedIndent = Self.paragraphGutter
+                + CGFloat(prefixWidth)
+                    * (applier.characterWidth() + applier.baseLetterSpacing)
+            #expect(style.firstLineHeadIndent == Self.paragraphGutter)
+            #expect(style.headIndent == expectedIndent)
+            #expect(storage.string == text)
+        }
+    }
+
     @Test func quoteMarkerGivesWrappedLinesATwoCharacterHangingIndent() throws {
         let text = "> a long quote\n> another long quote"
         let (applier, storage) = makeApplier(text: text)
@@ -519,6 +546,12 @@ struct MarkdownStyleApplierTests {
         #expect(style.tailIndent == -Self.paragraphGutter)
         #expect(style.minimumLineHeight == applier.lineHeight)
         #expect(style.maximumLineHeight == applier.lineHeight)
+        #expect(style.tabStops.isEmpty)
+        #expect(
+            style.defaultTabInterval
+                == CGFloat(Self.settings.tabWidth)
+                    * (applier.characterWidth() + applier.baseLetterSpacing)
+        )
     }
 
     /// The theme variant is pulled on every read, not cached: a restyle that
