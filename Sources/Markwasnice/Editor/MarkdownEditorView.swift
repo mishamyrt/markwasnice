@@ -1762,6 +1762,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 range: targetRange,
                 string: string
             )
+            // `setAttributes` above restores Lilex over the whole dirty line,
+            // including emoji that it cannot draw. Outside a text-storage
+            // edit AppKit fixes that fallback automatically; the local pass
+            // runs inside didProcessEditing, so without doing it here the
+            // emoji disappears until the parser's later styling pass.
+            textStorage.fixFontAttribute(in: targetRange)
             // Dimming first: the selected match's dark text must survive focus
             // mode's foreground override.
             applyFocusDimming(in: targetRange)

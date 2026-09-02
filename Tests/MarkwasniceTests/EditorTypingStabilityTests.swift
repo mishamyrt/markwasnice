@@ -114,6 +114,15 @@ struct EditorTypingStabilityTests {
         try harness.assertLocalStateMatchesParsedState()
     }
 
+    @Test func typingInBlockQuoteWithEmojiKeepsStylingStable() throws {
+        let source = "> ☝️ Всегда снимайте дамп перед прошивкой."
+        let harness = EditorHarness(source: source, settings: Self.settings)
+
+        harness.type(" Важно", at: (source as NSString).length)
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
     /// Reproduces the real per-keystroke sequence of the app: after every
     /// text change `EditorDocumentSession.markdownEditorViewDidChangeText`
     /// calls `refreshSearchMatches` → `clearSearchMatches` →
@@ -448,6 +457,7 @@ private final class EditorHarness {
     private struct CharacterStyle: Equatable {
         var foreground: String
         var underline: Int
+        var fontName: String
         var fontTraits: UInt
         var firstLineHeadIndent: CGFloat
     }
@@ -471,6 +481,7 @@ private final class EditorHarness {
             let style = CharacterStyle(
                 foreground: foreground,
                 underline: underline,
+                fontName: font?.fontName ?? "nil",
                 fontTraits: traits,
                 firstLineHeadIndent: paragraphStyle?.firstLineHeadIndent ?? 0
             )
