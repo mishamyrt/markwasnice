@@ -83,6 +83,25 @@ struct AutosavePayloadTests {
     }
 
     @Test
+    func realTextEditUpdatesAutosavePayloadThroughDelta() {
+        let session = EditorDocumentSession(
+            text: "seed",
+            fileURL: nil,
+            isEdited: false,
+            settings: Self.settings
+        ) {}
+        session.editorView.textView.insertText(
+            "X",
+            replacementRange: NSRange(location: 1, length: 2)
+        )
+
+        let draft = session.autosavedDraft(windowID: nil, windowFrame: nil)
+
+        #expect(draft.text == "sXd")
+        #expect(session.shellState.isEdited)
+    }
+
+    @Test
     func draftCapturesSelectionAndRequestsAutosaveWhenItChanges() {
         var autosaveRequestCount = 0
         let session = EditorDocumentSession(

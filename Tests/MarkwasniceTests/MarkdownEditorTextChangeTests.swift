@@ -37,6 +37,43 @@ struct MarkdownEditorTextChangeTests {
         #expect(delegate.changeCount == 1)
     }
 
+    @Test func reportsReplacementAsStructuredUTF16Edit() throws {
+        let editor = MarkdownEditorView(settings: Self.settings)
+        let delegate = DeltaRecordingDelegate()
+        editor.delegate = delegate
+        editor.setString("seed", clearsUndo: true)
+
+        editor.textView.insertText(
+            "X",
+            replacementRange: NSRange(location: 1, length: 2)
+        )
+
+        #expect(delegate.notifications.count == 1)
+        let notification = try #require(delegate.notifications.first)
+        #expect(notification.generation == 1)
+        #expect(notification.edits == [MarkdownTextEdit(
+            replacedRange: NSRange(location: 1, length: 2),
+            replacement: "X"
+        )])
+    }
+
+    @Test func reportsDeletionThatEmptiesTheDocument() throws {
+        let editor = MarkdownEditorView(settings: Self.settings)
+        let delegate = DeltaRecordingDelegate()
+        editor.delegate = delegate
+        editor.setString("seed", clearsUndo: true)
+        editor.textView.setSelectedRange(NSRange(location: 0, length: 4))
+
+        editor.textView.deleteBackward(nil)
+
+        #expect(delegate.notifications.count == 1)
+        let notification = try #require(delegate.notifications.first)
+        #expect(notification.edits == [MarkdownTextEdit(
+            replacedRange: NSRange(location: 0, length: 4),
+            replacement: ""
+        )])
+    }
+
     @Test func programmaticTextSettingDoesNotAdvanceGeneration() {
         let editor = MarkdownEditorView(settings: Self.settings)
         let delegate = GenerationRecordingDelegate()
@@ -102,5 +139,25 @@ private final class GenerationRecordingDelegate: RecordingDelegateBase,
         didChangeTextAt generation: Int
     ) {
         generations.append(generation)
+    }
+}
+
+@MainActor
+private final class DeltaRecordingDelegate: RecordingDelegateBase,
+    @preconcurrency MarkdownEditorViewDelegate
+{
+    struct Notification: Equatable {
+        let edits: [MarkdownTextEdit]
+        let generation: Int
+    }
+
+    private(set) var notifications: [Notification] = []
+
+    func markdownEditorView(
+        _: MarkdownEditorView,
+        didChangeTextBy edits: [MarkdownTextEdit],
+        at generation: Int
+    ) {
+        notifications.append(Notification(edits: edits, generation: generation))
     }
 }

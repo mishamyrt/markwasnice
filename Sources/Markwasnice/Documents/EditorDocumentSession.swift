@@ -43,24 +43,34 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private let stylingController: MarkdownStylingController
     private let onAutosaveNeeded: () -> Void
     private var statisticsTask: Task<Void, Never>?
+    private var documentAnalysisTask: Task<Void, Never>?
     private var isCloseApproved = false
     private var isPromptVisible = false
     private(set) var isTabBarTemporarilyHidden = false
     private weak var hiddenTabBarAccessory: NSTitlebarAccessoryViewController?
-    private var text: String
+    /// Main-actor mirror of the editor's TextKit storage. Character edits are
+    /// applied in place, avoiding a full NSString → String bridge in the
+    /// synchronous keystroke path. Immutable snapshots are made only for
+    /// persistence or the coalesced background-consumer pipeline.
+    private let textBuffer: NSMutableString
+    private var textGeneration = 0
+    private var cachedTextSnapshot: (generation: Int, text: String)?
+    private var displayedTitle: String
     private var fileRevision: FileIO.Revision?
     private var saveTask: Task<Void, Never>?
     private var fileReloadTask: Task<Void, Never>?
     private var filePresenter: DocumentFilePresenter?
     private var searchMatches: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
+    private var searchTask: Task<Void, Never>?
+    private var searchGeneration = 0
     /// False only for a tab restored as inactive. Nil keeps normal and legacy
     /// window creation behavior unchanged.
     let restoredTabSelection: Bool?
 
-    /// These observers are the single title-update mechanism: assign `text`
-    /// first when it changes, and don't call updateTitle() after assignments
-    /// — didSet fires even when the value is unchanged.
+    /// These observers are the title-update mechanism for document identity
+    /// and edited-state changes. Text-driven title updates are coalesced with
+    /// parser/statistics work.
     private(set) var fileURL: URL? {
         didSet {
             updateTitle()
@@ -69,7 +79,10 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
 
     private var hasUnsavedFileChanges: Bool {
         didSet {
-            updateTitle()
+            shellState.updateTitle(
+                displayedTitle,
+                isEdited: hasUnsavedFileChanges
+            )
         }
     }
 
@@ -83,7 +96,11 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         restoredTabSelection: Bool? = nil,
         onAutosaveNeeded: @escaping () -> Void
     ) {
-        self.text = text
+        textBuffer = NSMutableString(string: text)
+        cachedTextSnapshot = (generation: 0, text: text)
+        displayedTitle = fileURL?.lastPathComponent
+            ?? DocumentTitleSuggester.title(from: text)
+            ?? "Untitled"
         self.fileURL = fileURL
         self.fileRevision = fileRevision
         self.restoredTabSelection = restoredTabSelection
@@ -154,40 +171,118 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         applyChromeInsets(isFullScreen: false)
         stylingController.scheduleParse(text: text)
         // didSet observers don't fire during init.
-        updateTitle()
+        updateTitle(using: text)
         scheduleStatistics(text: text)
         observeFileChanges()
     }
 
     deinit {
+        documentAnalysisTask?.cancel()
+        statisticsTask?.cancel()
+        searchTask?.cancel()
         filePresenter?.invalidate()
     }
 
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView) {
-        handleConfirmedTextChange(in: editorView)
+        replaceTextBuffer(with: editorView.string)
+        handleConfirmedTextChange()
     }
 
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
         didChangeTextAt _: Int
     ) {
-        handleConfirmedTextChange(in: editorView)
+        replaceTextBuffer(with: editorView.string)
+        handleConfirmedTextChange()
     }
 
-    private func handleConfirmedTextChange(in editorView: MarkdownEditorView) {
-        // Read the current value once for all downstream consumers. The editor
-        // generation already proves that characters changed, so an O(n)
-        // comparison with the previous document would only repeat that work.
-        let newText = editorView.string
-        text = newText
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        didChangeTextBy edits: [MarkdownTextEdit],
+        at _: Int
+    ) {
+        if !applyTextEdits(edits) {
+            // IME commits and unusual TextKit mutations may not expose a
+            // character delta. Keep the correctness fallback off the normal
+            // typing path.
+            replaceTextBuffer(with: editorView.string)
+        }
+        handleConfirmedTextChange()
+    }
+
+    private func handleConfirmedTextChange() {
+        let textVersion = stylingController.invalidateText()
         if !hasUnsavedFileChanges {
             hasUnsavedFileChanges = true
         }
         onAutosaveNeeded()
-        stylingController.scheduleParse(text: newText)
-        scheduleStatistics(text: newText)
-        refreshSearchMatches(selectsFirstMatch: false)
+        scheduleDocumentAnalysis(textVersion: textVersion)
+        if shellState.isSearchPresented {
+            cancelSearchAndClearMatches()
+        }
         hideChrome()
+    }
+
+    private func applyTextEdits(_ edits: [MarkdownTextEdit]) -> Bool {
+        guard !edits.isEmpty else {
+            return false
+        }
+
+        for edit in edits {
+            let range = edit.replacedRange
+            guard range.location != NSNotFound,
+                  range.location >= 0,
+                  range.length >= 0,
+                  NSMaxRange(range) <= textBuffer.length
+            else {
+                return false
+            }
+            textBuffer.replaceCharacters(in: range, with: edit.replacement)
+        }
+        didChangeTextBuffer()
+        return true
+    }
+
+    private func scheduleDocumentAnalysis(textVersion: Int) {
+        documentAnalysisTask?.cancel()
+        documentAnalysisTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled, let self else {
+                return
+            }
+
+            let text = textSnapshot()
+            updateTitle(using: text)
+            stylingController.scheduleParse(text: text, version: textVersion)
+            scheduleStatistics(text: text)
+            refreshSearchMatches(selectsFirstMatch: false, text: text)
+        }
+    }
+
+    private func replaceTextBuffer(with text: String) {
+        textBuffer.setString(text)
+        didChangeTextBuffer()
+    }
+
+    private func textSnapshot() -> String {
+        if let cachedTextSnapshot,
+           cachedTextSnapshot.generation == textGeneration
+        {
+            return cachedTextSnapshot.text
+        }
+
+        let text = textBuffer as String
+        cachedTextSnapshot = (generation: textGeneration, text: text)
+        return text
+    }
+
+    private func didChangeTextBuffer() {
+        textGeneration &+= 1
+        cachedTextSnapshot = nil
+    }
+
+    private func textEquals(_ text: String) -> Bool {
+        textBuffer.isEqual(to: text)
     }
 
     func markdownEditorView(
@@ -241,12 +336,14 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         applyChromeInsets(isFullScreen: isFullScreen)
     }
 
-    func setFullScreenChromeOverlayHeight(_ height: CGFloat) {
-        guard shellState.fullScreenChromeOverlayHeight != height else {
+    func setFullScreenToolbarHeight(_ height: CGFloat) {
+        guard height > 0,
+              shellState.fullScreenToolbarHeight != height
+        else {
             return
         }
 
-        shellState.fullScreenChromeOverlayHeight = height
+        shellState.fullScreenToolbarHeight = height
         if shellState.isFullScreen {
             applyChromeInsets(isFullScreen: true)
         }
@@ -289,7 +386,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     var isEmptyDocument: Bool {
-        fileURL == nil && editorView.string.isEmpty
+        fileURL == nil && textBuffer.length == 0
     }
 
     func adoptFile(
@@ -297,7 +394,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         text: String,
         revision: FileIO.Revision? = nil
     ) {
-        self.text = text
+        documentAnalysisTask?.cancel()
+        replaceTextBuffer(with: text)
         fileURL = url
         fileRevision = revision
         hasUnsavedFileChanges = false
@@ -305,7 +403,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         editorView.setString(text, clearsUndo: true)
         stylingController.scheduleParse(text: text)
         scheduleStatistics(text: text)
-        refreshSearchMatches(selectsFirstMatch: false)
+        refreshSearchMatches(selectsFirstMatch: false, text: text)
         onAutosaveNeeded()
         observeFileChanges()
     }
@@ -483,7 +581,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         }
 
         self.fileRevision = fileRevision
-        guard text == expectedText, hasUnsavedFileChanges != isEdited else {
+        guard textEquals(expectedText), hasUnsavedFileChanges != isEdited else {
             return
         }
 
@@ -495,10 +593,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         windowFrame: String?,
         isSelectedTab: Bool = true
     ) -> AutosavedDraft {
-        AutosavedDraft(
-            text: fileURL != nil && fileRevision != nil && !hasUnsavedFileChanges
+        let draftText: String? =
+            fileURL != nil && fileRevision != nil && !hasUnsavedFileChanges
                 ? nil
-                : text,
+                : textSnapshot()
+        return AutosavedDraft(
+            text: draftText,
             fileURL: fileURL,
             windowID: windowID,
             windowFrame: windowFrame,
@@ -517,16 +617,12 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     var title: String {
-        if let fileURL {
-            return fileURL.lastPathComponent
-        }
-
-        return DocumentTitleSuggester.title(from: text) ?? "Untitled"
+        displayedTitle
     }
 
     private var suggestedSaveFileName: String {
         fileURL?.lastPathComponent
-            ?? DocumentTitleSuggester.fileName(from: text)
+            ?? DocumentTitleSuggester.fileName(from: textSnapshot())
             ?? "Untitled.md"
     }
 
@@ -569,7 +665,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        let savedText = text
+        let savedText = textSnapshot()
         let previousSaveTask = saveTask
         let finishSaveDestination = finishSaveDestination
         previousSaveTask?.cancel()
@@ -649,7 +745,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                 let resolution: FileConflictResolution
                 if let self,
                    !hasUnsavedFileChanges,
-                   text == savedText
+                   textEquals(savedText)
                 {
                     // Save raced the presenter's notification. There is no
                     // local work to resolve, so adopt the disk version just
@@ -668,7 +764,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
                         )
                         guard !Task.isCancelled,
                               let self,
-                              text == savedText
+                              textEquals(savedText)
                         else {
                             return
                         }
@@ -742,7 +838,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             fileRevision = savedRevision
             editorView.documentURL = url
             observeFileChanges()
-            let didSaveCurrentText = text == savedText
+            let didSaveCurrentText = textEquals(savedText)
             hasUnsavedFileChanges = !didSaveCurrentText
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             onAutosaveNeeded()
@@ -777,13 +873,14 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     }
 
     private func applyExternalSnapshot(_ snapshot: FileIO.UTF8Snapshot) {
-        text = snapshot.text
+        documentAnalysisTask?.cancel()
+        replaceTextBuffer(with: snapshot.text)
         fileRevision = snapshot.revision
         hasUnsavedFileChanges = false
         editorView.setString(snapshot.text, clearsUndo: true)
         stylingController.scheduleParse(text: snapshot.text)
         scheduleStatistics(text: snapshot.text)
-        refreshSearchMatches(selectsFirstMatch: false)
+        refreshSearchMatches(selectsFirstMatch: false, text: snapshot.text)
         onAutosaveNeeded()
     }
 
@@ -892,7 +989,16 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         onApprovedClose()
     }
 
-    private func updateTitle() {
+    private func updateTitle(using text: String? = nil) {
+        let title: String
+        if let fileURL {
+            title = fileURL.lastPathComponent
+        } else {
+            title = DocumentTitleSuggester.title(
+                from: text ?? textSnapshot()
+            ) ?? "Untitled"
+        }
+        displayedTitle = title
         shellState.updateTitle(title, isEdited: hasUnsavedFileChanges)
     }
 
@@ -977,6 +1083,13 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         showStatusBar()
     }
 
+    /// Native tab chrome belongs to the whole NSWindowTabGroup, not to one
+    /// document session. Reveal it before another window joins the group so
+    /// the new session cannot inherit an accessory hidden by the old one.
+    func revealChromeForTabAttachment() {
+        showChrome()
+    }
+
     private func showToolbar() {
         // @Published fires objectWillChange even for equal values; avoid
         // invalidating the whole SwiftUI shell for an already-visible bar.
@@ -1017,7 +1130,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     /// The tab bar hides with the chrome and reveals with the toolbar.
     /// While it is temporarily hidden the logical tab chrome state (insets,
     /// prominent backdrop) is kept frozen so the text does not shift; the
-    /// KVO refresh in WindowLifecycleView skips updates for this state.
+    /// window controller's KVO refresh skips updates for this state.
     // toggleTabBar(_:) silently no-ops for groups with several tabs (AppKit
     // disables Hide Tab Bar there), so the bar is collapsed by hiding its
     // titlebar accessory instead — the only accessory these windows have.
@@ -1074,12 +1187,18 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         if isPresented {
             refreshSearchMatches(selectsFirstMatch: true)
         } else {
-            clearSearchMatches()
+            cancelSearchAndClearMatches()
             editorView.focus()
         }
     }
 
-    private func refreshSearchMatches(selectsFirstMatch: Bool) {
+    private func refreshSearchMatches(
+        selectsFirstMatch: Bool,
+        text: String? = nil
+    ) {
+        searchTask?.cancel()
+        searchGeneration &+= 1
+        let requestGeneration = searchGeneration
         guard shellState.isSearchPresented,
               !shellState.searchQuery.isEmpty
         else {
@@ -1087,23 +1206,52 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        searchMatches = EditorSearchMatcher.matches(
-            for: shellState.searchQuery,
-            in: text,
-            options: shellState.searchOptions
-        )
+        let query = shellState.searchQuery
+        let options = shellState.searchOptions
+        let source = text ?? textSnapshot()
+        let sourceGeneration = textGeneration
+        let preferredIndex = selectsFirstMatch ? nil : selectedSearchMatchIndex
+        clearSearchMatches()
 
-        if searchMatches.isEmpty {
-            selectedSearchMatchIndex = nil
-        } else if selectsFirstMatch || selectedSearchMatchIndex == nil {
-            selectedSearchMatchIndex = 0
-        } else if let selectedSearchMatchIndex,
-                  selectedSearchMatchIndex >= searchMatches.count
-        {
-            self.selectedSearchMatchIndex = searchMatches.count - 1
+        searchTask = Task { [weak self] in
+            let matches = await Task.detached(priority: .userInitiated) {
+                EditorSearchMatcher.matches(
+                    for: query,
+                    in: source,
+                    options: options
+                )
+            }.value
+            guard !Task.isCancelled, let self,
+                  requestGeneration == searchGeneration,
+                  sourceGeneration == textGeneration,
+                  query == shellState.searchQuery,
+                  options == shellState.searchOptions,
+                  shellState.isSearchPresented
+            else {
+                return
+            }
+
+            searchMatches = matches
+            if searchMatches.isEmpty {
+                selectedSearchMatchIndex = nil
+            } else if let preferredIndex {
+                selectedSearchMatchIndex = min(
+                    preferredIndex,
+                    searchMatches.count - 1
+                )
+            } else {
+                selectedSearchMatchIndex = 0
+            }
+
+            applySearchMatches(selectsMatch: selectsFirstMatch)
         }
+    }
 
-        applySearchMatches(selectsMatch: selectsFirstMatch)
+    private func cancelSearchAndClearMatches() {
+        searchTask?.cancel()
+        searchTask = nil
+        searchGeneration &+= 1
+        clearSearchMatches()
     }
 
     private func clearSearchMatches() {
@@ -1143,9 +1291,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        // The text change has already refreshed the matches synchronously;
-        // scroll to the match that took over the replaced one's index.
-        applySearchMatches(selectsMatch: true)
+        // The confirmed text-change callback clears the obsolete ranges and
+        // the coalesced analysis schedules their replacement off-main.
     }
 
     private func replaceAllMatches() {

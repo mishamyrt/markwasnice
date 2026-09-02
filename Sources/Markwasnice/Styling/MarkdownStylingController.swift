@@ -8,11 +8,8 @@ final class MarkdownStylingController {
     private var resolvedStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var isProofreadingEnabled = false
 
-    /// Bumped on every scheduled parse — i.e. on every editor text change,
-    /// since all edit paths re-schedule. Async results carry the version
-    /// their text was scheduled at, so freshness checks compare two integers
-    /// (plus an O(1) length sanity check) instead of walking the whole
-    /// document per delivery on the main thread.
+    /// Bumped synchronously on every editor text change. Parsing may be
+    /// debounced, but an older result becomes invalid before that delay.
     private var textVersion = 0
     private var proofreadScheduledTextVersion = 0
     private var resolvedStyleSpansVersion = 0
@@ -55,8 +52,26 @@ final class MarkdownStylingController {
     }
 
     func scheduleParse(text: String) {
-        textVersion += 1
-        parseService.scheduleParse(text: text, version: textVersion)
+        let version = invalidateText()
+        scheduleParse(text: text, version: version)
+    }
+
+    /// Invalidates parsed and proofreading state in the synchronous edit
+    /// callback. The returned version belongs to that exact text generation
+    /// and may be scheduled after the session-level debounce.
+    @discardableResult
+    func invalidateText() -> Int {
+        textVersion &+= 1
+        parseService.cancel()
+        return textVersion
+    }
+
+    func scheduleParse(text: String, version: Int) {
+        guard version == textVersion else {
+            return
+        }
+
+        parseService.scheduleParse(text: text, version: version)
     }
 
     func applySettings(_ settings: EditorSettings) {
@@ -74,11 +89,16 @@ final class MarkdownStylingController {
 
         isProofreadingEnabled = enabled
         if enabled {
+            guard let spans = freshStyleSpans else {
+                // The next accepted parse starts the check with ranges that
+                // belong to the current text generation.
+                return
+            }
             proofreadScheduledTextVersion = textVersion
             proofreadingService.scheduleCheck(
                 text: editorView.string,
                 protectedRanges: ProofreadingService.protectedRanges(
-                    from: resolvedStyleSpans
+                    from: spans
                 ),
                 debounceMilliseconds: 0
             )

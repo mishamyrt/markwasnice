@@ -1,6 +1,6 @@
 import Foundation
 
-enum EditorSearchMode: CaseIterable, Equatable {
+enum EditorSearchMode: CaseIterable, Equatable, Sendable {
     case contains
     case startsWith
     case fullWord
@@ -17,7 +17,7 @@ enum EditorSearchMode: CaseIterable, Equatable {
     }
 }
 
-struct EditorSearchOptions: Equatable {
+struct EditorSearchOptions: Equatable, Sendable {
     var ignoresCase = true
     var mode: EditorSearchMode = .contains
 }
@@ -46,6 +46,10 @@ enum EditorSearchMatcher {
         var searchRange = NSRange(location: 0, length: nsText.length)
 
         while searchRange.length > 0 {
+            guard !Task.isCancelled else {
+                return []
+            }
+
             let range = nsText.range(
                 of: query,
                 options: findOptions,

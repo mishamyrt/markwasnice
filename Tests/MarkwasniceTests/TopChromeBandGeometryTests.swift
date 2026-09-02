@@ -71,6 +71,16 @@ struct TopChromeBandGeometryTests {
         #expect(!state.usesProgressiveToolbarBlur)
     }
 
+    @Test func fullscreenInsetUsesLiveToolbarAndTabMeasurements() {
+        let state = EditorShellState()
+        state.isFullScreen = true
+        state.isTabBarVisible = true
+        state.fullScreenToolbarHeight = 49
+        state.tabBarRowHeight = 41
+
+        #expect(state.fullScreenTopChromeInsetHeight == 90)
+    }
+
     /// The hairline would cut between the toolbar and the tabs; with the tab
     /// bar up the detached search band carries it instead.
     @Test func separatorStaysHiddenBehindTheTabBar() {

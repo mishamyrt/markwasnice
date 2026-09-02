@@ -193,4 +193,37 @@ struct AppTerminationPolicyTests {
         #expect(savedSession.drafts.count == 1)
         #expect(savedSession.drafts[0].fileURL == fileURL)
     }
+
+    @Test
+    func windowQueuedBeforeStartupDoesNotBypassRecovery() async throws {
+        let (state, directory) = try makeAppState()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let autosaveURL = directory.appendingPathComponent("AutosavedDraft.json")
+        let recoveredText = "text that must survive launch"
+        try JSONEncoder().encode(AutosavedSession(drafts: [
+            AutosavedDraft(
+                text: recoveredText,
+                fileURL: nil,
+                windowID: nil,
+                windowFrame: nil
+            ),
+        ])).write(to: autosaveURL)
+
+        state.requestNewWindow()
+        let queuedID = try #require(state.pendingWindowIDs.first)
+        let initialID = try #require(await state.initialSessionID())
+
+        #expect(initialID != queuedID)
+        #expect(state.sessions.count == 2)
+        #expect(state.session(for: initialID)?.editorView.string == recoveredText)
+        #expect(state.pendingWindowIDs == [queuedID])
+
+        #expect(await state.flushAutosaveAndWait(force: true))
+        let loaded = try await AutosaveStore(fileURL: autosaveURL).loadSession()
+        guard case let .loaded(savedSession) = loaded else {
+            Issue.record("expected the recovery manifest to remain readable")
+            return
+        }
+        #expect(savedSession.drafts.contains { $0.text == recoveredText })
+    }
 }

@@ -40,6 +40,8 @@ final class EditorShellState: ObservableObject {
     @Published var isTabBarVisible = false
     @Published var tabBarTopInset: CGFloat = 0
     @Published var tabBarRowHeight = EditorShellState.tabBarRowHeightEstimate
+    var fullScreenToolbarHeight =
+        EditorShellState.fullScreenToolbarOverlayEstimate
     @Published var searchQuery = ""
     @Published var searchOptions = EditorSearchOptions()
     @Published var searchMatchCount = 0
@@ -205,16 +207,9 @@ final class EditorShellState: ObservableObject {
         isContentScrolled && !isTabBarVisible
     }
 
-    /// Measured height of the auto-hidden fullscreen chrome overlay (the
-    /// toolbar window with the tab bar, plus the menu bar where it overlaps
-    /// the content); 0 until the toolbar window has been measured.
-    var fullScreenChromeOverlayHeight: CGFloat = 0
-
-    /// Estimates used before the fullscreen toolbar window exists, so the
-    /// text does not start under the reveal zone during the transition:
-    /// the unified toolbar row and the tab bar accessory row.
+    /// Public AppKit does not expose the auto-hidden fullscreen toolbar
+    /// window's geometry, so reserve the unified toolbar and tab row heights.
     static let fullScreenToolbarOverlayEstimate: CGFloat = 52
-    static let fullScreenTabBarOverlayEstimate: CGFloat = tabBarRowHeightEstimate
 
     /// Height of the tab bar accessory row, used until the live one has been
     /// measured off the window's titlebar accessory.
@@ -224,11 +219,8 @@ final class EditorShellState: ObservableObject {
     /// reveal; unscrolled text has to start below that band (and below the
     /// search bar when it is shown) so revealing never covers it.
     var fullScreenTopChromeInsetHeight: CGFloat {
-        let overlayHeight =
-            fullScreenChromeOverlayHeight > 0
-                ? fullScreenChromeOverlayHeight
-                : Self.fullScreenToolbarOverlayEstimate
-                + (isTabBarVisible ? Self.fullScreenTabBarOverlayEstimate : 0)
+        let overlayHeight = fullScreenToolbarHeight
+            + (isTabBarVisible ? tabBarRowHeight : 0)
         return max(overlayHeight, isSearchPresented ? searchBarHeight : 0)
     }
 

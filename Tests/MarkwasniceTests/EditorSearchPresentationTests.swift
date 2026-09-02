@@ -20,7 +20,18 @@ struct EditorSearchPresentationTests {
         ) {}
     }
 
-    @Test func selectedTextBecomesTheSearchQuery() {
+    private func waitForMatchCount(
+        _ count: Int,
+        in session: EditorDocumentSession
+    ) async throws {
+        var attempts = 0
+        while session.shellState.searchMatchCount != count, attempts < 200 {
+            try await Task.sleep(for: .milliseconds(5))
+            attempts += 1
+        }
+    }
+
+    @Test func selectedTextBecomesTheSearchQuery() async throws {
         let text = "alpha beta alpha"
         let session = makeSession(text: text)
         session.shellState.setSearchQuery("alpha")
@@ -29,13 +40,14 @@ struct EditorSearchPresentationTests {
         )
 
         session.showSearch()
+        try await waitForMatchCount(1, in: session)
 
         #expect(session.shellState.isSearchPresented)
         #expect(session.shellState.searchQuery == "beta")
         #expect(session.shellState.searchMatchCount == 1)
     }
 
-    @Test func searchQueryIsPreservedWithoutASelection() {
+    @Test func searchQueryIsPreservedWithoutASelection() async throws {
         let text = "alpha beta alpha"
         let session = makeSession(text: text)
         session.shellState.setSearchQuery("alpha")
@@ -44,8 +56,23 @@ struct EditorSearchPresentationTests {
         )
 
         session.showSearch()
+        try await waitForMatchCount(2, in: session)
 
         #expect(session.shellState.searchQuery == "alpha")
         #expect(session.shellState.searchMatchCount == 2)
+    }
+
+    @Test func editInvalidatesSearchRangesBeforeRescan() async throws {
+        let session = makeSession(text: "alpha beta")
+        session.shellState.setSearchQuery("alpha")
+        session.showSearch()
+        try await waitForMatchCount(1, in: session)
+
+        session.editorView.setString("gamma beta", clearsUndo: false)
+        session.markdownEditorViewDidChangeText(session.editorView)
+
+        #expect(session.shellState.searchMatchCount == 0)
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(session.shellState.searchMatchCount == 0)
     }
 }

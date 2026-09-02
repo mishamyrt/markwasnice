@@ -1,5 +1,12 @@
 @preconcurrency import AppKit
 
+/// One character edit in UTF-16 coordinates. `replacedRange` addresses the
+/// text before this edit; edits in one callback batch are applied in order.
+struct MarkdownTextEdit: Equatable {
+    let replacedRange: NSRange
+    let replacement: String
+}
+
 protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
     /// A confirmed editor text change. The generation is strictly increasing
@@ -8,6 +15,11 @@ protocol MarkdownEditorViewDelegate: AnyObject {
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
         didChangeTextAt generation: Int
+    )
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        didChangeTextBy edits: [MarkdownTextEdit],
+        at generation: Int
     )
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
@@ -27,13 +39,22 @@ protocol MarkdownEditorViewDelegate: AnyObject {
 }
 
 extension MarkdownEditorViewDelegate {
-    /// Compatibility bridge for delegates that have not adopted edit
-    /// generations yet. MarkdownEditorView calls only this entry point.
+    /// Compatibility bridge for delegates that have not adopted generations.
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
         didChangeTextAt _: Int
     ) {
         markdownEditorViewDidChangeText(editorView)
+    }
+
+    /// Compatibility bridge for delegates that do not need edit deltas.
+    /// MarkdownEditorView calls only this most specific entry point.
+    func markdownEditorView(
+        _ editorView: MarkdownEditorView,
+        didChangeTextBy _: [MarkdownTextEdit],
+        at generation: Int
+    ) {
+        markdownEditorView(editorView, didChangeTextAt: generation)
     }
 }
 
@@ -148,6 +169,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var isSettingTextProgrammatically = false
     private var isNormalizingEditedText = false
     private var textChangeGeneration = 0
+    private var pendingTextEdits: [MarkdownTextEdit] = []
     // Asymmetric set-here-consume-there protocol, deliberately not scoped:
     // hasRecentLargeEdit is raised by the large-edit path in
     // textStorage(_:didProcessEditing:…) and consumed by the next
@@ -271,6 +293,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
     func setString(_ string: String, clearsUndo: Bool) {
         proofreadingPresenter.clearIssues()
+        pendingTextEdits = []
         let selectedRange = textView.selectedRange()
         withProgrammaticTextSetting {
             textView.string = string
@@ -986,9 +1009,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         focusModeController.updateForSelection()
         textChangeGeneration += 1
+        let edits = pendingTextEdits
+        pendingTextEdits = []
         delegate?.markdownEditorView(
             self,
-            didChangeTextAt: textChangeGeneration
+            didChangeTextBy: edits,
+            at: textChangeGeneration
         )
     }
 
@@ -1001,10 +1027,34 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         guard editedMask.contains(.editedCharacters),
               !isApplyingStyles,
               !isSettingTextProgrammatically,
-              !isNormalizingEditedText,
-              !textView.hasMarkedText(),
-              textStorage.length > 0
+              !isNormalizingEditedText
         else {
+            return
+        }
+
+        let replacedLength = max(0, editedRange.length - changeInLength)
+        if editedRange.location != NSNotFound,
+           editedRange.location >= 0,
+           editedRange.length >= 0,
+           NSMaxRange(editedRange) <= textStorage.length
+        {
+            pendingTextEdits.append(MarkdownTextEdit(
+                replacedRange: NSRange(
+                    location: editedRange.location,
+                    length: replacedLength
+                ),
+                replacement: textStorage.mutableString.substring(with: editedRange)
+            ))
+        }
+
+        guard !textView.hasMarkedText() else {
+            return
+        }
+        guard textStorage.length > 0 else {
+            currentStyleSpans = []
+            codeInlineDrawRanges = []
+            codeBlockDrawRanges = []
+            proofreadingPresenter.clearIssues()
             return
         }
 
@@ -1831,19 +1881,36 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         in range: NSRange,
         string: NSString
     ) -> [ResolvedMarkdownStyleSpan] {
-        // The block/inline scanners and the link resolver all take a Swift
-        // String, so the backing store is bridged (copied) here — once per
-        // call, which is why the caller passes the NSString it already holds
-        // instead of letting each helper below reach for the text itself.
-        let source = string as String
-        var spans: [ResolvedMarkdownStyleSpan] = []
-        var lineStart = range.location
-        let upperBound = min(NSMaxRange(range), string.length)
+        let boundedRange = NSIntersectionRange(
+            range,
+            NSRange(location: 0, length: string.length)
+        )
+        guard boundedRange.length > 0 else {
+            return []
+        }
+
+        // The scanners require a Swift String. Materialize only the dirty
+        // lines, then translate their spans back to document coordinates.
+        let sourceRange = string.lineRange(for: boundedRange)
+        let source = string.substring(with: sourceRange)
+        let localString = source as NSString
+        var localSpans: [ResolvedMarkdownStyleSpan] = []
+        var absoluteSpans: [ResolvedMarkdownStyleSpan] = []
+        var lineStart = 0
+        let upperBound = localString.length
         let frontmatterRange = MarkdownFrontmatter.range(in: string)
 
         while lineStart < upperBound {
-            let lineRange = string.lineRange(for: NSRange(location: lineStart, length: 0))
-            defer { lineStart = max(NSMaxRange(lineRange), lineStart + 1) }
+            let localLineRange = localString.lineRange(
+                for: NSRange(location: lineStart, length: 0)
+            )
+            let absoluteLineRange = NSRange(
+                location: sourceRange.location + localLineRange.location,
+                length: localLineRange.length
+            )
+            defer {
+                lineStart = max(NSMaxRange(localLineRange), lineStart + 1)
+            }
 
             // Frontmatter is re-scanned per call (cheap: O(1) unless the
             // document opens with "---") rather than cached like code blocks,
@@ -1851,9 +1918,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             // staleness. Suppresses the analyzer's thematic-break match on
             // "---" and all markdown styling inside the block.
             if let frontmatterRange,
-               NSIntersectionRange(frontmatterRange, lineRange).length > 0
+               NSIntersectionRange(frontmatterRange, absoluteLineRange).length > 0
             {
-                spans.append(ResolvedMarkdownStyleSpan(
+                absoluteSpans.append(ResolvedMarkdownStyleSpan(
                     range: frontmatterRange,
                     kind: .frontmatter
                 ))
@@ -1867,30 +1934,33 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             // the analyzer's whole-document fence scan, which is far too slow
             // to run on every keystroke in a large document.
             if let block = codeBlockDrawRanges.first(where: {
-                NSIntersectionRange($0, lineRange).length > 0
+                NSIntersectionRange($0, absoluteLineRange).length > 0
             }) {
-                spans.append(ResolvedMarkdownStyleSpan(range: block, kind: .codeBlock))
+                absoluteSpans.append(ResolvedMarkdownStyleSpan(
+                    range: block,
+                    kind: .codeBlock
+                ))
                 continue
             }
 
             if let blockSpan = MarkdownBlockPrefixAnalyzer.prefixBlockSpan(
-                for: lineRange,
+                for: localLineRange,
                 source: source
             ) {
-                spans.append(blockSpan)
+                localSpans.append(blockSpan)
             }
-            spans.append(contentsOf: MarkdownInlineStyleScanner.inlineSpans(
-                in: lineRange,
+            localSpans.append(contentsOf: MarkdownInlineStyleScanner.inlineSpans(
+                in: localLineRange,
                 source: source
             ))
             // The inline scanner cannot produce this one: cmark reads a
             // list-less checkbox as ordinary text (see
             // MarkdownTaskCheckboxScanner).
             if let checkboxRange = MarkdownTaskCheckboxScanner.checkboxRange(
-                for: lineRange,
+                for: localLineRange,
                 source: source
             ) {
-                spans.append(ResolvedMarkdownStyleSpan(
+                localSpans.append(ResolvedMarkdownStyleSpan(
                     range: checkboxRange,
                     kind: .taskCheckbox
                 ))
@@ -1901,7 +1971,20 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         // same way the parse pipeline does, so the locally styled line looks
         // identical to the parsed one and nothing repaints when the parse
         // arrives.
-        return MarkdownLinkStyleResolver.resolve(spans: spans, in: source)
+        let resolvedLocalSpans = MarkdownLinkStyleResolver.resolve(
+            spans: localSpans,
+            in: source
+        )
+        absoluteSpans.append(contentsOf: resolvedLocalSpans.map { span in
+            ResolvedMarkdownStyleSpan(
+                range: NSRange(
+                    location: sourceRange.location + span.range.location,
+                    length: span.range.length
+                ),
+                kind: span.kind
+            )
+        })
+        return absoluteSpans
     }
 
     /// The selected match sits on the opaque yellow fill drawn in the text

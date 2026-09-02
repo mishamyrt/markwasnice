@@ -13,6 +13,11 @@ final class MarkdownParseService {
         parseTask?.cancel()
     }
 
+    func cancel() {
+        parseTask?.cancel()
+        parseTask = nil
+    }
+
     /// `version` is the caller's monotonically increasing text version; it is
     /// echoed in the delivered result so the caller can match a result to
     /// the text it scheduled without comparing whole strings.
@@ -42,7 +47,9 @@ final class MarkdownParseService {
             }
 
             await MainActor.run { [weak self] in
-                guard let self, version == latestScheduledVersion else {
+                guard !Task.isCancelled, let self,
+                      version == latestScheduledVersion
+                else {
                     return
                 }
 

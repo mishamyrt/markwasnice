@@ -39,12 +39,6 @@ struct EditorShellView: View {
                 fullScreenSearchLayer
             }
         }
-        .background(
-            ToolbarVisibilityBridge(
-                isVisible: $state.isToolbarVisible,
-                isSystemManaged: state.isFullScreen
-            )
-        )
         .background(Color(nsColor: editorBackgroundColor))
         .ignoresSafeArea(.container, edges: .top)
         .onAppear {
@@ -60,7 +54,7 @@ struct EditorShellView: View {
 
     private var topChromeBackdropLayer: some View {
         // Unmount the backdrop entirely while the chrome is hidden: a
-        // CABackdropLayer can keep sampling the content beneath it even at
+        // NSVisualEffectView can keep sampling the content beneath it even at
         // zero opacity, taxing every frame of a scroll. The opacity change
         // was not animated anyway, so conditional mounting looks identical.
         ZStack(alignment: .top) {

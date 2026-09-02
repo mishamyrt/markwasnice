@@ -36,6 +36,17 @@ struct EditorTypingStabilityTests {
         try harness.assertLocalStateMatchesParsedState()
     }
 
+    @Test func typingNearDocumentEndKeepsLocalSpanOffsets() throws {
+        let prefix = String(repeating: "plain paragraph\n", count: 2_000)
+        let source = prefix + "Tail with **bold text** and [link](https://example.com)"
+        let harness = EditorHarness(source: source, settings: Self.settings)
+        let location = (source as NSString).range(of: "bold text").upperBound
+
+        harness.type("!", at: location)
+
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
     @Test func typingOnLineAboveLinkKeepsLinkStylingAligned() throws {
         let source = """
         Intro line

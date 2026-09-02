@@ -5,42 +5,40 @@ import SwiftUI
 struct MarkwasniceApp: App {
     @NSApplicationDelegateAdaptor(SwiftUIAppDelegate.self)
     private var appDelegate
-    @StateObject private var appState: MarkwasniceAppState
 
     init() {
         LilexFontProvider.registerFonts()
         PlexSansFontProvider.registerFonts()
-        _appState = StateObject(wrappedValue: MarkwasniceAppState())
     }
 
     var body: some Scene {
-        WindowGroup("Markwasnice", for: EditorDocumentSession.ID.self) { $sessionID in
-            EditorWindowHost(sessionID: $sessionID)
-                .environmentObject(appState)
-                .onAppear {
-                    appDelegate.appState = appState
-                }
+        Settings {
+            EmptyView()
         }
         .commands {
-            MarkwasniceCommands(appState: appState)
+            MarkwasniceCommands(appState: appDelegate.appState)
         }
     }
 }
 
 @MainActor
 final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
-    var appState: MarkwasniceAppState? {
-        didSet {
-            flushPendingOpenURLs()
-        }
-    }
-
+    let appState: MarkwasniceAppState
+    private let windowCoordinator: EditorWindowCoordinator
     private var pendingOpenURLs: [URL] = []
+    private var didStartWindowCoordinator = false
+
+    override init() {
+        let appState = MarkwasniceAppState()
+        self.appState = appState
+        windowCoordinator = EditorWindowCoordinator(appState: appState)
+        super.init()
+    }
 
     func applicationWillFinishLaunching(_: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
-        // SwiftUI disables automatic window tabbing for its scenes, which
-        // also disables dragging a tab into another window's tab bar.
+        // Opt the coordinator-owned editor windows into native tab grouping
+        // and dragging between tab bars.
         NSWindow.allowsAutomaticWindowTabbing = true
         NotificationCenter.default.addObserver(
             self,
@@ -55,63 +53,33 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
         SystemMenuCustomization.hideDefaultTabCommands(in: NSApp.mainMenu)
-        ensureInitialSceneWindow(attempt: 0)
+        Task {
+            await windowCoordinator.start()
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            didStartWindowCoordinator = true
+            flushPendingOpenURLs()
+        }
     }
 
     @objc private func menuDidAddItem(_: Notification) {
         SystemMenuCustomization.hideDefaultTabCommands(in: NSApp.mainMenu)
     }
 
-    /// The WindowGroup normally materializes its first window before the app
-    /// finishes launching, but a launch whose only purpose is opening a
-    /// document can produce no scene at all: the open-documents event is
-    /// claimed by this delegate (see installOpenDocumentsHandler), SwiftUI
-    /// finds nothing to restore and nothing it should open itself, and the
-    /// app ends up running with no window — and stuck, because the pending
-    /// open URLs are only flushed once a window's host has appeared. A
-    /// reopen event — the same thing clicking the Dock icon sends — makes
-    /// the WindowGroup build its initial window, after which session
-    /// restoration and the pending opens run their normal course.
-    private func ensureInitialSceneWindow(attempt: Int) {
-        guard appState == nil, attempt < 5 else {
-            return
-        }
-
-        if attempt > 0 {
-            sendSelfReopenEvent()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            self?.ensureInitialSceneWindow(attempt: attempt + 1)
-        }
-    }
-
-    private func sendSelfReopenEvent() {
-        let target = NSAppleEventDescriptor(
-            processIdentifier: ProcessInfo.processInfo.processIdentifier
-        )
-        let event = NSAppleEventDescriptor(
-            eventClass: AEEventClass(kCoreEventClass),
-            eventID: AEEventID(kAEReopenApplication),
-            targetDescriptor: target,
-            returnID: AEReturnID(kAutoGenerateReturnID),
-            transactionID: AETransactionID(kAnyTransactionID)
-        )
-        guard let descriptor = event.aeDesc else {
-            return
-        }
-
-        AESendMessage(descriptor, nil, AESendMode(kAENoReply), kAEDefaultTimeout)
-    }
-
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
-        appState?.canTerminateAfterLastWindowClosed ?? true
+        appState.canTerminateAfterLastWindowClosed
+    }
+
+    func applicationShouldHandleReopen(
+        _: NSApplication,
+        hasVisibleWindows _: Bool
+    ) -> Bool {
+        if !windowCoordinator.hasVisibleEditorWindows {
+            appState.requestNewWindow()
+        }
+        return true
     }
 
     func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
-        guard let appState else {
-            return .terminateNow
-        }
-
         Task {
             let didFlush = await appState.flushAutosaveAndWait(force: true)
             let shouldTerminate = didFlush || Self.confirmTerminateAfterFailedFlush()
@@ -132,15 +100,8 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
-    /// SwiftUI's scene machinery claims the open-documents Apple Event and
-    /// answers it by opening WindowGroup windows with no scene value — windows
-    /// the editor host can only dismiss again — while
-    /// `application(_:openFiles:)` is never called at all. Handling the event
-    /// here is what lets an editor built on WindowGroup (rather than
-    /// DocumentGroup) see files opened from Finder, `open`, or the CLI. The
-    /// delegate callbacks are kept as a fallback for the case where AppKit's
-    /// own handler wins instead; only one of the two paths can be installed,
-    /// so a file is never opened twice.
+    /// Handle Finder/CLI opens explicitly so all documents enter the same
+    /// registry and AppKit window-coordinator path.
     private func installOpenDocumentsHandler() {
         NSAppleEventManager.shared().setEventHandler(
             self,
@@ -205,7 +166,7 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func queueOpen(_ url: URL) {
-        guard let appState else {
+        guard didStartWindowCoordinator else {
             pendingOpenURLs.append(url)
             return
         }
@@ -214,10 +175,6 @@ final class SwiftUIAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func flushPendingOpenURLs() {
-        guard let appState, !pendingOpenURLs.isEmpty else {
-            return
-        }
-
         let urls = pendingOpenURLs
         pendingOpenURLs = []
         for url in urls {

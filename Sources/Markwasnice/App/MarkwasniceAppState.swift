@@ -12,7 +12,7 @@ final class MarkwasniceAppState: ObservableObject {
 
     @Published private(set) var sessions: [EditorDocumentSession
         .ID: EditorDocumentSession] = [:]
-    @Published private(set) var pendingWindowIDs: [EditorDocumentSession.ID] = []
+    private(set) var pendingWindowIDs: [EditorDocumentSession.ID] = []
     @Published private(set) var settings: EditorSettings
     /// True while the most recent autosave write failed; cleared by the next
     /// successful flush.
@@ -41,6 +41,10 @@ final class MarkwasniceAppState: ObservableObject {
     /// Trailing edge of a settings drag: see `applySettings(_:phase:)`.
     private var settingsRolloutWorkItem: DispatchWorkItem?
     private var didCreateInitialSessions = false
+    /// Autosave must not replace a recovery manifest until launch restoration
+    /// has inspected it, even when an AppKit reopen event queues a fresh
+    /// window before the coordinator starts.
+    private var didResolveInitialSessions = false
     /// Set while the launch-time sessions are being read back from autosave:
     /// for that moment the app has neither a session nor a window.
     private var isResolvingInitialSessions = false
@@ -53,6 +57,9 @@ final class MarkwasniceAppState: ObservableObject {
     /// the lead's window lazily, because at restore time no windows exist yet.
     private var restoreTabLeads: [EditorDocumentSession.ID: EditorDocumentSession.ID] =
         [:]
+    /// Installed by EditorWindowCoordinator. App state only describes which
+    /// sessions need windows; it does not construct UI objects itself.
+    var onWindowPresentationNeeded: (() -> Void)?
 
     init(
         autosaveStore: AutosaveStore = AutosaveStore(),
@@ -63,10 +70,8 @@ final class MarkwasniceAppState: ObservableObject {
         settings = settingsStore.load()
     }
 
-    /// SwiftUI restores its own scene windows at launch with no session value,
-    /// and the editor host dismisses them again. Quitting on those closures
-    /// would kill the app before its real windows have appeared, so the app
-    /// only quits once no session is left and none is on its way.
+    /// Do not terminate during launch restoration, before its first AppKit
+    /// window has had a chance to materialize.
     var canTerminateAfterLastWindowClosed: Bool {
         sessions.isEmpty && !isResolvingInitialSessions
     }
@@ -80,18 +85,17 @@ final class MarkwasniceAppState: ObservableObject {
     }
 
     func initialSessionID() async -> EditorDocumentSession.ID? {
-        if !pendingWindowIDs.isEmpty {
-            return pendingWindowIDs.removeFirst()
-        }
-
         guard !didCreateInitialSessions else {
-            return nil
+            return pendingWindowIDs.isEmpty
+                ? nil
+                : pendingWindowIDs.removeFirst()
         }
 
         didCreateInitialSessions = true
         isResolvingInitialSessions = true
         defer {
             isResolvingInitialSessions = false
+            didResolveInitialSessions = true
             scheduleAutosave()
         }
         let autosaved = await loadAutosavedSession()
@@ -100,7 +104,9 @@ final class MarkwasniceAppState: ObservableObject {
             let drafts = deduplicatedDrafts(autosaved.drafts)
             let restoredSessions = await restoredSessions(from: drafts)
             guard let firstRestoredSession = restoredSessions.first else {
-                return newSession().id
+                return pendingWindowIDs.isEmpty
+                    ? newSession().id
+                    : pendingWindowIDs.removeFirst()
             }
 
             var leadSessionIDs: [UUID: EditorDocumentSession.ID] = [:]
@@ -114,13 +120,16 @@ final class MarkwasniceAppState: ObservableObject {
                     leadSessionIDs[windowID] = session.id
                 }
             }
-            pendingWindowIDs.append(
-                contentsOf: restoredSessions.dropFirst().map(\.session.id)
+            pendingWindowIDs.insert(
+                contentsOf: restoredSessions.dropFirst().map(\.session.id),
+                at: 0
             )
             return firstRestoredSession.session.id
         }
 
-        return newSession().id
+        return pendingWindowIDs.isEmpty
+            ? newSession().id
+            : pendingWindowIDs.removeFirst()
     }
 
     private func loadAutosavedSession() async -> AutosavedSession? {
@@ -193,14 +202,25 @@ final class MarkwasniceAppState: ObservableObject {
     }
 
     func requestNewTab(attachedTo window: NSWindow?) {
+        if let window {
+            for groupedWindow in window.tabGroup?.windows ?? [window] {
+                session(in: groupedWindow)?.revealChromeForTabAttachment()
+            }
+        } else {
+            activeSession?.revealChromeForTabAttachment()
+        }
         let session = newSession()
         placeSession(session, tabTarget: window, queuesWindow: true)
     }
 
-    /// Routes a session toward a window: registers a tab-attach target when
-    /// the target window supports editor tabs (with fullscreen targets
-    /// getting their tab window opened directly), otherwise queues a regular
-    /// window when requested.
+    func requestNewWindow() {
+        let session = newSession()
+        placeSession(session, tabTarget: nil, queuesWindow: true)
+    }
+
+    /// Records the desired tab target and asks the coordinator for an AppKit
+    /// window. Since that window is attached before it is shown, fullscreen
+    /// and cross-Space targets need no separate construction path.
     private func placeSession(
         _ session: EditorDocumentSession,
         tabTarget: NSWindow?,
@@ -210,37 +230,41 @@ final class MarkwasniceAppState: ObservableObject {
            tabTarget.tabbingIdentifier == EditorWindowTabbing.identifier
         {
             tabAttachTargets[session.id] = WeakWindowBox(window: tabTarget)
-            // Fullscreen targets and targets on another space both need the
-            // tab to join the group before it is ever shown (see
-            // EditorTabWindowFactory); the latter happens when an external
-            // open arrives from a space the editor is not on.
-            if tabTarget.styleMask.contains(.fullScreen)
-                || !tabTarget.isOnActiveSpace
-            {
-                EditorTabWindowFactory.open(
-                    session: session,
-                    appState: self,
-                    attachedTo: tabTarget
-                )
-                return
-            }
         }
         if queuesWindow {
-            pendingWindowIDs.append(session.id)
+            enqueueWindow(for: session.id)
         }
+    }
+
+    private func enqueueWindow(for id: EditorDocumentSession.ID) {
+        guard !pendingWindowIDs.contains(id) else {
+            return
+        }
+
+        pendingWindowIDs.append(id)
+        onWindowPresentationNeeded?()
     }
 
     func takeTabAttachTarget(
         for id: EditorDocumentSession.ID
+    ) -> NSWindow? {
+        takeTabAttachTarget(for: id) { [sessions] leadID in
+            sessions[leadID]?.editorView.window
+        }
+    }
+
+    func takeTabAttachTarget(
+        for id: EditorDocumentSession.ID,
+        restoreWindowFor: (EditorDocumentSession.ID) -> NSWindow?
     ) -> NSWindow? {
         if let window = tabAttachTargets.removeValue(forKey: id)?.window {
             return window
         }
 
         if let leadID = takeRestoreTabLead(for: id, ifReady: { leadID in
-            sessions[leadID]?.editorView.window?.isVisible == true
+            restoreWindowFor(leadID)?.isVisible == true
         }),
-            let leadWindow = sessions[leadID]?.editorView.window
+            let leadWindow = restoreWindowFor(leadID)
         {
             return leadWindow
         }
@@ -438,7 +462,7 @@ final class MarkwasniceAppState: ObservableObject {
         // The recovery manifest is incomplete while clean file-backed tabs
         // are being reopened. A reentrant external open must not overwrite it
         // with only the sessions materialized so far.
-        guard !isResolvingInitialSessions else {
+        guard didResolveInitialSessions, !isResolvingInitialSessions else {
             return
         }
         guard force || !sessions.isEmpty else {
@@ -734,7 +758,7 @@ final class MarkwasniceAppState: ObservableObject {
         if existing.editorView.window != nil {
             revealDocument(of: existing, activatesApp: placement.isFrontmostTab)
         } else if queuesWindow, !pendingWindowIDs.contains(existing.id) {
-            pendingWindowIDs.append(existing.id)
+            enqueueWindow(for: existing.id)
         }
         return true
     }
@@ -1146,7 +1170,6 @@ private enum OpenPlacement {
 
 struct MarkwasniceCommands: Commands {
     @ObservedObject private var appState: MarkwasniceAppState
-    @Environment(\.openWindow) private var openWindow
 
     init(appState: MarkwasniceAppState) {
         self.appState = appState
@@ -1155,7 +1178,7 @@ struct MarkwasniceCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New") {
-                openWindow(value: appState.newSession().id)
+                appState.requestNewWindow()
             }
             .keyboardShortcut("n")
 
