@@ -22,6 +22,7 @@ final class MarkwasniceAppState: ObservableObject {
     private let autosaveStore: AutosaveStore
     private var documentRegistry = DocumentRegistry()
     private var autosaveWorkItem: DispatchWorkItem?
+    private var autosaveDeadline: DispatchTime?
     /// Resolves to false when the write failed; a cancelled (superseded)
     /// flush counts as success because the newer flush covers it.
     private var autosaveTask: Task<Bool, Never>?
@@ -479,6 +480,7 @@ final class MarkwasniceAppState: ObservableObject {
 
         autosaveWorkItem?.cancel()
         autosaveWorkItem = nil
+        autosaveDeadline = nil
         autosaveTask?.cancel()
         autosaveGeneration += 1
         let generation = autosaveGeneration
@@ -1143,12 +1145,20 @@ final class MarkwasniceAppState: ObservableObject {
     }
 
     private func scheduleAutosave() {
+        // Keep a fixed upper bound while typing or moving the selection;
+        // trailing-edge debounce alone can postpone recovery indefinitely.
+        let now = DispatchTime.now()
+        let deadline = autosaveDeadline ?? now + 2
+        autosaveDeadline = deadline
         autosaveWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             self?.flushAutosave()
         }
         autosaveWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: workItem)
+        DispatchQueue.main.asyncAfter(
+            deadline: min(now + 0.4, deadline),
+            execute: workItem
+        )
     }
 }
 

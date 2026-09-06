@@ -33,6 +33,39 @@ struct AppTerminationPolicyTests {
     }
 
     @Test
+    func continuousEditsAndLayoutChangesStillAutosave() async throws {
+        let (state, directory) = try makeAppState()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let id = await state.initialSessionID()
+        let session = try #require(state.session(for: id))
+        #expect(await state.flushAutosaveAndWait(force: true))
+        let recoveryURL = directory.appendingPathComponent("AutosavedDraft.json")
+
+        var previousText = ""
+        for _ in 0 ..< 2 {
+            let until = ContinuousClock.now + .milliseconds(2300)
+            repeat {
+                session.editorView.textView.insertText(
+                    "x",
+                    replacementRange: NSRange(location: 0, length: 0)
+                )
+                state.noteWindowLayoutChanged()
+                state.noteSelectedTabChanged()
+                try await Task.sleep(for: .milliseconds(100))
+            } while ContinuousClock.now < until
+
+            let saved = try JSONDecoder().decode(
+                AutosavedSession.self,
+                from: Data(contentsOf: recoveryURL)
+            )
+            let text = try #require(saved.drafts.first?.text)
+            #expect(text.count > previousText.count)
+            previousText = text
+        }
+        #expect(await state.flushAutosaveAndWait(force: true))
+    }
+
+    @Test
     func quitsOnceTheLastSessionIsGone() async throws {
         let (state, directory) = try makeAppState()
         defer { try? FileManager.default.removeItem(at: directory) }
