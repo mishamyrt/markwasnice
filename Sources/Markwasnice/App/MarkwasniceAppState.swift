@@ -365,6 +365,10 @@ final class MarkwasniceAppState: ObservableObject {
         activeSession?.saveAs()
     }
 
+    func copySelection(as format: MarkdownCopyFormat, in window: NSWindow?) {
+        session(in: window)?.editorView.textView.copySelection(as: format)
+    }
+
     func pasteAsLink() {
         activeSession?.pasteAsLink()
     }
@@ -1260,6 +1264,37 @@ struct MarkwasniceCommands: Commands {
                 }
                 .keyboardShortcut("0")
             }
+        }
+
+        CommandGroup(replacing: .pasteboard) {
+            Button("Cut") {
+                NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
+            }
+            .keyboardShortcut("x")
+
+            Menu("Copy As") {
+                Button("Plain Text") {
+                    appState.copySelection(
+                        as: .plainText, in: NSApp.keyWindow ?? NSApp.mainWindow
+                    )
+                }
+
+                Button("Telegram") {
+                    appState.copySelection(
+                        as: .telegram, in: NSApp.keyWindow ?? NSApp.mainWindow
+                    )
+                }
+
+                Button("Markdown") {
+                    NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+                }
+                .keyboardShortcut("c")
+            }
+
+            Button("Paste") {
+                NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+            }
+            .keyboardShortcut("v")
         }
 
         CommandGroup(after: .pasteboard) {

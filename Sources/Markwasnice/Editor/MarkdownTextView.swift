@@ -747,14 +747,17 @@ final class MarkdownTextView: NSTextView {
             return nil
         }
 
+        if let copyItem = menu.items.first(where: { $0.action == #selector(copy(_:)) }) {
+            copyItem.title = "Copy As"
+            copyItem.action = nil
+            copyItem.keyEquivalent = ""
+            copyItem.submenu = copyAsMenu()
+        }
+
         var index = 0
         if selectedRange().length > 0 {
             menu.insertItem(
                 submenuItem(title: "Style", menu: styleMenu()), at: index
-            )
-            index += 1
-            menu.insertItem(
-                submenuItem(title: "Copy as", menu: copyAsMenu()), at: index
             )
             index += 1
         }
@@ -790,32 +793,27 @@ final class MarkdownTextView: NSTextView {
         return menu
     }
 
-    private func copyAsMenu() -> NSMenu {
-        let menu = NSMenu(title: "Copy as")
-
-        let plainText = NSMenuItem(
-            title: "Plain Text",
-            action: #selector(copySelectionAsPlainText),
-            keyEquivalent: ""
-        )
-        plainText.target = self
-        menu.addItem(plainText)
-
-        let telegram = NSMenuItem(
-            title: "Telegram",
-            action: #selector(copySelectionAsTelegram),
-            keyEquivalent: ""
-        )
-        telegram.target = self
-        menu.addItem(telegram)
-
-        return menu
-    }
-
     private func submenuItem(title: String, menu: NSMenu) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.submenu = menu
         return item
+    }
+
+    private func copyAsMenu() -> NSMenu {
+        let menu = NSMenu(title: "Copy As")
+        menu.autoenablesItems = false
+        let commands: [(String, Selector)] = [
+            ("Plain Text", #selector(copySelectionAsPlainText)),
+            ("Telegram", #selector(copySelectionAsTelegram)),
+            ("Markdown", #selector(copy(_:))),
+        ]
+        for (title, action) in commands {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.isEnabled = selectedRange().length > 0
+            menu.addItem(item)
+        }
+        return menu
     }
 
     @objc private func insertTableMenuItem(_: NSMenuItem) {
@@ -838,7 +836,7 @@ final class MarkdownTextView: NSTextView {
         copySelection(as: .telegram)
     }
 
-    private func copySelection(as format: MarkdownCopyFormat) {
+    func copySelection(as format: MarkdownCopyFormat) {
         let range = selectedRange()
         guard range.length > 0 else {
             return

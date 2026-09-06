@@ -1,7 +1,7 @@
 import Foundation
 import Markdown
 
-/// Conversion targets for the "Copy as" context-menu items.
+/// Conversion targets for the "Copy As" menu items.
 enum MarkdownCopyFormat {
     /// Markdown syntax stripped, keeping readable structure.
     case plainText
