@@ -21,11 +21,7 @@ struct MarkdownPreviewRenderer {
     static let codeFontScale: CGFloat = 0.85
 
     func render(_ source: String) -> NSAttributedString {
-        var source = source
-        if let frontmatter = MarkdownFrontmatter.range(in: source) {
-            source = (source as NSString).substring(from: NSMaxRange(frontmatter))
-        }
-        let document = Document(parsing: source)
+        let document = MarkdownDocument.parse(source)
         let result = NSMutableAttributedString()
         for block in document.children {
             result.append(renderBlock(block, indent: 0, isQuoted: false))

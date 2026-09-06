@@ -1,4 +1,5 @@
 import Foundation
+import Markdown
 
 /// A "[ ]" / "[x]" opening a line that is not a list item. cmark folds the
 /// checkbox of a real list item into `ListItem.checkbox` and leaves nothing in
@@ -6,6 +7,31 @@ import Foundation
 /// find it by line prefix instead. List-item checkboxes are not scanned here:
 /// they are already part of the list marker range (see listMarkerRegex).
 enum MarkdownTaskCheckboxScanner {
+    /// Only a marker at its original line prefix is a standalone checkbox.
+    /// Looking at decoded inline text alone would also convert escaped text
+    /// and checkbox-looking link labels.
+    static func renderedText(
+        _ text: Text,
+        source: String,
+        sourceMap: SourceMap
+    ) -> Text {
+        guard let range = text.range.flatMap(sourceMap.nsRange(for:)),
+              let checkbox = checkboxRange(
+                  for: NSRange(location: range.location, length: 0),
+                  source: source
+              ),
+              checkbox.location == range.location
+        else {
+            return text
+        }
+        let marker = (source as NSString).substring(with: checkbox)
+        guard text.string.hasPrefix(marker) else {
+            return text
+        }
+        let symbol = marker.lowercased() == "[x]" ? "☑" : "☐"
+        return Text(symbol + text.string.dropFirst(marker.count))
+    }
+
     private static let bareCheckboxRegex = try! NSRegularExpression(
         pattern: #"^[ \t]*(\#(MarkdownLineGrammar.checkbox))(?=[ \t]|$)"#,
         options: [.anchorsMatchLines]

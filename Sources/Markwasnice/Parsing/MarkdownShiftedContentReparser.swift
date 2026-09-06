@@ -23,6 +23,59 @@ enum MarkdownShiftedContentReparser {
     /// pathological hand-crafted input.
     private static let maxDepth = 5
 
+    /// The same shifted regions as the styling pass, kept as blocks for
+    /// preview/export. Replacing inside each container preserves nested lists.
+    static func document(parsing source: String) -> Document {
+        document(parsing: source, depth: 0)
+    }
+
+    private static func document(parsing source: String, depth: Int) -> Document {
+        let document = Document(parsing: source, options: [.disableSmartOpts])
+        guard depth < maxDepth else {
+            return document
+        }
+        let sourceMap = SourceMap(text: source)
+        let string = source as NSString
+        var scanner = RegionScanner(source: string, sourceMap: sourceMap)
+        scanner.visit(document)
+        guard !scanner.regions.isEmpty || source.contains("[") else {
+            return document
+        }
+        let regions = Dictionary(uniqueKeysWithValues: scanner.regions.map {
+            ($0.originalRange, $0)
+        })
+
+        func rewrite(_ block: BlockMarkup) -> [BlockMarkup] {
+            if let range = block.range.flatMap(sourceMap.nsRange(for:)),
+               let region = regions[range]
+            {
+                return Array(Self.document(
+                    parsing: dedentedSource(for: region, in: string),
+                    depth: depth + 1
+                ).blockChildren)
+            }
+            guard block.childCount > 0 else {
+                return [block]
+            }
+            let children: [Markup] = block.children.flatMap { child -> [Markup] in
+                if block is Paragraph, let text = child as? Text {
+                    return [MarkdownTaskCheckboxScanner.renderedText(
+                        text,
+                        source: source,
+                        sourceMap: sourceMap
+                    )]
+                }
+                guard let child = child as? BlockMarkup else {
+                    return [child]
+                }
+                return rewrite(child).map { $0 as Markup }
+            }
+            return [block.withUncheckedChildren(children) as! BlockMarkup]
+        }
+
+        return Document(document.blockChildren.flatMap(rewrite))
+    }
+
     static func spans(
         replacing spans: [ResolvedMarkdownStyleSpan],
         in source: String,
@@ -46,6 +99,7 @@ enum MarkdownShiftedContentReparser {
     }
 
     private struct Region {
+        let originalRange: NSRange
         /// Spans lying entirely inside this range are replaced.
         let dropRange: NSRange
         let segments: [Segment]
@@ -136,15 +190,11 @@ enum MarkdownShiftedContentReparser {
         in source: NSString,
         depth: Int
     ) -> [ResolvedMarkdownStyleSpan] {
-        var subSource = ""
+        let subSource = dedentedSource(for: region, in: source)
         var segmentStarts: [Int] = []
         var subLength = 0
         for segment in region.segments {
             segmentStarts.append(subLength)
-            subSource += source.substring(with: NSRange(
-                location: segment.range.location + segment.stripped,
-                length: segment.range.length - segment.stripped
-            ))
             subLength += segment.range.length - segment.stripped
         }
 
@@ -220,6 +270,18 @@ enum MarkdownShiftedContentReparser {
         return segment.range.location + segment.stripped + offsetInSegment
     }
 
+    private static func dedentedSource(
+        for region: Region,
+        in source: NSString
+    ) -> String {
+        region.segments.map { segment in
+            source.substring(with: NSRange(
+                location: segment.range.location + segment.stripped,
+                length: segment.range.length - segment.stripped
+            ))
+        }.joined()
+    }
+
     private struct RegionScanner: MarkupWalker {
         let source: NSString
         let sourceMap: SourceMap
@@ -229,7 +291,6 @@ enum MarkdownShiftedContentReparser {
             guard let sourceRange = codeBlock.range,
                   let nsRange = sourceMap.nsRange(for: sourceRange),
                   nsRange.length > 0,
-                  !startsWithFence(nsRange, in: source),
                   let region = indentedBlockRegion(for: nsRange)
             else {
                 return
@@ -283,6 +344,7 @@ enum MarkdownShiftedContentReparser {
             }
 
             return Region(
+                originalRange: range,
                 dropRange: blockLineRange,
                 segments: zip(lineRanges, leadingCounts).map { lineRange, leading in
                     Segment(range: lineRange, stripped: min(dedent, leading))
@@ -326,7 +388,7 @@ enum MarkdownShiftedContentReparser {
                 return nil
             }
 
-            return Region(dropRange: range, segments: segments)
+            return Region(originalRange: range, dropRange: range, segments: segments)
         }
 
         private func leadingWhitespaceLength(of lineRange: NSRange) -> Int {
@@ -341,23 +403,6 @@ enum MarkdownShiftedContentReparser {
 
             return leading
         }
-    }
-
-    private static func startsWithFence(
-        _ range: NSRange,
-        in source: NSString
-    ) -> Bool {
-        guard range.length >= 3 else {
-            return false
-        }
-
-        let first = source.character(at: range.location)
-        guard first == 0x60 || first == 0x7E else { // '`' or '~'
-            return false
-        }
-
-        return source.character(at: range.location + 1) == first
-            && source.character(at: range.location + 2) == first
     }
 }
 

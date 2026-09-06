@@ -12,7 +12,7 @@ enum MarkdownCopyFormat {
 
     func convert(_ markdown: String) -> String {
         let renderer = Renderer(format: self)
-        return renderer.render(Document(parsing: markdown))
+        return renderer.render(MarkdownDocument.parse(markdown))
     }
 
     private struct Renderer {
@@ -48,7 +48,15 @@ enum MarkdownCopyFormat {
                 return renderBlocks(quote.blockChildren)
             case let list as UnorderedList:
                 return list.listItems
-                    .map { "• " + renderListItem($0) }
+                    .map { item in
+                        let marker: String
+                        switch item.checkbox {
+                        case .checked: marker = "☑"
+                        case .unchecked: marker = "☐"
+                        case nil: marker = "•"
+                        }
+                        return marker + " " + renderListItem(item)
+                    }
                     .joined(separator: "\n")
             case let list as OrderedList:
                 return list.listItems.enumerated()
