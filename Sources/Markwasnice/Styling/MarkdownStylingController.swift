@@ -75,11 +75,11 @@ final class MarkdownStylingController {
     }
 
     func applySettings(_ settings: EditorSettings) {
-        editorView.applySettings(settings, spans: resolvedStyleSpans)
+        editorView.applySettings(settings)
     }
 
     func updateWindowWidthFontScale(for width: CGFloat) {
-        editorView.updateWindowWidthFontScale(for: width, spans: resolvedStyleSpans)
+        editorView.updateWindowWidthFontScale(for: width)
     }
 
     func setProofreadingEnabled(_ enabled: Bool) {

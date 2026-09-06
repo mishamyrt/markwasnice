@@ -423,21 +423,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         resumeFullStylingIfNeeded(spans: spans)
     }
 
-    func applySettings(_ settings: EditorSettings, spans: [ResolvedMarkdownStyleSpan]) {
+    func applySettings(_ settings: EditorSettings) {
         self.settings = settings
         // Before the inset pass below: it measures the gutter with the new
         // font metrics.
         syncStyleApplierMetrics()
-        setStyleSpans(spans)
         _ = updateTextContainerInset()
         restyleAllText()
         previewPresenter.refreshIfActive()
     }
 
-    func updateWindowWidthFontScale(
-        for windowWidth: CGFloat,
-        spans: [ResolvedMarkdownStyleSpan]
-    ) {
+    func updateWindowWidthFontScale(for windowWidth: CGFloat) {
         let newScale = Self.windowWidthFontScale(for: windowWidth)
         let didChangeScale = newScale != windowWidthFontScale
         windowWidthFontScale = newScale
@@ -445,7 +441,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         let didChangeGutter = updateTextContainerInset()
         if didChangeScale || didChangeGutter {
-            setStyleSpans(spans)
             restyleAllText()
         }
         if didChangeScale {
