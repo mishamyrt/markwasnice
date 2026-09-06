@@ -39,6 +39,10 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     /// Override used by focused tests. Production sessions present the native
     /// conflict alert when this callback is nil.
     var resolveFileConflict: ((URL) -> FileConflictResolution)?
+    var findSearchMatches: @Sendable (String, String, EditorSearchOptions)
+        -> [NSRange] = {
+            EditorSearchMatcher.matches(for: $0, in: $1, options: $2)
+        }
 
     private let stylingController: MarkdownStylingController
     private let onAutosaveNeeded: () -> Void
@@ -1213,37 +1217,37 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         let preferredIndex = selectsFirstMatch ? nil : selectedSearchMatchIndex
         clearSearchMatches()
 
-        searchTask = Task { [weak self] in
-            let matches = await Task.detached(priority: .userInitiated) {
-                EditorSearchMatcher.matches(
-                    for: query,
-                    in: source,
-                    options: options
-                )
-            }.value
-            guard !Task.isCancelled, let self,
-                  requestGeneration == searchGeneration,
-                  sourceGeneration == textGeneration,
-                  query == shellState.searchQuery,
-                  options == shellState.searchOptions,
-                  shellState.isSearchPresented
-            else {
+        let findMatches = findSearchMatches
+        searchTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard !Task.isCancelled else {
                 return
             }
+            let matches = findMatches(query, source, options)
+            await MainActor.run { [weak self] in
+                guard !Task.isCancelled, let self,
+                      requestGeneration == searchGeneration,
+                      sourceGeneration == textGeneration,
+                      query == shellState.searchQuery,
+                      options == shellState.searchOptions,
+                      shellState.isSearchPresented
+                else {
+                    return
+                }
 
-            searchMatches = matches
-            if searchMatches.isEmpty {
-                selectedSearchMatchIndex = nil
-            } else if let preferredIndex {
-                selectedSearchMatchIndex = min(
-                    preferredIndex,
-                    searchMatches.count - 1
-                )
-            } else {
-                selectedSearchMatchIndex = 0
+                searchMatches = matches
+                if searchMatches.isEmpty {
+                    selectedSearchMatchIndex = nil
+                } else if let preferredIndex {
+                    selectedSearchMatchIndex = min(
+                        preferredIndex,
+                        searchMatches.count - 1
+                    )
+                } else {
+                    selectedSearchMatchIndex = 0
+                }
+
+                applySearchMatches(selectsMatch: selectsFirstMatch)
             }
-
-            applySearchMatches(selectsMatch: selectsFirstMatch)
         }
     }
 

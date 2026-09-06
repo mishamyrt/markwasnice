@@ -75,4 +75,35 @@ struct EditorSearchPresentationTests {
         try await Task.sleep(for: .milliseconds(120))
         #expect(session.shellState.searchMatchCount == 0)
     }
+
+    @Test(arguments: [false, true])
+    func supersedingSearchCancelsTheWorker(closesSearch: Bool) async {
+        let session = makeSession(text: "alpha beta")
+        let gate = DispatchSemaphore(value: 0)
+        let (events, continuation) = AsyncStream<Bool>.makeStream()
+        session.findSearchMatches = { query, _, _ in
+            guard query == "alpha" else {
+                return []
+            }
+            continuation.yield(false)
+            _ = gate.wait(timeout: .now() + 5)
+            continuation.yield(Task.isCancelled)
+            continuation.finish()
+            return [NSRange(location: 0, length: 5)]
+        }
+        session.shellState.setSearchQuery("alpha")
+        session.shellState.showSearch()
+        var iterator = events.makeAsyncIterator()
+        #expect(await iterator.next() == false)
+
+        if closesSearch {
+            session.shellState.closeSearch()
+        } else {
+            session.shellState.setSearchQuery("gamma")
+        }
+        gate.signal()
+
+        #expect(await iterator.next() == true)
+        #expect(session.shellState.searchMatchCount == 0)
+    }
 }
