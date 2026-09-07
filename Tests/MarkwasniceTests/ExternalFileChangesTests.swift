@@ -92,11 +92,7 @@ struct ExternalFileChangesTests {
         session.markdownEditorViewDidChangeText(session.editorView)
         try Data("changed outside".utf8).write(to: fileURL, options: .atomic)
 
-        session.save()
-
-        for _ in 0 ..< 200 where session.editorView.string != "changed outside" {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        #expect(await session.save(to: fileURL).value)
         #expect(session.editorView.string == "changed outside")
         #expect(!session.shellState.isEdited)
         #expect(try String(contentsOf: fileURL, encoding: .utf8) == "changed outside")
@@ -118,11 +114,7 @@ struct ExternalFileChangesTests {
         }
         try Data("changed outside".utf8).write(to: fileURL, options: .atomic)
 
-        session.save()
-
-        for _ in 0 ..< 200 where session.editorView.string != "changed outside" {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        #expect(await session.save(to: fileURL).value)
         #expect(session.editorView.string == "changed outside")
         #expect(!session.shellState.isEdited)
     }
@@ -142,13 +134,7 @@ struct ExternalFileChangesTests {
         session.markdownEditorViewDidChangeText(session.editorView)
         try Data("changed outside".utf8).write(to: fileURL, options: .atomic)
 
-        session.save()
-
-        for _ in 0 ..< 200
-            where try String(contentsOf: fileURL, encoding: .utf8) != "local changes"
-        {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        #expect(await session.save(to: fileURL).value)
         #expect(try String(contentsOf: fileURL, encoding: .utf8) == "local changes")
         #expect(!session.shellState.isEdited)
     }

@@ -5,11 +5,7 @@ import UniformTypeIdentifiers
 final class EditorDocumentSession: ObservableObject, Identifiable,
     @preconcurrency MarkdownEditorViewDelegate
 {
-    enum FileConflictResolution {
-        case discardLocalChanges
-        case overwriteFile
-        case cancel
-    }
+    typealias FileConflictResolution = DocumentFileState.ConflictResolution
 
     static let editorTopInset: CGFloat = 0
     static let editorBottomInset: CGFloat = 72
@@ -25,17 +21,13 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     let id = UUID()
     let editorView: MarkdownEditorView
     let shellState: EditorShellState
+    let fileState: DocumentFileState
 
     /// Opens files dropped onto this session's window; wired by the app state,
     /// which owns the session registry and the open flow.
     var onOpenFiles: (([URL], NSWindow?) -> Void)?
     var onFocusModeEnabledChanged: ((Bool) -> Void)?
     var onProofreadingEnabledChanged: ((Bool) -> Void)?
-    /// App-level URL reservation keeps two sessions from saving to the same
-    /// canonical document. Standalone sessions used by focused UI tests can
-    /// leave these callbacks unset.
-    var reserveSaveDestination: ((URL) throws -> DocumentRegistry.SaveClaim)?
-    var finishSaveDestination: ((DocumentRegistry.SaveClaim, URL?, Bool) -> Void)?
     /// Override used by focused tests. Production sessions present the native
     /// conflict alert when this callback is nil.
     var resolveFileConflict: ((URL) -> FileConflictResolution)?
@@ -61,10 +53,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private var textGeneration = 0
     private var cachedTextSnapshot: (generation: Int, text: String)?
     private var displayedTitle: String
-    private var fileRevision: FileIO.Revision?
-    private var saveTask: Task<Void, Never>?
-    private var fileReloadTask: Task<Void, Never>?
-    private var filePresenter: DocumentFilePresenter?
     private var searchMatches: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
     private var searchTask: Task<Void, Never>?
@@ -73,13 +61,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     /// window creation behavior unchanged.
     let restoredTabSelection: Bool?
 
-    /// These observers are the title-update mechanism for document identity
-    /// and edited-state changes. Text-driven title updates are coalesced with
-    /// parser/statistics work.
-    private(set) var fileURL: URL? {
-        didSet {
-            updateTitle()
-        }
+    var fileURL: URL? {
+        fileState.url
     }
 
     private var hasUnsavedFileChanges: Bool {
@@ -106,8 +89,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         displayedTitle = fileURL?.lastPathComponent
             ?? DocumentTitleSuggester.title(from: text)
             ?? "Untitled"
-        self.fileURL = fileURL
-        self.fileRevision = fileRevision
+        fileState = DocumentFileState(url: fileURL, revision: fileRevision)
         self.restoredTabSelection = restoredTabSelection
         hasUnsavedFileChanges = isEdited
         self.onAutosaveNeeded = onAutosaveNeeded
@@ -178,7 +160,28 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         // didSet observers don't fire during init.
         updateTitle(using: text)
         scheduleStatistics(text: text)
-        observeFileChanges()
+        fileState.canReload = { [weak self] in
+            self.map { !$0.hasUnsavedFileChanges } ?? false
+        }
+        fileState.isCurrentText = { [weak self] text in
+            self?.textEquals(text) ?? false
+        }
+        fileState.resolveConflict = { [weak self] url in
+            self?.fileConflictResolution(for: url) ?? .cancel
+        }
+        fileState.onReload = { [weak self] snapshot in
+            self?.applyExternalSnapshot(snapshot)
+        }
+        fileState.onSave = { [weak self] url, didSaveCurrentText in
+            guard let self else {
+                return
+            }
+            hasUnsavedFileChanges = !didSaveCurrentText
+            updateTitle()
+            editorView.documentURL = url
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            onAutosaveNeeded()
+        }
     }
 
     deinit {
@@ -186,7 +189,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         statisticsTask?.cancel()
         selectionStatisticsTask?.cancel()
         searchTask?.cancel()
-        filePresenter?.invalidate()
     }
 
     func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView) {
@@ -426,8 +428,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     ) {
         documentAnalysisTask?.cancel()
         replaceTextBuffer(with: text)
-        fileURL = url
-        fileRevision = revision
+        fileState.adopt(url: url, revision: revision)
+        updateTitle()
         hasUnsavedFileChanges = false
         editorView.documentURL = url
         editorView.setString(text, clearsUndo: true)
@@ -435,39 +437,10 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         scheduleStatistics(text: text)
         refreshSearchMatches(selectsFirstMatch: false, text: text)
         onAutosaveNeeded()
-        observeFileChanges()
     }
 
-    /// Re-reads a presented file only while the editor still matches the
-    /// revision from which the read began. User edits and overlapping saves
-    /// always win over an asynchronous external-change notification.
     func reloadFromDiskIfClean() async {
-        guard !hasUnsavedFileChanges,
-              let fileURL,
-              let fileRevision
-        else {
-            return
-        }
-
-        let expectedURL = fileURL
-        guard let expectedDocumentURL = filePresenter?.presentedItemURL else {
-            return
-        }
-        let expectedRevision = fileRevision
-        guard let snapshot = try? await FileIO.readUTF8Snapshot(
-            from: expectedURL,
-            resolvingTo: expectedDocumentURL
-        ),
-            !Task.isCancelled,
-            self.fileURL?.standardizedFileURL == expectedURL.standardizedFileURL,
-            !hasUnsavedFileChanges,
-            self.fileRevision == expectedRevision,
-            snapshot.revision != expectedRevision
-        else {
-            return
-        }
-
-        applyExternalSnapshot(snapshot)
+        await fileState.reloadFromDiskIfClean()
     }
 
     func pasteAsLink() {
@@ -610,7 +583,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             return
         }
 
-        self.fileRevision = fileRevision
+        fileState.revision = fileRevision
         guard textEquals(expectedText), hasUnsavedFileChanges != isEdited else {
             return
         }
@@ -624,7 +597,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         isSelectedTab: Bool = true
     ) -> AutosavedDraft {
         let draftText: String? =
-            fileURL != nil && fileRevision != nil && !hasUnsavedFileChanges
+            fileURL != nil && fileState.revision != nil && !hasUnsavedFileChanges
                 ? nil
                 : textSnapshot()
         return AutosavedDraft(
@@ -663,249 +636,49 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         return panel
     }
 
-    private func save(
+    /// Menu and close-sheet callers may ignore the handle; tests and other
+    /// asynchronous callers can await the exact save outcome without polling.
+    @discardableResult
+    func save(
         to url: URL,
         onCompletion: ((Bool) -> Void)? = nil
-    ) {
-        let previousURL = fileURL
-        // Capture identity before any suspension. The user-visible URL may be
-        // a symlink whose target changes while the write is queued.
-        let previousDocumentURL = previousURL.map {
-            FileIO.canonicalDocumentURL(for: $0)
-        }
-        let isSameRequestedURL = previousURL.map {
-            $0.standardizedFileURL == url.standardizedFileURL
-        } ?? false
-        let isCurrentDocument = isSameRequestedURL
-            || previousDocumentURL == FileIO.canonicalDocumentURL(for: url)
-        if isCurrentDocument, fileRevision == nil {
-            NSAlert(
-                error: FileIO.ConditionalWriteError.revisionUnavailable(url)
-            ).runModal()
-            onCompletion?(false)
-            return
-        }
-
-        let claim: DocumentRegistry.SaveClaim?
+    ) -> Task<Bool, Never> {
+        let fileTask: Task<Bool, Error>
         do {
-            claim = try reserveSaveDestination?(url)
+            fileTask = try fileState.startSave(textSnapshot(), to: url)
         } catch {
-            NSAlert(error: error).runModal()
-            onCompletion?(false)
-            return
-        }
-
-        let savedText = textSnapshot()
-        let previousSaveTask = saveTask
-        let finishSaveDestination = finishSaveDestination
-        previousSaveTask?.cancel()
-        saveTask = Task { [weak self, savedText, url] in
-            // Every exit has to answer, or a caller waiting on the outcome
-            // waits forever: the close prompt keeps its window hostage that
-            // way, since an unanswered prompt refuses to close.
-            var didReportOutcome = false
-            var didFinishClaim = false
-            defer {
-                if let claim, !didFinishClaim {
-                    finishSaveDestination?(claim, previousDocumentURL, false)
-                }
-                if !didReportOutcome {
-                    onCompletion?(false)
-                }
-            }
-
-            // The superseded save's detached write cannot be interrupted;
-            // wait for it so two quick saves to the same URL cannot land
-            // with the older content last.
-            await previousSaveTask?.value
-            // If another save superseded us while we were only queued, no
-            // bytes from this snapshot have started moving yet. Skip it so a
-            // burst of saves coalesces to the in-flight and latest versions.
-            guard !Task.isCancelled else {
-                return
-            }
-
-            let expectedRevision: FileIO.Revision?
-            if isCurrentDocument {
-                // A superseded save still writes before this task starts. Use
-                // the revision it produced, rather than the revision captured
-                // before waiting, or our own write looks externally modified.
-                guard let revision = self?.fileRevision else {
-                    guard !Task.isCancelled else {
-                        return
-                    }
-                    NSAlert(
-                        error: FileIO.ConditionalWriteError.revisionUnavailable(url)
-                    ).runModal()
-                    didReportOutcome = true
-                    onCompletion?(false)
-                    return
-                }
-                expectedRevision = revision
-            } else {
-                expectedRevision = nil
-            }
-
-            let savedRevision: FileIO.Revision
-            do {
-                if let expectedRevision {
-                    savedRevision = try await FileIO.writeUTF8(
-                        savedText,
-                        to: url,
-                        ifUnmodifiedSince: expectedRevision
-                    )
-                } else if let claimedDocumentURL = claim?.documentURL {
-                    savedRevision = try await FileIO.writeUTF8(
-                        savedText,
-                        to: url,
-                        resolvingTo: claimedDocumentURL
-                    )
-                } else {
-                    savedRevision = try await FileIO.writeUTF8(savedText, to: url)
-                }
-            } catch FileIO.ConditionalWriteError.modifiedExternally
-                where isCurrentDocument
-            {
-                // A superseded save must not alert: the newer save owns
-                // the outcome the user will see.
-                guard !Task.isCancelled else {
-                    return
-                }
-
-                let resolution: FileConflictResolution
-                if let self,
-                   !hasUnsavedFileChanges,
-                   textEquals(savedText)
-                {
-                    // Save raced the presenter's notification. There is no
-                    // local work to resolve, so adopt the disk version just
-                    // as the normal clean-document reload would.
-                    resolution = .discardLocalChanges
-                } else {
-                    resolution = self?.fileConflictResolution(for: url) ?? .cancel
-                }
-
-                switch resolution {
-                case .discardLocalChanges:
-                    do {
-                        let snapshot = try await FileIO.readUTF8Snapshot(
-                            from: url,
-                            resolvingTo: previousDocumentURL ?? url
-                        )
-                        guard !Task.isCancelled,
-                              let self,
-                              textEquals(savedText)
-                        else {
-                            return
-                        }
-
-                        applyExternalSnapshot(snapshot)
-                        didReportOutcome = true
-                        onCompletion?(true)
-                    } catch {
-                        guard !Task.isCancelled else {
-                            return
-                        }
-                        NSAlert(error: error).runModal()
-                        didReportOutcome = true
-                        onCompletion?(false)
-                    }
-                    return
-                case .overwriteFile:
-                    do {
-                        savedRevision = try await FileIO.writeUTF8(
-                            savedText,
-                            to: url,
-                            resolvingTo: previousDocumentURL ?? url
-                        )
-                    } catch {
-                        guard !Task.isCancelled else {
-                            return
-                        }
-                        NSAlert(error: error).runModal()
-                        didReportOutcome = true
-                        onCompletion?(false)
-                        return
-                    }
-                case .cancel:
-                    didReportOutcome = true
-                    onCompletion?(false)
-                    return
-                }
-            } catch {
-                // A superseded save must not alert: the newer save owns
-                // the outcome the user will see.
-                guard !Task.isCancelled else {
-                    return
-                }
-
+            if !(error is CancellationError) {
                 NSAlert(error: error).runModal()
-                didReportOutcome = true
-                onCompletion?(false)
-                return
             }
-
-            // A newer save may have cancelled this task but is deliberately
-            // waiting for its uninterruptible write. Publish the resulting
-            // baseline so that newer conditional write can continue safely.
-            if isCurrentDocument {
-                self?.fileRevision = savedRevision
-            }
-
-            guard !Task.isCancelled else {
-                return
-            }
-
-            guard let self else {
-                return
-            }
-
-            if let claim {
-                finishSaveDestination?(claim, previousDocumentURL, true)
-                didFinishClaim = true
-            }
-            fileURL = url
-            fileRevision = savedRevision
-            editorView.documentURL = url
-            observeFileChanges()
-            let didSaveCurrentText = textEquals(savedText)
-            hasUnsavedFileChanges = !didSaveCurrentText
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
-            onAutosaveNeeded()
-            didReportOutcome = true
-            onCompletion?(didSaveCurrentText)
+            onCompletion?(false)
+            return Task { false }
         }
-    }
-
-    private func observeFileChanges() {
-        fileReloadTask?.cancel()
-        filePresenter?.invalidate()
-        filePresenter = fileURL.map { url in
-            DocumentFilePresenter(
-                url: FileIO.canonicalDocumentURL(for: url)
-            ) { [weak self] in
-                self?.scheduleExternalFileReload()
+        return Task { [weak self] in
+            let didSave: Bool
+            do {
+                let result = try await withTaskCancellationHandler {
+                    try await fileTask.value
+                } onCancel: {
+                    fileTask.cancel()
+                }
+                // A new edit can land between the transaction finishing and
+                // this continuation. Never approve closing over that edit.
+                didSave = result && !fileTask.isCancelled
+                    && (self.map { !$0.hasUnsavedFileChanges } ?? false)
+            } catch {
+                if !(error is CancellationError), !fileTask.isCancelled, self != nil {
+                    NSAlert(error: error).runModal()
+                }
+                didSave = false
             }
-        }
-    }
-
-    private func scheduleExternalFileReload() {
-        fileReloadTask?.cancel()
-        fileReloadTask = Task { [weak self] in
-            // Coalesce the attribute and content notifications produced by
-            // atomic replacement into one read of the final file.
-            try? await Task.sleep(for: .milliseconds(50))
-            guard !Task.isCancelled else {
-                return
-            }
-            await self?.reloadFromDiskIfClean()
+            onCompletion?(didSave)
+            return didSave
         }
     }
 
     private func applyExternalSnapshot(_ snapshot: FileIO.UTF8Snapshot) {
         documentAnalysisTask?.cancel()
         replaceTextBuffer(with: snapshot.text)
-        fileRevision = snapshot.revision
         hasUnsavedFileChanges = false
         editorView.setString(snapshot.text, clearsUndo: true)
         stylingController.scheduleParse(text: snapshot.text)

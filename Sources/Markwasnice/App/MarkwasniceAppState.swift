@@ -896,7 +896,7 @@ final class MarkwasniceAppState: ObservableObject {
             }
             self?.objectWillChange.send()
         }
-        session.reserveSaveDestination = { [weak self] url in
+        session.fileState.reserveSaveDestination = { [weak self] url in
             guard let self else {
                 throw CancellationError()
             }
@@ -905,7 +905,7 @@ final class MarkwasniceAppState: ObservableObject {
                 for: sessionID
             )
         }
-        session.finishSaveDestination = {
+        session.fileState.finishSaveDestination = {
             [weak self] claim, previousDocumentURL, succeeded in
             guard let self else {
                 return

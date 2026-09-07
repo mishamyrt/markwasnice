@@ -139,16 +139,16 @@ struct DocumentOpenRegistryTests {
         let owner = state.newSession()
         let contender = state.newSession()
         let destination = directory.appendingPathComponent("document.md")
-        let reservedClaim = try owner.reserveSaveDestination?(destination)
+        let reservedClaim = try owner.fileState.reserveSaveDestination?(destination)
         let claim = try #require(reservedClaim)
-        owner.finishSaveDestination?(claim, nil, true)
+        owner.fileState.finishSaveDestination?(claim, nil, true)
 
         #expect(throws: DocumentRegistry.ClaimError.self) {
-            try contender.reserveSaveDestination?(destination)
+            try contender.fileState.reserveSaveDestination?(destination)
         }
 
         state.remove(owner)
-        let releasedClaim = try contender.reserveSaveDestination?(destination)
+        let releasedClaim = try contender.fileState.reserveSaveDestination?(destination)
         #expect(releasedClaim != nil)
     }
 
@@ -268,17 +268,14 @@ struct DocumentOpenRegistryTests {
 
         session.editorView.setString("first save", clearsUndo: false)
         session.markdownEditorViewDidChangeText(session.editorView)
-        session.save()
+        let firstSave = session.save(to: fileURL)
         session.editorView.setString("second save", clearsUndo: false)
         session.markdownEditorViewDidChangeText(session.editorView)
-        session.save()
+        let secondSave = session.save(to: fileURL)
 
-        for _ in 0 ..< 200 {
-            if try String(contentsOf: fileURL, encoding: .utf8) == "second save" {
-                return
-            }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        Issue.record("the latest save did not reach the file")
+        #expect(await firstSave.value == false)
+        #expect(await secondSave.value)
+        #expect(try String(contentsOf: fileURL, encoding: .utf8) == "second save")
+        #expect(!session.shellState.isEdited)
     }
 }
