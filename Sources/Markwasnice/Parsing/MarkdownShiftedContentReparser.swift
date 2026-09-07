@@ -44,6 +44,14 @@ enum MarkdownShiftedContentReparser {
         let regions = Dictionary(uniqueKeysWithValues: scanner.regions.map {
             ($0.originalRange, $0)
         })
+        // Scan once per source, not once per inline text node: bridging a
+        // large UTF-8 string to NSString for every node is quadratic work.
+        let checkboxes = Dictionary(uniqueKeysWithValues:
+            MarkdownTaskCheckboxScanner.spans(in: source, excluding: []).map {
+                let checked = string.substring(with: $0.range).lowercased() == "[x]"
+                return ($0.range.location, checked ? "☑" : "☐")
+            }
+        )
 
         func rewrite(_ block: BlockMarkup) -> [BlockMarkup] {
             if let range = block.range.flatMap(sourceMap.nsRange(for:)),
@@ -58,19 +66,23 @@ enum MarkdownShiftedContentReparser {
                 return [block]
             }
             let children: [Markup] = block.children.flatMap { child -> [Markup] in
-                if block is Paragraph, let text = child as? Text {
-                    return [MarkdownTaskCheckboxScanner.renderedText(
-                        text,
-                        source: source,
-                        sourceMap: sourceMap
-                    )]
+                if block is Paragraph, let text = child as? Text,
+                   let range = text.range.flatMap(sourceMap.nsRange(for:)),
+                   let symbol = checkboxes[range.location],
+                   text.string.hasPrefix("[")
+                {
+                    return [Text(symbol + text.string.dropFirst(3))]
                 }
                 guard let child = child as? BlockMarkup else {
                     return [child]
                 }
                 return rewrite(child).map { $0 as Markup }
             }
-            return [block.withUncheckedChildren(children) as! BlockMarkup]
+            // Replacing an attached node also copies its ancestors. The new
+            // document only needs this subtree, so avoid copying the root for
+            // every paragraph in a large document.
+            return [block.detachedFromParent
+                .withUncheckedChildren(children) as! BlockMarkup]
         }
 
         return Document(document.blockChildren.flatMap(rewrite))

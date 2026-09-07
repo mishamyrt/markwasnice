@@ -306,7 +306,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         let boundedLocation = min(selectedRange.location, (string as NSString).length)
         textView.setSelectedRange(NSRange(location: boundedLocation, length: 0))
         restyleAllText()
-        previewPresenter.refreshIfActive()
+        previewPresenter.invalidateContent()
     }
 
     func restoreSelectedRange(_ range: NSRange?) {
@@ -518,8 +518,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             container: self,
             editorScrollView: scrollView
         )
-        presenter.renderContent = { [weak self] preview in
-            self?.renderPreviewContent(into: preview)
+        presenter.source = { [weak self] in
+            self?.textView.string ?? ""
+        }
+        presenter.theme = { [weak self] in
+            MarkdownPreviewRenderer.Theme(
+                baseFontSize: self?.styleApplier.basePointSize ?? 20,
+                colors: self?.colors ?? EditorThemeColors.default.light
+            )
         }
         presenter.editorScrollFraction = { [weak self] in
             self?.editorScrollFraction ?? 0
@@ -545,14 +551,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             self?.updateScrollerInsets()
         }
         return presenter
-    }
-
-    private func renderPreviewContent(into preview: MarkdownPreviewView) {
-        let renderer = MarkdownPreviewRenderer(theme: .init(
-            baseFontSize: styleApplier.basePointSize,
-            colors: colors
-        ))
-        preview.setContent(renderer.render(textView.string), colors: colors)
     }
 
     private func pushPreviewInsets() {
@@ -1004,6 +1002,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         focusModeController.updateForSelection()
         textChangeGeneration += 1
+        previewPresenter.invalidateContent()
         let edits = pendingTextEdits
         pendingTextEdits = []
         delegate?.markdownEditorView(

@@ -1,5 +1,4 @@
 import Testing
-
 @testable import Markwasnice
 
 @MainActor
@@ -16,7 +15,7 @@ struct ChromeVisibilityTests {
             text: "",
             fileURL: nil,
             isEdited: false,
-            settings: Self.settings,
+            settings: Self.settings
         ) {}
     }
 
@@ -62,7 +61,7 @@ struct ChromeVisibilityTests {
         #expect(!state.isStatusBarVisible)
     }
 
-    @Test func selectionDoesNotChangeStatusBarVisibility() {
+    @Test func selectionDoesNotChangeStatusBarVisibility() async {
         let session = makeSession()
         let state = session.shellState
 
@@ -72,6 +71,8 @@ struct ChromeVisibilityTests {
             didChangeSelectionText: "Two selected sentences. Really!"
         )
 
+        #expect(!state.isStatusBarVisible)
+        await session.waitForSelectionStatistics()
         #expect(!state.isStatusBarVisible)
         #expect(state.characterCountText == "31 characters")
         #expect(state.wordCountText == "4 words")

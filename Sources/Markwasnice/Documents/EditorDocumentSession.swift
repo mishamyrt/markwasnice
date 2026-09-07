@@ -47,6 +47,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private let stylingController: MarkdownStylingController
     private let onAutosaveNeeded: () -> Void
     private var statisticsTask: Task<Void, Never>?
+    private var selectionStatisticsTask: Task<Void, Never>?
     private var documentAnalysisTask: Task<Void, Never>?
     private var isCloseApproved = false
     private var isPromptVisible = false
@@ -183,6 +184,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     deinit {
         documentAnalysisTask?.cancel()
         statisticsTask?.cancel()
+        selectionStatisticsTask?.cancel()
         searchTask?.cancel()
         filePresenter?.invalidate()
     }
@@ -283,6 +285,8 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
     private func didChangeTextBuffer() {
         textGeneration &+= 1
         cachedTextSnapshot = nil
+        selectionStatisticsTask?.cancel()
+        shellState.selectionStatistics = nil
     }
 
     private func textEquals(_ text: String) -> Bool {
@@ -293,8 +297,30 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         _: MarkdownEditorView,
         didChangeSelectionText selectedText: String?
     ) {
-        shellState.selectionStatistics = selectedText.map(Self.statistics(in:))
+        selectionStatisticsTask?.cancel()
+        shellState.selectionStatistics = nil
         onAutosaveNeeded()
+        guard let selectedText else {
+            return
+        }
+        let generation = textGeneration
+        selectionStatisticsTask = Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else {
+                return
+            }
+            let statistics = Self.statistics(in: selectedText)
+            await MainActor.run { [weak self] in
+                guard !Task.isCancelled, let self, textGeneration == generation else {
+                    return
+                }
+                shellState.selectionStatistics = statistics
+            }
+        }
+    }
+
+    func waitForSelectionStatistics() async {
+        await selectionStatisticsTask?.value
     }
 
     func markdownEditorViewDidScroll(_: MarkdownEditorView) {

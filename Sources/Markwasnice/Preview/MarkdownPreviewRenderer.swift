@@ -6,7 +6,7 @@ import Markdown
 /// replaced with typographic styling.
 @MainActor
 struct MarkdownPreviewRenderer {
-    struct Theme {
+    struct Theme: Equatable {
         var baseFontSize: CGFloat
         var colors: EditorThemeColors.Variant
     }
@@ -27,6 +27,31 @@ struct MarkdownPreviewRenderer {
             result.append(renderBlock(block, indent: 0, isQuoted: false))
         }
         return result
+    }
+
+    /// Construct a fresh tree off-main and transfer its ownership to the
+    /// presenter. The Markdown tree is never shared between executors.
+    @concurrent
+    static func prepare(_ source: String) async -> sending Document {
+        MarkdownDocument.parse(source)
+    }
+
+    /// AppKit font/attribute work stays on MainActor, with a frame-sized
+    /// budget between blocks so a long preview doesn't monopolize input.
+    func renderCooperatively(_ document: Document) async -> NSAttributedString? {
+        let result = NSMutableAttributedString()
+        var deadline = ContinuousClock.now + .milliseconds(8)
+        for block in document.children {
+            guard !Task.isCancelled else {
+                return nil
+            }
+            result.append(renderBlock(block, indent: 0, isQuoted: false))
+            if ContinuousClock.now >= deadline {
+                await Task.yield()
+                deadline = .now + .milliseconds(8)
+            }
+        }
+        return Task.isCancelled ? nil : result
     }
 
     // MARK: Blocks

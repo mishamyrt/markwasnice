@@ -1,4 +1,5 @@
 import AppKit
+import Markdown
 
 /// Owns the preview overlay for the editor: lazy view creation, the
 /// fade/scale transition between the editor scroll view and the preview,
@@ -9,7 +10,8 @@ import AppKit
 final class MarkdownPreviewPresenter {
     private(set) var isActive = false
 
-    var renderContent: ((MarkdownPreviewView) -> Void)?
+    var source: (() -> String)?
+    var theme: (() -> MarkdownPreviewRenderer.Theme)?
     var editorScrollFraction: (() -> CGFloat)?
     var focusEditor: (() -> Void)?
     var onScroll: (() -> Void)?
@@ -20,6 +22,13 @@ final class MarkdownPreviewPresenter {
     private weak var container: NSView?
     private weak var editorScrollView: NSScrollView?
     private var previewView: MarkdownPreviewView?
+    private var renderTask: Task<Void, Never>?
+    private var contentGeneration = 0
+    private var document: Document?
+    private var renderedTheme: MarkdownPreviewRenderer.Theme?
+    private(set) var renderedContent: NSAttributedString?
+    private var displayedContent: NSAttributedString?
+    private var needsReveal = false
 
     private static let transitionDuration: TimeInterval = 0.22
     private static let transitionScale: CGFloat = 1.02
@@ -27,6 +36,23 @@ final class MarkdownPreviewPresenter {
     init(container: NSView, editorScrollView: NSScrollView) {
         self.container = container
         self.editorScrollView = editorScrollView
+    }
+
+    deinit {
+        renderTask?.cancel()
+    }
+
+    func invalidateContent() {
+        contentGeneration &+= 1
+        renderTask?.cancel()
+        document = nil
+        renderedContent = nil
+        renderedTheme = nil
+        refreshIfActive()
+    }
+
+    func waitForRendering() async {
+        await renderTask?.value
     }
 
     func setActive(_ isActive: Bool) {
@@ -47,13 +73,10 @@ final class MarkdownPreviewPresenter {
     }
 
     func refreshIfActive() {
-        guard isActive, let previewView, !previewView.isHidden else {
+        guard isActive, let previewView else {
             return
         }
-
-        let fraction = previewView.scrollFraction
-        renderContent?(previewView)
-        previewView.scrollToFraction(fraction)
+        updateContent(in: previewView)
     }
 
     func setInsets(top: CGFloat, bottom: CGFloat, horizontal: CGFloat) {
@@ -65,14 +88,69 @@ final class MarkdownPreviewPresenter {
     }
 
     private func show() {
+        guard editorScrollView != nil else {
+            return
+        }
+        let preview = ensurePreviewView()
+        needsReveal = true
+        updateContent(in: preview)
+    }
+
+    private func updateContent(in preview: MarkdownPreviewView) {
+        renderTask?.cancel()
+        let generation = contentGeneration
+        renderTask = Task { [weak self] in
+            // Coalesce theme and font-size changes during live resize.
+            try? await Task.sleep(for: .milliseconds(30))
+            guard !Task.isCancelled, let self, isActive else {
+                return
+            }
+            if document == nil {
+                let parsed = await MarkdownPreviewRenderer.prepare(source?() ?? "")
+                guard generation == contentGeneration else {
+                    return
+                }
+                document = parsed
+            }
+            guard !Task.isCancelled, let document, let theme = theme?() else {
+                return
+            }
+            if renderedContent == nil || renderedTheme != theme {
+                guard let content = await MarkdownPreviewRenderer(theme: theme)
+                    .renderCooperatively(document),
+                    !Task.isCancelled, generation == contentGeneration
+                else {
+                    return
+                }
+                renderedContent = content
+                renderedTheme = theme
+            }
+            guard isActive, !Task.isCancelled, let renderedContent else {
+                return
+            }
+            let fraction = needsReveal
+                ? (editorScrollFraction?() ?? 0)
+                : preview.scrollFraction
+            if displayedContent !== renderedContent {
+                preview.setContent(renderedContent, colors: theme.colors)
+                displayedContent = renderedContent
+            }
+            guard await preview.prepareLayout(), generation == contentGeneration else {
+                return
+            }
+            preview.scrollToFraction(fraction)
+            if needsReveal {
+                needsReveal = false
+                reveal(preview)
+            }
+        }
+    }
+
+    private func reveal(_ preview: MarkdownPreviewView) {
         guard let editorScrollView else {
             return
         }
-
-        let preview = ensurePreviewView()
-        renderContent?(preview)
         preview.isHidden = false
-        preview.scrollToFraction(editorScrollFraction?() ?? 0)
         preview.focus()
 
         preview.alphaValue = 0
@@ -86,6 +164,8 @@ final class MarkdownPreviewPresenter {
     }
 
     private func hide() {
+        needsReveal = false
+        renderTask?.cancel()
         focusEditor?()
         guard let preview = previewView, !preview.isHidden else {
             editorScrollView?.alphaValue = 1

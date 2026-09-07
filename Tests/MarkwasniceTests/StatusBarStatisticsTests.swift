@@ -3,6 +3,31 @@ import Testing
 
 @MainActor
 struct StatusBarStatisticsTests {
+    @Test func selectionStatisticsApplyOnlyToTheLatestSelection() async {
+        let session = EditorDocumentSession(
+            text: "",
+            fileURL: nil,
+            isEdited: false,
+            settings: EditorSettings(
+                textSizeScale: 1, maxTextColumns: 64,
+                tabInsertionMode: .spaces, tabWidth: 4
+            )
+        ) {}
+        session.markdownEditorView(
+            session.editorView,
+            didChangeSelectionText: String(repeating: "Long selection. ", count: 50000)
+        )
+        #expect(session.shellState.selectionStatistics == nil)
+        session.markdownEditorView(session.editorView, didChangeSelectionText: "New.")
+        await session.waitForSelectionStatistics()
+        #expect(session.shellState.selectionStatistics?.characterCount == 4)
+        #expect(session.shellState.selectionStatistics?.wordCount == 1)
+        session.markdownEditorView(session.editorView, didChangeSelectionText: nil)
+        #expect(session.shellState.selectionStatistics == nil)
+        await session.waitForSelectionStatistics()
+        #expect(session.shellState.selectionStatistics == nil)
+    }
+
     @Test func formatsAllStatusBarMetrics() {
         let state = EditorShellState()
         state.characterCount = 512

@@ -73,6 +73,24 @@ final class MarkdownPreviewView: NSView {
         ]
     }
 
+    /// Warm contiguous TextKit layout in bounded ranges before scroll sync
+    /// asks for the whole document's exact height.
+    func prepareLayout() async -> Bool {
+        layoutSubtreeIfNeeded()
+        let length = previewTextStorage.length
+        for location in stride(from: 0, to: length, by: 12000) {
+            guard !Task.isCancelled else {
+                return false
+            }
+            previewLayoutManager.ensureLayout(forCharacterRange: NSRange(
+                location: location,
+                length: min(12000, length - location)
+            ))
+            await Task.yield()
+        }
+        return !Task.isCancelled
+    }
+
     func setInsets(top: CGFloat, bottom: CGFloat, horizontal: CGFloat) {
         let contentInsets = NSEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
         // With automaticallyAdjustsContentInsets off, the scroll view's own
