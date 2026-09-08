@@ -1320,6 +1320,13 @@ struct MarkwasniceCommands: Commands {
         }
 
         CommandGroup(after: .textEditing) {
+            Button("Select All") {
+                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+            }
+            .keyboardShortcut("a")
+
+            Divider()
+
             Button("Find") {
                 appState.showSearch()
             }
