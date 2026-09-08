@@ -216,8 +216,9 @@ enum MarkdownShiftedContentReparser {
         let sourceMap = SourceMap(text: subSource)
         // Zero-length spans survive resolution (the mapping below drops
         // them), matching the top-level parse pipeline.
-        let subSpans = sourceMap.resolvedSpans(
-            from: collector.spans,
+        let subSpans = collector.resolvedSpans(
+            in: subSource,
+            sourceMap: sourceMap,
             droppingZeroLength: false
         )
 

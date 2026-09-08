@@ -1336,6 +1336,7 @@ struct MarkwasniceCommands: Commands {
         CommandGroup(after: .textFormatting) {
             markdownCommand("Bold", .bold, keyEquivalent: "b")
             markdownCommand("Italic", .italic, keyEquivalent: "i")
+            markdownCommand("Comment", .comment, keyEquivalent: "/")
             markdownCommand(
                 "Strikethrough", .strikethrough,
                 keyEquivalent: "u", modifiers: [.command, .option]

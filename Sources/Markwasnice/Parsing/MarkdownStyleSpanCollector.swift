@@ -1,7 +1,65 @@
+import Foundation
 import Markdown
 
 struct MarkdownStyleSpanCollector: MarkupWalker {
     private(set) var spans: [MarkdownStyleSpan] = []
+    private var htmlRanges: [(range: SourceRange, lineCount: Int?)] = []
+
+    mutating func visitHTMLBlock(_ html: HTMLBlock) {
+        if let range = html.range {
+            // cmark can report the end before the closing delimiter. The
+            // literal's line count still describes the complete HTML block.
+            let lineCount = html.rawHTML.split(
+                separator: "\n",
+                omittingEmptySubsequences: false
+            ).count
+                - (html.rawHTML.hasSuffix("\n") ? 1 : 0)
+            htmlRanges.append((range, lineCount))
+        }
+    }
+
+    mutating func visitInlineHTML(_ html: InlineHTML) {
+        if let range = html.range {
+            htmlRanges.append((range, nil))
+        }
+    }
+
+    func resolvedSpans(
+        in source: String,
+        sourceMap: SourceMap,
+        droppingZeroLength: Bool
+    ) -> [ResolvedMarkdownStyleSpan] {
+        var result = sourceMap.resolvedSpans(
+            from: spans,
+            droppingZeroLength: droppingZeroLength
+        )
+        let string = source as NSString
+        let lines = htmlRanges.isEmpty ? [] : sourceMap.lineRanges()
+        for (htmlRange, lineCount) in htmlRanges {
+            guard var range = sourceMap.nsRange(for: htmlRange) else {
+                continue
+            }
+            if let lineCount {
+                let lastLine = min(
+                    htmlRange.lowerBound.line + lineCount - 2,
+                    lines.count - 1
+                )
+                range.length = NSMaxRange(lines[lastLine]) - range.location
+            }
+            result.append(contentsOf: MarkdownHTMLComment.ranges(
+                in: string.substring(with: range)
+            ).map {
+                ResolvedMarkdownStyleSpan(
+                    range: NSRange(
+                        location: range.location + $0.location,
+                        length: $0.length
+                    ),
+                    kind: .htmlComment
+                )
+            })
+        }
+        return result
+    }
 
     mutating func visitHeading(_ heading: Heading) {
         add(.heading, for: heading)

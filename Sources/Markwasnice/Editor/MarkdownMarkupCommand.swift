@@ -20,6 +20,7 @@ enum MarkdownMarkupCommand: Int {
     case heading4
     case heading5
     case heading6
+    case comment
 
     /// The text arrives as an NSString: the whole edit is UTF-16 range math,
     /// and the editor hands over the text storage's backing string instead of
@@ -33,6 +34,8 @@ enum MarkdownMarkupCommand: Int {
         }
 
         switch self {
+        case .comment:
+            return Self.commentEdit(in: nsString, selectedRange: selectedRange)
         case .bold:
             return Self.inlinePairEdit(
                 in: nsString, selectedRange: selectedRange,
@@ -79,6 +82,83 @@ enum MarkdownMarkupCommand: Int {
         case .heading6:
             return Self.headingEdit(in: nsString, level: 6, selectedRange: selectedRange)
         }
+    }
+
+    private static func commentEdit(
+        in string: NSString,
+        selectedRange: NSRange
+    ) -> MarkdownMarkupEdit {
+        var contentSelection = selectedRange
+        if selectedRange.length > 0 {
+            let first = string.rangeOfCharacter(
+                from: .whitespacesAndNewlines.inverted, options: [], range: selectedRange
+            )
+            let last = string.rangeOfCharacter(
+                from: .whitespacesAndNewlines.inverted, options: .backwards,
+                range: selectedRange
+            )
+            if first.location != NSNotFound {
+                contentSelection = NSRange(
+                    location: first.location,
+                    length: NSMaxRange(last) - first.location
+                )
+            }
+        }
+        // The same selection (or a caret anywhere inside it) toggles the
+        // enclosing comment off, including comments written without spaces.
+        if let comment = MarkdownHTMLComment.ranges(in: string as String).first(where: {
+            $0.location <= contentSelection
+                .location && NSMaxRange(contentSelection) <= NSMaxRange($0)
+        }), string.substring(with: comment).hasSuffix("-->") {
+            var content = NSRange(
+                location: comment.location + 4,
+                length: comment.length - 7
+            )
+            if content.length >= 2,
+               string.character(at: content.location) == 0x20,
+               string.character(at: NSMaxRange(content) - 1) == 0x20
+            {
+                content.location += 1
+                content.length -= 2
+            }
+            let start = min(
+                max(selectedRange.location, content.location),
+                NSMaxRange(content)
+            )
+            let end = min(
+                max(NSMaxRange(selectedRange), content.location),
+                NSMaxRange(content)
+            )
+            return MarkdownMarkupEdit(
+                replacementRange: comment,
+                replacementString: string.substring(with: content),
+                selectedRange: NSRange(
+                    location: comment.location + start - content.location,
+                    length: end - start
+                )
+            )
+        }
+
+        var range = selectedRange
+        if range.length == 0 {
+            var start = 0
+            var end = 0
+            string.getLineStart(&start, end: nil, contentsEnd: &end, for: range)
+            range = horizontallyTrimmedRange(
+                in: string, range: NSRange(location: start, length: end - start)
+            )
+        }
+        return pairEdit(
+            for: MarkupTarget(
+                range: range,
+                isExplicitSelection: selectedRange.length > 0,
+                cursorLocation: min(
+                    max(selectedRange.location, range.location),
+                    NSMaxRange(range)
+                )
+            ),
+            in: string, opening: "<!-- ", closing: " -->"
+        )
     }
 
     private static func headingEdit(

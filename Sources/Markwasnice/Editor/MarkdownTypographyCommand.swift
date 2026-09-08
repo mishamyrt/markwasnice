@@ -179,7 +179,7 @@ enum MarkdownTypographyCommand {
         var structure: [NSRange] = []
         for span in resolvedSpans {
             switch span.kind {
-            case .codeBlock, .inlineCode:
+            case .codeBlock, .inlineCode, .htmlComment:
                 code.append(span.range)
             case .thematicBreak:
                 structure.append(span.range)

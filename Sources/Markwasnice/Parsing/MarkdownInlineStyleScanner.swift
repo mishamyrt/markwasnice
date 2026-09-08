@@ -47,10 +47,11 @@ enum MarkdownInlineStyleScanner {
         // Unlike the parse pipeline, zero-length spans are dropped right at
         // resolution: the scanner only feeds local restyling, which has no
         // later mapping step to drop them.
-        let resolvedSpans = sourceMap.resolvedSpans(
-            from: collector.spans.filter { !$0.kind.isBlockStyle },
+        let resolvedSpans = collector.resolvedSpans(
+            in: trimmedLine,
+            sourceMap: sourceMap,
             droppingZeroLength: true
-        )
+        ).filter { !$0.kind.isBlockStyle }
 
         return resolvedSpans.compactMap { span in
             let fullRange = NSRange(

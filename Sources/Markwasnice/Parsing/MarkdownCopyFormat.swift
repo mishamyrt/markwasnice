@@ -25,7 +25,7 @@ enum MarkdownCopyFormat {
         private func renderBlocks(
             _ blocks: some Sequence<BlockMarkup>
         ) -> String {
-            blocks.map(renderBlock).joined(separator: "\n\n")
+            blocks.map(renderBlock).filter { !$0.isEmpty }.joined(separator: "\n\n")
         }
 
         private func renderBlock(_ block: BlockMarkup) -> String {
@@ -65,7 +65,8 @@ enum MarkdownCopyFormat {
             case is ThematicBreak:
                 return "—"
             case let html as HTMLBlock:
-                return html.rawHTML.trimmingCharacters(in: .newlines)
+                return MarkdownHTMLComment.removing(from: html.rawHTML)
+                    .trimmingCharacters(in: .newlines)
             default:
                 return block.format()
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -113,7 +114,7 @@ enum MarkdownCopyFormat {
             case is SoftBreak, is LineBreak:
                 return "\n"
             case let html as InlineHTML:
-                return html.rawHTML
+                return MarkdownHTMLComment.removing(from: html.rawHTML)
             default:
                 return inline.format()
             }

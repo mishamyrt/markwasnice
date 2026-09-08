@@ -153,6 +153,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     private var currentStyleSpans: [ResolvedMarkdownStyleSpan] = []
     private var codeInlineDrawRanges: [NSRange] = []
     private var codeBlockDrawRanges: [NSRange] = []
+    private var htmlCommentRanges: [NSRange] = []
     private var searchMatchRanges: [NSRange] = []
     private var selectedSearchMatchIndex: Int?
     private var previousSelectionRange = NSRange(location: 0, length: 0)
@@ -391,6 +392,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     /// not guarantee (see documentOrdered).
     private func setStyleSpans(_ spans: [ResolvedMarkdownStyleSpan]) {
         currentStyleSpans = MarkdownStylingEngine.documentOrdered(spans)
+        htmlCommentRanges = spans.filter { $0.kind == .htmlComment }.map(\.range)
     }
 
     private func applyDirtyStyles(
@@ -1048,6 +1050,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             currentStyleSpans = []
             codeInlineDrawRanges = []
             codeBlockDrawRanges = []
+            htmlCommentRanges = []
             proofreadingPresenter.clearIssues()
             return
         }
@@ -1088,9 +1091,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             sourceLength: textStorage.length
         )
 
-        // Keep the drawn code backgrounds glued to (and growing with) the text
-        // until the next parse arrives.
-        translateCodeBackgroundRangesForEdit(
+        // Keep code backgrounds and comment styles attached to the edited
+        // text until the next parse arrives.
+        translateCachedRangesForEdit(
             editedRange: editedRange,
             changeInLength: changeInLength,
             sourceLength: textStorage.length
@@ -1115,6 +1118,7 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         guard !isLargeEdit else {
             currentStyleSpans = []
+            htmlCommentRanges = []
             proofreadingPresenter.clearIssues()
             updateCodeBackgroundRanges()
             pendingFullStyleRanges = []
@@ -1460,12 +1464,9 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
-    /// Shift/grow the drawn code ranges across an edit, so a code background
-    /// stays put — and expands with the text — while typing inside it, instead
-    /// of vanishing until the next parse arrives. Pending full-style chunks are
-    /// shifted the same way so an interrupted full pass resumes at the right
-    /// offsets.
-    private func translateCodeBackgroundRangesForEdit(
+    /// Keep code decorations and comment styles across edits while the parser
+    /// catches up. Pending full-style chunks move with the text as well.
+    private func translateCachedRangesForEdit(
         editedRange: NSRange,
         changeInLength: Int,
         sourceLength: Int
@@ -1482,6 +1483,38 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
 
         codeInlineDrawRanges = codeInlineDrawRanges.compactMap(adjusted)
         codeBlockDrawRanges = codeBlockDrawRanges.compactMap(adjusted)
+        let string = sourceCharacters
+        htmlCommentRanges = htmlCommentRanges.compactMap { oldRange in
+            guard let range = adjusted(oldRange) else {
+                return nil
+            }
+            guard range.location <= NSMaxRange(editedRange),
+                  NSMaxRange(range) >= editedRange.location
+            else {
+                return range
+            }
+            let comment = string.substring(with: range)
+            guard comment.hasPrefix("<!--"),
+                  let localRange = MarkdownHTMLComment.ranges(in: comment).first
+            else {
+                return nil
+            }
+            return NSRange(location: range.location, length: localRange.length)
+        }
+        // The ordinary span translation drops spans touching an edit. Keep
+        // the validated comments in the shared cache as well, so layout,
+        // search and focus restyles before the next parse retain their style.
+        if !htmlCommentRanges.isEmpty || currentStyleSpans
+            .contains(where: { $0.kind == .htmlComment })
+        {
+            currentStyleSpans = MarkdownStylingEngine.documentOrdered(
+                currentStyleSpans.filter { $0.kind != .htmlComment }
+                    + htmlCommentRanges.map { ResolvedMarkdownStyleSpan(
+                        range: $0,
+                        kind: .htmlComment
+                    ) }
+            )
+        }
         pendingFullStyleRanges = pendingFullStyleRanges.compactMap(adjusted)
         pushCodeBackgroundRanges()
     }
@@ -1978,6 +2011,17 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
                 kind: span.kind
             )
         })
+        // A continuation line alone cannot reveal its enclosing comment.
+        let comments = htmlCommentRanges
+            .filter { NSIntersectionRange($0, sourceRange).length > 0 }
+            .map { ResolvedMarkdownStyleSpan(range: $0, kind: .htmlComment) }
+        absoluteSpans.removeAll { span in
+            // Block spans include the line's newline, which can be outside
+            // the comment on its closing line. It is the marker's location
+            // that decides whether Markdown styling belongs inside HTML.
+            comments.contains { NSLocationInRange(span.range.location, $0.range) }
+        }
+        absoluteSpans.append(contentsOf: comments)
         return absoluteSpans
     }
 

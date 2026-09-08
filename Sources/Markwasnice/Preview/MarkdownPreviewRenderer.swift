@@ -69,7 +69,10 @@ struct MarkdownPreviewRenderer {
         case let codeBlock as CodeBlock:
             return renderCodeText(codeBlock.code, indent: indent)
         case let htmlBlock as HTMLBlock:
-            return renderCodeText(htmlBlock.rawHTML, indent: indent)
+            let html = MarkdownHTMLComment.removing(from: htmlBlock.rawHTML)
+            return html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? NSAttributedString()
+                : renderCodeText(html, indent: indent)
         case let blockQuote as BlockQuote:
             return renderBlockQuote(blockQuote, indent: indent)
         case let list as UnorderedList:
@@ -581,7 +584,7 @@ struct MarkdownPreviewRenderer {
             var context = context
             context.isCode = true
             return NSAttributedString(
-                string: html.rawHTML,
+                string: MarkdownHTMLComment.removing(from: html.rawHTML),
                 attributes: attributes(for: context)
             )
         default:

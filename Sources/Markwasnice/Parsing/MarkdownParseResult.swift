@@ -38,6 +38,7 @@ enum MarkdownStyleKind: Equatable, Hashable {
     case heading
     case strong
     case emphasis
+    case htmlComment
     case strikethrough
     case inlineCode
     case codeBlock
@@ -59,7 +60,7 @@ extension MarkdownStyleKind {
         case .frontmatter, .heading, .codeBlock, .blockQuote, .orderedList,
              .unorderedList:
             return true
-        case .strong, .emphasis, .strikethrough, .inlineCode, .link, .image,
+        case .strong, .emphasis, .htmlComment, .strikethrough, .inlineCode, .link, .image,
              .linkSyntaxPunctuation, .linkDestination, .taskCheckbox,
              .thematicBreak:
             return false

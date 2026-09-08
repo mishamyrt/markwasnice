@@ -20,6 +20,41 @@ struct EditorTypingStabilityTests {
 
     // MARK: - Scenarios
 
+    @Test(arguments: ["", "\n\nAfter"])
+    func typingOnCommentClosingLineKeepsWrappedIndent(suffix: String) throws {
+        let source = """
+        <!-- Схлопывание
+        1. Если 2 скважины — метка слева и справа
+        2. Если 3, 1 слева, вторая и третья справа
+        3. Меньше или равно 3 метр, в рисуем на расстоянии в 1_метр -->
+        """ + suffix
+        let harness = EditorHarness(source: source, settings: Self.settings)
+        harness.type("klkdasdfg", at: (source as NSString).range(of: "Ме").upperBound)
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func restylingWhileTypingInsideCommentKeepsItsStyle() throws {
+        let source = "<!-- first\n3. a long commented list item with a wrapped continuation -->\n\nAfter"
+        let harness = EditorHarness(source: source, settings: Self.settings)
+        harness.type("x", at: (source as NSString).range(of: "commented").upperBound)
+        harness.editor.applySettings(Self.settings)
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func typingInsideMultilineCommentKeepsStylingAligned() throws {
+        let source = "<!-- first\n\n# heading\n[x] task\n`code`\n-->\n\nAfter"
+        let harness = EditorHarness(source: source, settings: Self.settings)
+        harness.type("!", at: (source as NSString).range(of: "heading").upperBound)
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
+    @Test func typingAfterCommentDoesNotExtendItsStyle() throws {
+        let source = "<!-- comment -->"
+        let harness = EditorHarness(source: source, settings: Self.settings)
+        harness.type("\nplain", at: source.utf16.count)
+        try harness.assertLocalStateMatchesParsedState()
+    }
+
     @Test func typingInsideNestedImageLinkLabelKeepsStylingAligned() throws {
         let source = """
         Intro line
@@ -471,6 +506,7 @@ private final class EditorHarness {
         var fontName: String
         var fontTraits: UInt
         var firstLineHeadIndent: CGFloat
+        var headIndent: CGFloat
     }
 
     private func attributeSnapshot() -> [CharacterStyle] {
@@ -494,7 +530,8 @@ private final class EditorHarness {
                 underline: underline,
                 fontName: font?.fontName ?? "nil",
                 fontTraits: traits,
-                firstLineHeadIndent: paragraphStyle?.firstLineHeadIndent ?? 0
+                firstLineHeadIndent: paragraphStyle?.firstLineHeadIndent ?? 0,
+                headIndent: paragraphStyle?.headIndent ?? 0
             )
             for _ in 0..<range.length {
                 styles.append(style)

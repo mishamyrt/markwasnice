@@ -148,6 +148,11 @@ final class MarkdownStyleApplier {
             addFontTraits(.boldFontMask, range: range)
         case .emphasis:
             addFontTraits(.italicFontMask, range: range)
+        case .htmlComment:
+            textStorage.addAttributes([
+                .font: LilexFontProvider.italic(size: basePointSize),
+                .foregroundColor: colors.punctuation,
+            ], range: range)
         case .strikethrough:
             // Drawn by MarkdownLayoutManager centered on the x-height.
             textStorage.addAttribute(

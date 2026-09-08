@@ -145,7 +145,7 @@ final class ProofreadingService {
     ) -> [NSRange] {
         spans.compactMap { span in
             switch span.kind {
-            case .codeBlock, .inlineCode, .frontmatter, .linkDestination:
+            case .codeBlock, .inlineCode, .htmlComment, .frontmatter, .linkDestination:
                 span.range
             default:
                 nil

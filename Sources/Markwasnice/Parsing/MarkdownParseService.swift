@@ -96,8 +96,9 @@ final class MarkdownParseService {
             return nil
         }
 
-        let resolvedSpans = sourceMap.resolvedSpans(
-            from: collector.spans,
+        let resolvedSpans = collector.resolvedSpans(
+            in: text,
+            sourceMap: sourceMap,
             droppingZeroLength: false
         )
 
@@ -116,7 +117,7 @@ final class MarkdownParseService {
         // else there.
         spans.append(contentsOf: MarkdownTaskCheckboxScanner.spans(
             in: text,
-            excluding: spans.filter { $0.kind == .codeBlock }.map(\.range)
+            excluding: spans.filter { $0.kind == .codeBlock || $0.kind == .htmlComment }.map(\.range)
         ))
         if let frontmatterRange = MarkdownFrontmatter.range(in: text) {
             // cmark reads the block as thematic breaks, setext headings and
