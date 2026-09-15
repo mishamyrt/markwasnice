@@ -267,10 +267,10 @@ struct DocumentOpenRegistryTests {
         ) {}
 
         session.editorView.setString("first save", clearsUndo: false)
-        session.markdownEditorViewDidChangeText(session.editorView)
+        session.editorView.textView.didChangeText()
         let firstSave = session.save(to: fileURL)
         session.editorView.setString("second save", clearsUndo: false)
-        session.markdownEditorViewDidChangeText(session.editorView)
+        session.editorView.textView.didChangeText()
         let secondSave = session.save(to: fileURL)
 
         #expect(await firstSave.value == false)

@@ -270,8 +270,8 @@ final class PreferencesWindowController: NSWindowController, NSTextFieldDelegate
         textSizeSlider.numberOfTickMarks = EditorSettings.textSizeScaleTickCount
         textSizeSlider.allowsTickMarkValuesOnly = true
 
-        smallTextSizeLabel.font = LilexFontProvider.regular(size: 11)
-        largeTextSizeLabel.font = LilexFontProvider.regular(size: 18)
+        smallTextSizeLabel.font = BundledFontFamily.lilex.regular(size: 11)
+        largeTextSizeLabel.font = BundledFontFamily.lilex.regular(size: 18)
 
         for option in EditorSettings.maxTextWidthOptions {
             widthPopup.addItem(withTitle: String(option))

@@ -47,6 +47,190 @@ final class MarkdownTextView: NSTextView {
     private var pasteRequestGeneration = 0
     private var contentRevision = 0
     private var selectionRevision = 0
+    private var selectionHeadAtStart = false
+
+    private var pendingAnimatedSelectionRevision: Int?
+    private var insertionPointContentRevision = 0
+    private var insertionPointRect: NSRect?
+    private var insertionPointUpdatePending = false
+    private static let insertionPointAnimationDuration: TimeInterval = 0.03
+    private var insertionPointDisplayLink: CADisplayLink?
+    private var insertionPointAnimation: (from: NSRect, startTime: TimeInterval)?
+
+    var isInsertionPointAnimating: Bool {
+        insertionPointAnimation != nil
+    }
+
+    private lazy var insertionIndicatorContainer: NSView = {
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        addSubview(view)
+        return view
+    }()
+
+    private lazy var insertionIndicator: NSTextInsertionIndicator = {
+        let indicator = NSTextInsertionIndicator(frame: .zero)
+        indicator.displayMode = .hidden
+        indicator.automaticModeOptions.insert(.showWhileTracking)
+        insertionIndicatorContainer.addSubview(indicator)
+        return indicator
+    }()
+
+    override var shouldDrawInsertionPoint: Bool {
+        false
+    }
+
+    override func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) {
+        super.updateInsertionPointStateAndRestartTimer(restartFlag)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        // Caret geometry and view updates must happen outside the render pass.
+        guard !insertionPointUpdatePending else {
+            return
+        }
+        insertionPointUpdatePending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            insertionPointUpdatePending = false
+            updateInsertionPoint()
+        }
+    }
+
+    private func updateInsertionPoint() {
+        guard let window, window.isKeyWindow,
+              window.firstResponder === self, isEditable,
+              selectedRanges.count == 1
+        else {
+            resetInsertionPointAnimation()
+            return
+        }
+
+        // The legacy drawInsertionPoint hook is not called on recent macOS.
+        // Ask text input for the laid-out caret rect, including bidi and IME.
+        updateInsertionIndicator(
+            in: currentInsertionPointRect(in: window),
+            color: insertionPointColor
+        )
+    }
+
+    private func currentInsertionPointRect(in window: NSWindow) -> NSRect {
+        let selection = selectedRange()
+        let location = selectionHeadAtStart
+            ? selection.location : NSMaxRange(selection)
+        let screenRect = firstRect(
+            forCharacterRange: NSRange(location: location, length: 0),
+            actualRange: nil
+        )
+        var rect = convert(window.convertFromScreen(screenRect), from: nil)
+        rect.size.width = 2
+        return rect
+    }
+
+    func updateInsertionIndicator(
+        in rect: NSRect,
+        color: NSColor
+    ) {
+        let previousRect = insertionPointRect
+        let shouldAnimate = pendingAnimatedSelectionRevision == selectionRevision
+            || insertionPointContentRevision != contentRevision
+        insertionPointContentRevision = contentRevision
+        pendingAnimatedSelectionRevision = nil
+        insertionPointRect = rect
+        let indicator = insertionIndicator
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        indicator.color = color
+        if indicator.displayMode != .automatic {
+            indicator.displayMode = .automatic
+        }
+        CATransaction.commit()
+
+        guard previousRect != rect else { return }
+
+        if shouldAnimate,
+           previousRect != nil,
+           !hasMarkedText(),
+           !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        {
+            insertionPointAnimation = (
+                insertionIndicatorContainer.frame,
+                CACurrentMediaTime()
+            )
+            if insertionPointDisplayLink == nil {
+                let link = displayLink(
+                    target: self,
+                    selector: #selector(updateInsertionPointAnimation(_:))
+                )
+                link.add(to: .main, forMode: .common)
+                insertionPointDisplayLink = link
+            }
+        } else {
+            stopInsertionPointAnimation()
+            applyInsertionPointFrame(rect)
+        }
+    }
+
+    private func stopInsertionPointAnimation() {
+        insertionPointDisplayLink?.invalidate()
+        insertionPointDisplayLink = nil
+        insertionPointAnimation = nil
+    }
+
+    private func resetInsertionPointAnimation() {
+        stopInsertionPointAnimation()
+        pendingAnimatedSelectionRevision = nil
+        insertionPointRect = nil
+        insertionIndicator.displayMode = .hidden
+    }
+
+    @objc private func updateInsertionPointAnimation(_ link: CADisplayLink) {
+        guard window?.isKeyWindow == true, window?.firstResponder === self else {
+            resetInsertionPointAnimation()
+            return
+        }
+        if insertionPointContentRevision != contentRevision {
+            updateInsertionPoint()
+        }
+        advanceInsertionPointAnimation(at: link.targetTimestamp)
+    }
+
+    func advanceInsertionPointAnimation(at timestamp: TimeInterval) {
+        guard let animation = insertionPointAnimation,
+              let target = insertionPointRect else { return }
+        let elapsed = timestamp - animation.startTime
+        var progress = min(1, max(0, elapsed / Self.insertionPointAnimationDuration))
+        if hasMarkedText() || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            progress = 1
+        }
+        let start = animation.from.origin
+        var rect = target
+        rect.origin.x = start.x + (target.minX - start.x) * progress
+        rect.origin.y = start.y + (target.minY - start.y) * progress
+        if progress == 1 {
+            stopInsertionPointAnimation()
+        }
+        applyInsertionPointFrame(rect)
+    }
+
+    private func applyInsertionPointFrame(_ rect: NSRect) {
+        // Move only the indicator; AppKit owns its blinking and text rendering.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        insertionIndicatorContainer.frame = rect
+        insertionIndicator.frame = insertionIndicatorContainer.bounds
+        CATransaction.commit()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned {
+            resetInsertionPointAnimation()
+        }
+        return resigned
+    }
 
     private static let codeCornerRadius: CGFloat = 3
     private static let codeHorizontalPaddingRatio: CGFloat = 0.02
@@ -724,6 +908,7 @@ final class MarkdownTextView: NSTextView {
     /// keypad Enter (a different character, the same insertNewline command)
     /// gets markdown continuation too.
     override func keyDown(with event: NSEvent) {
+        pendingAnimatedSelectionRevision = nil
         if isFindShortcut(event) {
             commandDelegate?.markdownTextViewShowFind(self)
             return
@@ -734,10 +919,28 @@ final class MarkdownTextView: NSTextView {
             return
         }
 
+        let previousSelectionRevision = selectionRevision
+        let previousContentRevision = contentRevision
         super.keyDown(with: event)
+        switch event.specialKey {
+        case .leftArrow, .rightArrow, .upArrow, .downArrow:
+            if selectionRevision != previousSelectionRevision,
+               contentRevision == previousContentRevision,
+               selectedRanges.count == 1,
+               !hasMarkedText()
+            {
+                // Drawing is deferred, so retain the exact navigation selection.
+                pendingAnimatedSelectionRevision = selectionRevision
+            }
+        default:
+            break
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
+        stopInsertionPointAnimation()
+        insertionPointRect = nil
+        pendingAnimatedSelectionRevision = nil
         super.mouseDown(with: event)
         onMouseDown?()
     }
@@ -879,16 +1082,39 @@ final class MarkdownTextView: NSTextView {
         stillSelecting stillSelectingFlag: Bool
     ) {
         let previousRanges = selectedRanges
+        let previousSelection = selectedRange()
+        let previousAffinity = selectionAffinity
         super.setSelectedRanges(
             ranges,
             affinity: affinity,
             stillSelecting: stillSelectingFlag
         )
-        guard selectedRanges != previousRanges else {
+        guard selectedRanges != previousRanges || selectionAffinity != previousAffinity
+        else {
             return
         }
 
         selectionRevision &+= 1
+        let selection = selectedRange()
+        // AppKit's affinity describes line-wrap placement, not the active edge.
+        // The unchanged endpoint anchors selection; it can switch sides when crossed.
+        if selection != previousSelection,
+           selection.location == previousSelection.location
+           || selection.location == NSMaxRange(previousSelection)
+        {
+            selectionHeadAtStart = false
+        } else if selection != previousSelection,
+                  NSMaxRange(selection) == NSMaxRange(previousSelection)
+                  || NSMaxRange(selection) == previousSelection.location
+        {
+            selectionHeadAtStart = true
+        } else {
+            selectionHeadAtStart = selectionAffinity == .upstream
+        }
+        if selectedRanges.count != 1 {
+            resetInsertionPointAnimation()
+        }
+        needsDisplay = true
         if deferredPasteTask != nil {
             invalidateDeferredPaste()
         }
@@ -994,6 +1220,7 @@ final class MarkdownTextView: NSTextView {
         super.viewWillMove(toWindow: newWindow)
         if newWindow == nil {
             caretScrollAnimator.cancel()
+            resetInsertionPointAnimation()
         }
     }
 

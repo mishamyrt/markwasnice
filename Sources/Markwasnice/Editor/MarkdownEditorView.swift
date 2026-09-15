@@ -8,14 +8,9 @@ struct MarkdownTextEdit: Equatable {
 }
 
 protocol MarkdownEditorViewDelegate: AnyObject {
-    func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView)
     /// A confirmed editor text change. The generation is strictly increasing
     /// for the lifetime of the view, so consumers can trust the notification
     /// without comparing two full-document String snapshots.
-    func markdownEditorView(
-        _ editorView: MarkdownEditorView,
-        didChangeTextAt generation: Int
-    )
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
         didChangeTextBy edits: [MarkdownTextEdit],
@@ -38,30 +33,10 @@ protocol MarkdownEditorViewDelegate: AnyObject {
     )
 }
 
-extension MarkdownEditorViewDelegate {
-    /// Compatibility bridge for delegates that have not adopted generations.
-    func markdownEditorView(
-        _ editorView: MarkdownEditorView,
-        didChangeTextAt _: Int
-    ) {
-        markdownEditorViewDidChangeText(editorView)
-    }
-
-    /// Compatibility bridge for delegates that do not need edit deltas.
-    /// MarkdownEditorView calls only this most specific entry point.
-    func markdownEditorView(
-        _ editorView: MarkdownEditorView,
-        didChangeTextBy _: [MarkdownTextEdit],
-        at generation: Int
-    ) {
-        markdownEditorView(editorView, didChangeTextAt: generation)
-    }
-}
-
 /// Environment-driven kill switches for the styling pipeline, used to bisect
 /// a misbehaving document down to the attribute that causes it. Shared with
-/// MarkdownStyleApplier, which owns the attribute application the last four
-/// flags disable.
+/// MarkdownStyleApplier, which owns the heading, font, kern and paragraph
+/// attributes controlled by these flags.
 enum MarkdownEditorDiagnostics {
     private static let environment = ProcessInfo.processInfo.environment
 
@@ -76,9 +51,6 @@ enum MarkdownEditorDiagnostics {
     static let disableKern = flag("MARKWASNICE_EDITOR_DISABLE_KERN")
     static let disableParagraphStyle = flag(
         "MARKWASNICE_EDITOR_DISABLE_PARAGRAPH_STYLE"
-    )
-    static let disableBackgroundColor = flag(
-        "MARKWASNICE_EDITOR_DISABLE_BACKGROUND_COLOR"
     )
     static let disableVisibleLocalStylingAfterPaste = flag(
         "MARKWASNICE_EDITOR_DISABLE_VISIBLE_LOCAL_AFTER_PASTE"
@@ -839,10 +811,6 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             selectedRange: edit.selectedRange
         )
         textView.scrollRangeToVisible(edit.selectedRange)
-    }
-
-    func wrapSelectionWithQuotes(opening: String, closing: String) {
-        _ = wrapSelection(opening: opening, closing: closing)
     }
 
     func fixTypography(spans: [ResolvedMarkdownStyleSpan]?) {

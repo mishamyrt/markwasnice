@@ -101,25 +101,23 @@ enum MarkdownStylingEngine {
             ))
         }
 
-        let sorted = lineRanges
-            .filter { $0.length > 0 }
-            .sorted { $0.location < $1.location }
-        guard var current = sorted.first else {
-            return []
-        }
+        return mergeRanges(lineRanges)
+    }
 
-        var result: [NSRange] = []
-        for range in sorted.dropFirst() {
-            if range.location <= NSMaxRange(current) {
-                current.length = max(NSMaxRange(current), NSMaxRange(range))
-                    - current.location
+    /// Sorts and merges overlapping or touching ranges, dropping empty ones.
+    static func mergeRanges(_ ranges: [NSRange]) -> [NSRange] {
+        var merged: [NSRange] = []
+        merged.reserveCapacity(ranges.count)
+        for range in ranges.filter({ $0.length > 0 })
+            .sorted(by: { $0.location < $1.location })
+        {
+            if let last = merged.last, range.location <= NSMaxRange(last) {
+                merged[merged.count - 1] = NSUnionRange(last, range)
             } else {
-                result.append(current)
-                current = range
+                merged.append(range)
             }
         }
-        result.append(current)
-        return result
+        return merged
     }
 
     /// The range expanded to whole lines; out-of-bounds input collapses to

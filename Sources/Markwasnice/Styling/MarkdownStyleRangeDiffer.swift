@@ -77,7 +77,7 @@ enum MarkdownStyleRangeDiffer {
             }
         }
 
-        return mergedRanges(dirtyRanges)
+        return MarkdownStylingEngine.mergeRanges(dirtyRanges)
     }
 
     static func sourceChange(
@@ -110,11 +110,7 @@ enum MarkdownStyleRangeDiffer {
                 location: prefixLength,
                 length: currentSuffixLocation - prefixLength
             ),
-            lengthDelta: current.length - previous.length,
-            insertedText: current.substring(with: NSRange(
-                location: prefixLength,
-                length: currentSuffixLocation - prefixLength
-            ))
+            lengthDelta: current.length - previous.length
         )
     }
 
@@ -284,59 +280,15 @@ enum MarkdownStyleRangeDiffer {
 
         return max(0, intersection.length - 1)
     }
-
-    private static func mergedRanges(_ ranges: [NSRange]) -> [NSRange] {
-        let sortedRanges = ranges
-            .filter { $0.length > 0 }
-            .sorted { lhs, rhs in
-                if lhs.location == rhs.location {
-                    return lhs.length < rhs.length
-                }
-
-                return lhs.location < rhs.location
-            }
-        guard var currentRange = sortedRanges.first else {
-            return []
-        }
-
-        var result: [NSRange] = []
-        for range in sortedRanges.dropFirst() {
-            let currentUpperBound = currentRange.location + currentRange.length
-            let rangeUpperBound = range.location + range.length
-            if range.location <= currentUpperBound {
-                currentRange.length = max(currentUpperBound, rangeUpperBound)
-                    - currentRange.location
-            } else {
-                result.append(currentRange)
-                currentRange = range
-            }
-        }
-
-        result.append(currentRange)
-        return result
-    }
 }
 
 struct SourceChange {
     let previousRange: NSRange
     let currentRange: NSRange
     let lengthDelta: Int
-    let insertedText: String
 
     var hasSourceEdits: Bool {
         previousRange.length > 0 || currentRange.length > 0
-    }
-
-    var isInsertion: Bool {
-        previousRange.length == 0 && currentRange.length > 0
-    }
-
-    var isSmallLocalEdit: Bool {
-        max(previousRange.length, currentRange.length) <= 512
-    }
-
-    var insertedTextContainsNewline: Bool {
-        insertedText.contains("\n") || insertedText.contains("\r")
     }
 }
 

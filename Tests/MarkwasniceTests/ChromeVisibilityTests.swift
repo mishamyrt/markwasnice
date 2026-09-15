@@ -56,7 +56,7 @@ struct ChromeVisibilityTests {
         state.onToolbarHoverChanged?(true)
         state.onStatusBarHoverChanged?(true)
         session.editorView.setString("a", clearsUndo: false)
-        session.markdownEditorViewDidChangeText(session.editorView)
+        session.editorView.textView.didChangeText()
         #expect(!state.isToolbarVisible)
         #expect(!state.isStatusBarVisible)
     }

@@ -68,7 +68,7 @@ struct ExternalFileChangesTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let (session, fileURL) = try await makeSession(in: directory)
         session.editorView.setString("local changes", clearsUndo: false)
-        session.markdownEditorViewDidChangeText(session.editorView)
+        session.editorView.textView.didChangeText()
 
         try Data("changed outside".utf8).write(to: fileURL, options: .atomic)
         await session.reloadFromDiskIfClean()
@@ -89,7 +89,7 @@ struct ExternalFileChangesTests {
         let (session, fileURL) = try await makeSession(in: directory)
         session.resolveFileConflict = { _ in .discardLocalChanges }
         session.editorView.setString("local changes", clearsUndo: false)
-        session.markdownEditorViewDidChangeText(session.editorView)
+        session.editorView.textView.didChangeText()
         try Data("changed outside".utf8).write(to: fileURL, options: .atomic)
 
         #expect(await session.save(to: fileURL).value)
@@ -131,7 +131,7 @@ struct ExternalFileChangesTests {
         let (session, fileURL) = try await makeSession(in: directory)
         session.resolveFileConflict = { _ in .overwriteFile }
         session.editorView.setString("local changes", clearsUndo: false)
-        session.markdownEditorViewDidChangeText(session.editorView)
+        session.editorView.textView.didChangeText()
         try Data("changed outside".utf8).write(to: fileURL, options: .atomic)
 
         #expect(await session.save(to: fileURL).value)

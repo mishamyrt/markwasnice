@@ -47,7 +47,7 @@ struct EditorWindowControllerTests {
         let initialSession = try #require(appState.sessions.values.first)
         let initialWindow = try #require(initialSession.editorView.window)
         initialSession.editorView.setString("typed", clearsUndo: false)
-        initialSession.markdownEditorViewDidChangeText(initialSession.editorView)
+        initialSession.editorView.textView.didChangeText()
         try await Task.sleep(for: .milliseconds(150))
         #expect(!initialSession.shellState.isToolbarVisible)
 
@@ -84,9 +84,7 @@ struct EditorWindowControllerTests {
             $0.editorView.window === selectedWindow
         })
         selectedSession.editorView.setString("typed", clearsUndo: false)
-        selectedSession.markdownEditorViewDidChangeText(
-            selectedSession.editorView
-        )
+        selectedSession.editorView.textView.didChangeText()
         try await Task.sleep(for: .milliseconds(150))
 
         selectedSession.shellState.onToolbarHoverChanged?(true)

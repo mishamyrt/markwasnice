@@ -57,11 +57,11 @@ final class MarkdownStyleApplier {
     // MARK: Metrics
 
     var baseFont: NSFont {
-        LilexFontProvider.regular(size: basePointSize)
+        BundledFontFamily.lilex.regular(size: basePointSize)
     }
 
     private var boldFont: NSFont {
-        LilexFontProvider.bold(size: basePointSize)
+        BundledFontFamily.lilex.bold(size: basePointSize)
     }
 
     var basePointSize: CGFloat {
@@ -150,7 +150,7 @@ final class MarkdownStyleApplier {
             addFontTraits(.italicFontMask, range: range)
         case .htmlComment:
             textStorage.addAttributes([
-                .font: LilexFontProvider.italic(size: basePointSize),
+                .font: BundledFontFamily.lilex.italic(size: basePointSize),
                 .foregroundColor: colors.punctuation,
             ], range: range)
         case .strikethrough:
@@ -322,7 +322,7 @@ final class MarkdownStyleApplier {
             let existingTraits = NSFontManager.shared.traits(of: currentFont)
             textStorage.addAttribute(
                 .font,
-                value: LilexFontProvider.font(
+                value: BundledFontFamily.lilex.font(
                     size: currentFont.pointSize,
                     traits: existingTraits.union(traits)
                 ),

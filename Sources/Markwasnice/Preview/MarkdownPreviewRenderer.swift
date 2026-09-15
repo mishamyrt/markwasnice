@@ -181,7 +181,7 @@ struct MarkdownPreviewRenderer {
         )
         let text = code.trimmingCharacters(in: .newlines)
         return NSAttributedString(string: text + "\n", attributes: [
-            .font: LilexFontProvider.regular(size: size),
+            .font: BundledFontFamily.lilex.regular(size: size),
             .foregroundColor: theme.colors.foreground,
             .backgroundColor: theme.colors.codeBackground,
             .paragraphStyle: style,
@@ -251,7 +251,9 @@ struct MarkdownPreviewRenderer {
                 result.append(NSAttributedString(
                     string: marker + "\t",
                     attributes: [
-                        .font: PlexSansFontProvider.regular(size: theme.baseFontSize),
+                        .font: BundledFontFamily.plexSans.regular(
+                            size: theme.baseFontSize
+                        ),
                         .foregroundColor: theme.colors.listMarker,
                         .paragraphStyle: markerStyle,
                     ]
@@ -275,7 +277,7 @@ struct MarkdownPreviewRenderer {
             result.insert(NSAttributedString(
                 string: marker + "\n",
                 attributes: [
-                    .font: PlexSansFontProvider.regular(size: theme.baseFontSize),
+                    .font: BundledFontFamily.plexSans.regular(size: theme.baseFontSize),
                     .foregroundColor: theme.colors.listMarker,
                     .paragraphStyle: markerStyle,
                 ]
@@ -296,7 +298,7 @@ struct MarkdownPreviewRenderer {
         return NSAttributedString(
             string: String(repeating: "─", count: 20) + "\n",
             attributes: [
-                .font: PlexSansFontProvider.regular(size: theme.baseFontSize * 0.8),
+                .font: BundledFontFamily.plexSans.regular(size: theme.baseFontSize * 0.8),
                 .foregroundColor: theme.colors.thematicBreak,
                 .paragraphStyle: style,
             ]
@@ -627,19 +629,19 @@ struct MarkdownPreviewRenderer {
             }
             let size = context.fontSize * Self.codeFontScale
             return traits.isEmpty
-                ? LilexFontProvider.regular(size: size)
-                : LilexFontProvider.font(size: size, traits: traits)
+                ? BundledFontFamily.lilex.regular(size: size)
+                : BundledFontFamily.lilex.font(size: size, traits: traits)
         }
 
         switch (context.bold, context.italic) {
         case (true, true):
-            return PlexSansFontProvider.boldItalic(size: context.fontSize)
+            return BundledFontFamily.plexSans.boldItalic(size: context.fontSize)
         case (true, false):
-            return PlexSansFontProvider.bold(size: context.fontSize)
+            return BundledFontFamily.plexSans.bold(size: context.fontSize)
         case (false, true):
-            return PlexSansFontProvider.italic(size: context.fontSize)
+            return BundledFontFamily.plexSans.italic(size: context.fontSize)
         case (false, false):
-            return PlexSansFontProvider.regular(size: context.fontSize)
+            return BundledFontFamily.plexSans.regular(size: context.fontSize)
         }
     }
 

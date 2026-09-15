@@ -8,8 +8,8 @@ struct MarkdownPreviewRendererTests {
     private let baseFontSize: CGFloat = 20
 
     private func render(_ source: String) -> NSAttributedString {
-        PlexSansFontProvider.registerFonts()
-        LilexFontProvider.registerFonts()
+        BundledFontFamily.plexSans.registerFonts()
+        BundledFontFamily.lilex.registerFonts()
         let renderer = MarkdownPreviewRenderer(theme: .init(
             baseFontSize: baseFontSize,
             colors: EditorThemeColors.default.light

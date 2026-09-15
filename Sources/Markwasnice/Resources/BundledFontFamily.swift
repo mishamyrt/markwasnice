@@ -8,6 +8,22 @@ import CoreText
 /// resolution rules.
 @MainActor
 final class BundledFontFamily {
+    /// The editor's monospaced family, with separate upright and italic files.
+    static let lilex = BundledFontFamily(
+        resourceNames: ["Lilex[wght]", "Lilex-Italic[wght]"],
+        regularFontName: "Lilex",
+        italicFontName: "Lilex Italic",
+        systemFallback: .monospaced
+    )
+
+    /// The preview's proportional family, registered as "IBM Plex Sans Var".
+    static let plexSans = BundledFontFamily(
+        resourceNames: ["IBM-Plex-Sans", "IBM-Plex-Sans-Italic"],
+        regularFontName: "IBM Plex Sans Var",
+        italicFontName: "IBM Plex Sans Var Italic",
+        systemFallback: .proportional
+    )
+
     /// The face the system provides when the bundled files are missing.
     enum SystemFallback {
         case monospaced

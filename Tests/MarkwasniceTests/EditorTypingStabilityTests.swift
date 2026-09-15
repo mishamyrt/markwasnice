@@ -170,7 +170,7 @@ struct EditorTypingStabilityTests {
     }
 
     /// Reproduces the real per-keystroke sequence of the app: after every
-    /// text change `EditorDocumentSession.markdownEditorViewDidChangeText`
+    /// text change `EditorDocumentSession.markdownEditorView(_:didChangeTextBy:at:)`
     /// calls `refreshSearchMatches` → `clearSearchMatches` →
     /// `editorView.setSearchMatches([], selectedIndex: nil)`, which triggers
     /// a full restyle BEFORE the parse result arrives.

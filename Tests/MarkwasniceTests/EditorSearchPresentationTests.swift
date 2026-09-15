@@ -69,7 +69,7 @@ struct EditorSearchPresentationTests {
         try await waitForMatchCount(1, in: session)
 
         session.editorView.setString("gamma beta", clearsUndo: false)
-        session.markdownEditorViewDidChangeText(session.editorView)
+        session.editorView.textView.didChangeText()
 
         #expect(session.shellState.searchMatchCount == 0)
         try await Task.sleep(for: .milliseconds(120))

@@ -109,6 +109,30 @@ struct MarkdownStylingEngineTests {
         #expect(range == NSRange(location: 0, length: 3))
     }
 
+    // MARK: - mergeRanges
+
+    @Test
+    func mergesUnsortedNestedTouchingAndDuplicateRanges() {
+        let ranges = [
+            NSRange(location: 12, length: 2),
+            NSRange(location: 3, length: 1),
+            NSRange(location: 6, length: 2),
+            NSRange(location: 2, length: 2),
+            NSRange(location: 2, length: 4),
+            NSRange(location: 2, length: 4),
+            NSRange(location: 10, length: 0),
+        ]
+
+        #expect(MarkdownStylingEngine.mergeRanges(ranges) == [
+            NSRange(location: 2, length: 6),
+            NSRange(location: 12, length: 2),
+        ])
+        #expect(MarkdownStylingEngine.mergeRanges([]).isEmpty)
+        #expect(MarkdownStylingEngine.mergeRanges([
+            NSRange(location: 2, length: 0),
+        ]).isEmpty)
+    }
+
     // MARK: - mergedLineRanges
 
     @Test

@@ -13,7 +13,7 @@ import AppKit
 final class CaretScrollAnimator: NSObject {
     /// Time constant of the exponential approach; the scroll visually
     /// settles in about three time constants after the last key repeat.
-    private static let timeConstant: CGFloat = 0.05
+    private static let timeConstant: CGFloat = 0.07
 
     /// Ticks tolerated without the clip origin getting closer to the
     /// target. Something else owning the scroll position (a layout pass

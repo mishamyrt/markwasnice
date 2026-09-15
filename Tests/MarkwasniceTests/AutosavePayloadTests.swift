@@ -59,7 +59,7 @@ struct AutosavePayloadTests {
             settings: Self.settings
         ) {}
         session.editorView.setString("", clearsUndo: false)
-        session.markdownEditorViewDidChangeText(session.editorView)
+        session.editorView.textView.didChangeText()
 
         let draft = session.autosavedDraft(windowID: nil, windowFrame: nil)
 

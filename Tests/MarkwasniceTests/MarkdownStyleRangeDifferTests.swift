@@ -15,7 +15,6 @@ struct MarkdownStyleRangeDifferTests {
         #expect(change.previousRange == NSRange(location: 1, length: 0))
         #expect(change.currentRange == NSRange(location: 1, length: 1))
         #expect(change.lengthDelta == 1)
-        #expect(change.insertedText == "x")
     }
 
     @Test
@@ -28,7 +27,6 @@ struct MarkdownStyleRangeDifferTests {
         #expect(change.previousRange == NSRange(location: 1, length: 1))
         #expect(change.currentRange == NSRange(location: 1, length: 0))
         #expect(change.lengthDelta == -1)
-        #expect(change.insertedText.isEmpty)
     }
 
     @Test
@@ -42,7 +40,6 @@ struct MarkdownStyleRangeDifferTests {
         #expect(change.previousRange == NSRange(location: 10_000, length: 0))
         #expect(change.currentRange == NSRange(location: 10_000, length: 1))
         #expect(change.lengthDelta == 1)
-        #expect(change.insertedText == "x")
     }
 
     @Test
@@ -56,7 +53,6 @@ struct MarkdownStyleRangeDifferTests {
         #expect(change.previousRange == NSRange(location: 0, length: 1))
         #expect(change.currentRange == NSRange(location: 0, length: 1))
         #expect(change.lengthDelta == 0)
-        #expect(change.insertedText == "y")
     }
 
     @Test
@@ -69,7 +65,6 @@ struct MarkdownStyleRangeDifferTests {
 
         #expect(!change.hasSourceEdits)
         #expect(change.lengthDelta == 0)
-        #expect(change.insertedText.isEmpty)
     }
 
     @Test

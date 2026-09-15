@@ -20,17 +20,6 @@ struct MarkdownStyleSpan {
 struct ResolvedMarkdownStyleSpan: Equatable {
     let range: NSRange
     let kind: MarkdownStyleKind
-
-    func affectsTyping(at location: Int) -> Bool {
-        let lowerBound = range.location
-        let upperBound = range.location + range.length
-
-        if location > lowerBound, location < upperBound {
-            return true
-        }
-
-        return location == upperBound && kind.isBlockStyle
-    }
 }
 
 enum MarkdownStyleKind: Equatable, Hashable {

@@ -7,8 +7,8 @@ struct MarkwasniceApp: App {
     private var appDelegate
 
     init() {
-        LilexFontProvider.registerFonts()
-        PlexSansFontProvider.registerFonts()
+        BundledFontFamily.lilex.registerFonts()
+        BundledFontFamily.plexSans.registerFonts()
     }
 
     var body: some Scene {

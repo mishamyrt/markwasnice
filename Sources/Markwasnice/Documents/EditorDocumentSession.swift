@@ -191,19 +191,6 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
         searchTask?.cancel()
     }
 
-    func markdownEditorViewDidChangeText(_ editorView: MarkdownEditorView) {
-        replaceTextBuffer(with: editorView.string)
-        handleConfirmedTextChange()
-    }
-
-    func markdownEditorView(
-        _ editorView: MarkdownEditorView,
-        didChangeTextAt _: Int
-    ) {
-        replaceTextBuffer(with: editorView.string)
-        handleConfirmedTextChange()
-    }
-
     func markdownEditorView(
         _ editorView: MarkdownEditorView,
         didChangeTextBy edits: [MarkdownTextEdit],
