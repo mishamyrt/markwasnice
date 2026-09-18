@@ -1214,6 +1214,10 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     }
 
     private func configureScrollView() {
+        scrollView.onUserScroll = { [weak self] in
+            guard let self else { return }
+            delegate?.markdownEditorViewDidScroll(self)
+        }
         let defaultClipView = scrollView.contentView
         clipView.frame = defaultClipView.frame
         clipView.translatesAutoresizingMaskIntoConstraints = false
@@ -1384,11 +1388,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
             focusModeController.restyleSuppressedViewportIfNeeded()
         }
 
-        // A user scroll moves only the bounds origin; window resizes (zoom,
-        // live resize) change the clip size and shift the origin as a side
-        // effect. Those shifts must not read as scrolling — they would hide
-        // the chrome the user just revealed by resizing.
-        guard let lastScrollOffsetY,
+        // Wheel and scroller input is reported by OverlayScrollView. Bounds
+        // alone also change during momentum and elastic return, so only use
+        // them for keyboard scrolling (caret navigation, Page Up/Down, etc.).
+        guard NSApp.currentEvent?.type == .keyDown,
+              let lastScrollOffsetY,
               let lastScrollClipSize,
               clipSize == lastScrollClipSize,
               abs(offsetY - lastScrollOffsetY) > 0.5

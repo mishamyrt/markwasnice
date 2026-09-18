@@ -185,6 +185,9 @@ final class MarkdownPreviewView: NSView {
     }
 
     private func configureScrollView() {
+        scrollView.onUserScroll = { [weak self] in
+            self?.onScroll?()
+        }
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -231,9 +234,10 @@ final class MarkdownPreviewView: NSView {
             lastScrollClipSize = clipSize
         }
         onScrollOffsetChanged?()
-        // Window resizes change the clip size and shift the origin as a
-        // side effect; only origin-only changes are user scrolling.
-        guard let lastScrollOffsetY,
+        // As in the editor, only keyboard scrolling uses bounds changes to
+        // hide chrome; wheel and scroller input is reported separately.
+        guard NSApp.currentEvent?.type == .keyDown,
+              let lastScrollOffsetY,
               let lastScrollClipSize,
               clipSize == lastScrollClipSize,
               abs(offsetY - lastScrollOffsetY) > 0.5
