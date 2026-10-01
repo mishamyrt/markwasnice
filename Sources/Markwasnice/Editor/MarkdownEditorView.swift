@@ -887,10 +887,14 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         )
     }
 
-    func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool {
+    func markdownTextViewContinueMarkdownPrefix(
+        _ textView: NSTextView,
+        continuingItem: Bool = false
+    ) -> Bool {
         guard let edit = MarkdownContinuationCommand.edit(
             in: textView.textStorage?.mutableString ?? "",
-            selectedRange: textView.selectedRange()
+            selectedRange: textView.selectedRange(),
+            continuingItem: continuingItem
         ) else {
             return false
         }
@@ -953,7 +957,12 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
     ) -> Bool {
         switch commandSelector {
         case #selector(NSResponder.insertNewline(_:)):
-            return markdownTextViewContinueMarkdownPrefix(textView)
+            return markdownTextViewContinueMarkdownPrefix(
+                textView,
+                continuingItem: self.textView.keyDownModifiers.contains(.shift)
+            )
+        case #selector(NSResponder.insertLineBreak(_:)):
+            return markdownTextViewContinueMarkdownPrefix(textView, continuingItem: true)
         case #selector(NSResponder.insertTab(_:)):
             markdownTextViewInsertTab(textView)
             return true

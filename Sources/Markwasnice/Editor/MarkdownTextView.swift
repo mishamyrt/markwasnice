@@ -8,7 +8,10 @@ protocol MarkdownTextViewCommandDelegate: AnyObject {
         _ textView: NSTextView,
         moveLines command: MarkdownLineMoveCommand
     )
-    func markdownTextViewContinueMarkdownPrefix(_ textView: NSTextView) -> Bool
+    func markdownTextViewContinueMarkdownPrefix(
+        _ textView: NSTextView,
+        continuingItem: Bool
+    ) -> Bool
     func markdownTextView(
         _ textView: NSTextView, applyMarkup command: MarkdownMarkupCommand
     )
@@ -25,6 +28,7 @@ protocol MarkdownTextViewCommandDelegate: AnyObject {
 
 final class MarkdownTextView: NSTextView {
     weak var commandDelegate: MarkdownTextViewCommandDelegate?
+    private(set) var keyDownModifiers: NSEvent.ModifierFlags = []
     var isWindowPointInTopChrome: ((NSPoint, NSWindow) -> Bool)?
     var topChromeRectProvider: (() -> NSRect?)?
     var onMouseDown: (() -> Void)?
@@ -908,6 +912,9 @@ final class MarkdownTextView: NSTextView {
     /// keypad Enter (a different character, the same insertNewline command)
     /// gets markdown continuation too.
     override func keyDown(with event: NSEvent) {
+        let previousModifiers = keyDownModifiers
+        keyDownModifiers = event.modifierFlags
+        defer { keyDownModifiers = previousModifiers }
         pendingAnimatedSelectionRevision = nil
         if isFindShortcut(event) {
             commandDelegate?.markdownTextViewShowFind(self)

@@ -104,6 +104,65 @@ struct EditorCommandRoutingTests {
         #expect(editor.textView.string == source)
     }
 
+    @Test func insertLineBreakContinuesItemAndEnterCreatesNextItem() {
+        let editor = makeEditor(source: "- item", caretAt: 6)
+
+        #expect(performCommand(#selector(NSResponder.insertLineBreak(_:)), in: editor))
+        #expect(editor.textView.string == "- item\n  ")
+        #expect(editor.textView.selectedRange() == NSRange(location: 9, length: 0))
+
+        editor.textView.insertText(
+            "details",
+            replacementRange: editor.textView.selectedRange()
+        )
+        #expect(performCommand(#selector(NSResponder.insertNewline(_:)), in: editor))
+        #expect(editor.textView.string == "- item\n  details\n- ")
+    }
+
+    @Test(arguments: [(kVK_Return, "\r"), (kVK_ANSI_KeypadEnter, "\u{3}")])
+    func shiftReturnContinuesItemThroughInputContext(
+        keyCode: Int,
+        characters: String
+    ) throws {
+        let editor = makeEditor(source: "- item", caretAt: 6)
+        let window = NSWindow(
+            contentRect: editor.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = editor
+        window.makeFirstResponder(editor.textView)
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .shift,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: UInt16(keyCode)
+        ))
+
+        editor.textView.keyDown(with: event)
+
+        #expect(editor.textView.string == "- item\n  ")
+        #expect(editor.textView.keyDownModifiers.isEmpty)
+        #expect(performCommand(#selector(NSResponder.insertNewline(_:)), in: editor))
+        #expect(editor.textView.string == "- item\n  \n- ")
+    }
+
+    @Test func insertLineBreakFallsBackToDefaultOnPlainText() {
+        let editor = makeEditor(source: "plain paragraph", caretAt: 15)
+
+        #expect(!performCommand(#selector(NSResponder.insertLineBreak(_:)), in: editor))
+        #expect(editor.textView.string == "plain paragraph")
+    }
+
     @Test func insertTabIndentsAtCaret() {
         let source = "text"
         let editor = makeEditor(source: source, caretAt: 0)

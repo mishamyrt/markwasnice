@@ -2,7 +2,8 @@ import Foundation
 
 /// Enter inside a list or quote: continues the prefix on the new line
 /// (incrementing ordered markers, restarting task checkboxes as unchecked),
-/// and Enter on a line holding only an empty prefix exits the list/quote by
+/// while Shift+Enter indents a new line within the same list item.
+/// Enter on a line holding only an empty prefix exits the list/quote by
 /// clearing it. Pure computation over (text, selection), mirroring
 /// MarkdownIndentCommand; returns nil when a plain newline should be
 /// inserted instead. The text arrives as an NSString — everything here is
@@ -13,12 +14,8 @@ enum MarkdownContinuationCommand {
     private static let markerPattern = MarkdownLineGrammar.listMarker
     private static let emptyCheckbox = "[ ] "
     private static let listContinuationRegex = try! NSRegularExpression(
-        pattern: "^([ \\t]*)(\(markerPattern))\\s+(\(checkboxPattern)\\s+)?(.+)$"
-    )
-    /// A checkbox carrying its own list line, with no bullet or number in
-    /// front of it — continued as its own kind of list.
-    private static let checkboxContinuationRegex = try! NSRegularExpression(
-        pattern: "^([ \\t]*)\(checkboxPattern)\\s+(.+)$"
+        pattern: "^([ \\t]*)(?:(\(markerPattern))[ \\t]+)?"
+            + "(\(checkboxPattern)[ \\t]+)?(.*)$"
     )
     private static let emptyListPrefixRegex =
         try! NSRegularExpression(pattern: "^[ \\t]*\(markerPattern)\\s*$")
@@ -44,7 +41,8 @@ enum MarkdownContinuationCommand {
 
     static func edit(
         in nsString: NSString,
-        selectedRange: NSRange
+        selectedRange: NSRange,
+        continuingItem: Bool = false
     ) -> MarkdownMarkupEdit? {
         guard selectedRange.length == 0,
               selectedRange.location != NSNotFound,
@@ -57,13 +55,17 @@ enum MarkdownContinuationCommand {
             in: nsString,
             caretLocation: selectedRange.location
         )
-        if let exitEdit = exitEmptyPrefixEdit(in: nsString, context: context) {
-            return exitEdit
+        if !continuingItem {
+            if let exitEdit = exitEmptyPrefixEdit(in: nsString, context: context) {
+                return exitEdit
+            }
         }
 
-        guard let continuation = listContinuation(for: context)
-            ?? checkboxContinuation(for: context)
-            ?? quoteContinuation(for: context)
+        guard let continuation = listContinuation(
+            in: nsString,
+            context: context,
+            continuingItem: continuingItem
+        ) ?? (continuingItem ? nil : quoteContinuation(for: context))
         else {
             return nil
         }
@@ -137,38 +139,60 @@ enum MarkdownContinuationCommand {
         }
     }
 
-    private static func listContinuation(for context: CaretLineContext) -> String? {
-        let prefix = context.prefix as NSString
-        guard let match = listContinuationRegex.firstMatch(
-            in: context.prefix,
-            range: NSRange(location: 0, length: prefix.length)
-        ),
-            match.numberOfRanges == 5
-        else {
-            return nil
+    private static func listContinuation(
+        in nsString: NSString,
+        context: CaretLineContext,
+        continuingItem: Bool
+    ) -> String? {
+        let indentation = String(context.prefix.prefix { $0 == " " || $0 == "\t" })
+        var line = context
+        while true {
+            let prefix = line.prefix as NSString
+            if let match = listContinuationRegex.firstMatch(
+                in: line.prefix,
+                range: NSRange(location: 0, length: prefix.length)
+            ), match.range(at: 2).location != NSNotFound
+                || match.range(at: 3).location != NSNotFound
+            {
+                // Preserve tabs so the continuation has the same visual columns.
+                let contentIndent = String(prefix
+                    .substring(to: match.range(at: 4).location)
+                    .map { $0 == "\t" ? "\t" : " " })
+                if line.lineRange.location == context.lineRange.location
+                    || context.prefix.hasPrefix(contentIndent)
+                {
+                    if !continuingItem,
+                       line.lineRange.location == context.lineRange.location,
+                       match.range(at: 4).length == 0
+                    {
+                        return nil
+                    }
+                    if continuingItem {
+                        return "\n\(contentIndent)"
+                    }
+                    let markerRange = match.range(at: 2)
+                    let marker = markerRange.location == NSNotFound
+                        ? ""
+                        : nextListMarker(after: prefix.substring(with: markerRange)) + " "
+                    let checkbox = match.range(at: 3).location != NSNotFound
+                        ? emptyCheckbox
+                        : ""
+                    return "\n\(prefix.substring(with: match.range(at: 1)))\(marker)\(checkbox)"
+                }
+            }
+
+            // Only walk adjacent indented lines; an unindented line ends the item.
+            guard !indentation.isEmpty,
+                  line.lineRange.location > 0,
+                  line.prefix.hasPrefix(indentation)
+            else {
+                return nil
+            }
+            line = caretLineContext(
+                in: nsString,
+                caretLocation: line.lineRange.location
+            )
         }
-
-        let indentation = prefix.substring(with: match.range(at: 1))
-        let marker = prefix.substring(with: match.range(at: 2))
-        let checkbox = match.range(at: 3).location != NSNotFound
-            ? emptyCheckbox
-            : ""
-        return "\n\(indentation)\(nextListMarker(after: marker)) \(checkbox)"
-    }
-
-    private static func checkboxContinuation(for context: CaretLineContext) -> String? {
-        let prefix = context.prefix as NSString
-        guard let match = checkboxContinuationRegex.firstMatch(
-            in: context.prefix,
-            range: NSRange(location: 0, length: prefix.length)
-        ),
-            match.numberOfRanges == 3
-        else {
-            return nil
-        }
-
-        let indentation = prefix.substring(with: match.range(at: 1))
-        return "\n\(indentation)\(emptyCheckbox)"
     }
 
     private static func quoteContinuation(for context: CaretLineContext) -> String? {

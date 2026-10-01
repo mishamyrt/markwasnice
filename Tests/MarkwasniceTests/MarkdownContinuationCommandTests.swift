@@ -1,4 +1,5 @@
 import Foundation
+import Markdown
 import Testing
 @testable import Markwasnice
 
@@ -23,6 +24,94 @@ struct MarkdownContinuationCommandTests {
         ))
 
         #expect(edit.replacementString == "\n3. ")
+    }
+
+    @Test(arguments: [
+        ("- first\n  second", "\n- "),
+        ("  9) first\n     second\n     third", "\n  10) "),
+        ("- [x] done\n      details", "\n- [ ] "),
+        ("[X] task\n    details", "\n[ ] "),
+        ("- outer\n  - nested\n    details", "\n  - "),
+        ("- outer\n  - nested\n  outer details", "\n- "),
+    ])
+    func enterAfterContinuationCreatesNextItem(
+        text: String,
+        expected: String
+    ) throws {
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text as NSString,
+            selectedRange: NSRange(location: (text as NSString).length, length: 0)
+        ))
+
+        #expect(edit.replacementString == expected)
+    }
+
+    @Test(arguments: [
+        ("- Привет🙂", "\n  ", "\n- "),
+        ("+ first", "\n  ", "\n+ "),
+        ("* first", "\n  ", "\n* "),
+        ("  99. first", "\n      ", "\n  100. "),
+        ("\t- first", "\n\t  ", "\n\t- "),
+        ("-\tfirst", "\n \t", "\n- "),
+        ("- [x] first", "\n      ", "\n- [ ] "),
+        ("[X] first", "\n    ", "\n[ ] "),
+        ("- first\n  second", "\n  ", "\n- "),
+        ("- first\n  \n  second", "\n  ", "\n- "),
+        ("- ", "\n  ", "\n- "),
+    ])
+    func shiftEnterIndentsAndFollowingEnterCreatesNextItem(
+        text: String,
+        expectedBreak: String,
+        expectedItem: String
+    ) throws {
+        let source = text as NSString
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: source,
+            selectedRange: NSRange(location: source.length, length: 0),
+            continuingItem: true
+        ))
+        #expect(edit.replacementString == expectedBreak)
+        #expect(edit.selectedRange.location == source.length + expectedBreak.utf16.count)
+
+        let continued = source.replacingCharacters(
+            in: edit.replacementRange,
+            with: edit.replacementString
+        ) + "details"
+        let nextItem = try #require(MarkdownContinuationCommand.edit(
+            in: continued as NSString,
+            selectedRange: NSRange(location: continued.utf16.count, length: 0)
+        ))
+        #expect(nextItem.replacementString == expectedItem)
+    }
+
+    @Test(arguments: ["- item", "10. item", "- [x] item"])
+    func shiftEnterPreservesSingleMarkdownListItem(text: String) throws {
+        let edit = try #require(MarkdownContinuationCommand.edit(
+            in: text as NSString,
+            selectedRange: NSRange(location: text.utf16.count, length: 0),
+            continuingItem: true
+        ))
+        let continued = text + edit.replacementString + "details"
+        for document in [Document(parsing: continued),
+                         MarkdownDocument.parse(continued)]
+        {
+            #expect(document.childCount == 1)
+            let list = try #require(document.child(at: 0) as? any ListItemContainer)
+            #expect(list.childCount == 1)
+        }
+    }
+
+    @Test(arguments: [
+        "- item\nplain",
+        "- item\n indented too little",
+        "- item\n\n  separate paragraph",
+        "- item\nunrelated\n  indented",
+    ])
+    func enterDoesNotContinueUnrelatedIndentedText(text: String) {
+        #expect(MarkdownContinuationCommand.edit(
+            in: text as NSString,
+            selectedRange: NSRange(location: text.utf16.count, length: 0)
+        ) == nil)
     }
 
     @Test func continuesParenthesizedOrderedMarker() throws {
@@ -127,6 +216,23 @@ struct MarkdownContinuationCommandTests {
         ))
 
         #expect(edit.replacementString == "\n> ")
+    }
+
+    @Test(arguments: [
+        ("> quote", 2, Optional("\n> ")),
+        ("- first", 2, nil),
+        ("- [ ] first", 6, nil),
+    ])
+    func enterBeforeContentPreservesPrefixBehavior(
+        text: String,
+        caret: Int,
+        expected: String?
+    ) {
+        let edit = MarkdownContinuationCommand.edit(
+            in: text as NSString,
+            selectedRange: NSRange(location: caret, length: 0)
+        )
+        #expect(edit?.replacementString == expected)
     }
 
     @Test func exitsEmptyListItem() throws {
