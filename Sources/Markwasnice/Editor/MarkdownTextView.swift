@@ -32,6 +32,7 @@ final class MarkdownTextView: NSTextView {
     var isWindowPointInTopChrome: ((NSPoint, NSWindow) -> Bool)?
     var topChromeRectProvider: (() -> NSRect?)?
     var onMouseDown: (() -> Void)?
+    var onSelectionAutoscroll: (() -> Void)?
     var onScrollWheel: ((NSEvent) -> Void)?
     var pasteboardForPaste: () -> NSPasteboard = { .general }
     var convertDeferredPaste: @Sendable (
@@ -945,11 +946,20 @@ final class MarkdownTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        caretScrollAnimator.cancel()
         stopInsertionPointAnimation()
         insertionPointRect = nil
         pendingAnimatedSelectionRevision = nil
+        isTrackingMouseSelection = true
+        defer {
+            isTrackingMouseSelection = false
+            stopSelectionAutoscroll()
+        }
         super.mouseDown(with: event)
-        onMouseDown?()
+        // An autoscrolled selection keeps its viewport until the next caret move.
+        if selectionScrollDisplayLink == nil {
+            onMouseDown?()
+        }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -1223,10 +1233,91 @@ final class MarkdownTextView: NSTextView {
         caretScrollAnimator.cancel()
     }
 
+    private var isTrackingMouseSelection = false
+    private var selectionScrollDisplayLink: CADisplayLink?
+    private var selectionScrollTimestamp: TimeInterval?
+
+    override func autoscroll(with event: NSEvent) -> Bool {
+        guard isTrackingMouseSelection,
+              event.type == .leftMouseDragged,
+              selectedRanges.count == 1,
+              let scrollView = enclosingScrollView,
+              window != nil
+        else {
+            stopSelectionAutoscroll()
+            return super.autoscroll(with: event)
+        }
+
+        let clipView = scrollView.contentView
+        let bounds = clipView.bounds
+        let point = clipView.convert(event.locationInWindow, from: nil)
+        let distance: CGFloat
+        if point.y < bounds.minY {
+            distance = point.y - bounds.minY
+        } else if point.y > bounds.maxY {
+            distance = point.y - bounds.maxY
+        } else {
+            selectionScrollTimestamp = nil
+            return false
+        }
+
+        if selectionScrollDisplayLink == nil {
+            onSelectionAutoscroll?()
+            let link = displayLink(
+                target: self, selector: #selector(pulseSelectionAutoscroll(_:))
+            )
+            link.add(to: .main, forMode: .common)
+            selectionScrollDisplayLink = link
+        }
+
+        advanceSelectionAutoscroll(distance: distance, at: CACurrentMediaTime())
+        return true
+    }
+
+    func advanceSelectionAutoscroll(distance: CGFloat, at timestamp: TimeInterval) {
+        guard let scrollView = enclosingScrollView, let window else { return }
+        let clipView = scrollView.contentView
+        let bounds = clipView.bounds
+        let elapsed = selectionScrollTimestamp.map { min(timestamp - $0, 1 / 30) } ?? 0
+        selectionScrollTimestamp = timestamp
+        let speed = min(1800, max(180, abs(distance) * 12))
+        let delta = (distance < 0 ? -speed : speed) * elapsed
+        var offset = clipView.constrainBoundsRect(bounds.offsetBy(dx: 0, dy: delta))
+            .origin
+        // Match AppKit's pixel alignment before layout can snap the viewport back.
+        let scale = window.backingScaleFactor
+        offset.y = (offset.y * scale).rounded() / scale
+        clipView.setBoundsOrigin(offset)
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    @objc private func pulseSelectionAutoscroll(_ link: CADisplayLink) {
+        guard isTrackingMouseSelection, let window else {
+            stopSelectionAutoscroll()
+            return
+        }
+
+        // Wake AppKit's tracking loop each frame so it extends the native selection
+        // using the latest drag event, including word/paragraph and Shift anchors.
+        guard let event = NSEvent.otherEvent(
+            with: .periodic, location: .zero, modifierFlags: [],
+            timestamp: link.targetTimestamp, windowNumber: window.windowNumber,
+            context: nil, subtype: 0, data1: 0, data2: 0
+        ) else { return }
+        NSApp.postEvent(event, atStart: false)
+    }
+
+    private func stopSelectionAutoscroll() {
+        selectionScrollDisplayLink?.invalidate()
+        selectionScrollDisplayLink = nil
+        selectionScrollTimestamp = nil
+    }
+
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
         if newWindow == nil {
             caretScrollAnimator.cancel()
+            stopSelectionAutoscroll()
             resetInsertionPointAnimation()
         }
     }

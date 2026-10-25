@@ -1174,6 +1174,11 @@ final class MarkdownEditorView: NSView, NSTextViewDelegate,
         textView.onMouseDown = { [weak self] in
             self?.focusModeController.restoreAfterEditorInteraction()
         }
+        textView.onSelectionAutoscroll = { [weak self] in
+            guard let self else { return }
+            focusModeController.suppressForUserScroll()
+            delegate?.markdownEditorViewDidScroll(self)
+        }
         textView.onScrollWheel = { [weak self] event in
             guard let self else {
                 return
