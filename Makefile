@@ -105,7 +105,8 @@ define convert_iconset
     @sips -z $1 $1 "$(APP_ICON_PNG_PATH)" --out "$(ICONSET_DIR)/icon_$1x$1.png" > /dev/null
 endef
 
-$(RESOURCES_DIR)/AppIcon.icns: $(ICON_FILES)
+# SwiftPM initializes the release symlink before we can safely generate resources there.
+$(RESOURCES_DIR)/AppIcon.icns: $(ICON_FILES) | $(RELEASE_DIR)/$(APP_NAME)
 	@echo "Building AppIcon.icns"
 	@rm -rf "$(ICONSET_DIR)" && mkdir -p "$(ICONSET_DIR)"
 
@@ -139,7 +140,7 @@ $(RESOURCES_DIR)/AppIcon.icns: $(ICON_FILES)
 	@rm -rf "$(ICONSET_DIR)"
 	@rm -f "$(APP_ICON_PNG_PATH)"
 
-$(RESOURCES_DIR)/Assets.car: $(ICON_FILES)
+$(RESOURCES_DIR)/Assets.car: $(ICON_FILES) | $(RELEASE_DIR)/$(APP_NAME)
 	@echo "Building Assets.car"
 	@mkdir -p $(RESOURCES_DIR)
 	@$(ACTOOL) "$(ASSETS_ICON_PATH)" \
