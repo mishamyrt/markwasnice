@@ -165,6 +165,19 @@ $(RESOURCES_DIR)/Assets.car: $(ICON_FILES) | $(RELEASE_DIR)/$(APP_NAME)
 		--enable-icon-stack-fallback-generation=disabled \
 		--output-partial-info-plist /dev/null > /dev/null
 
+
+publish:
+	@git add Makefile
+	@git commit -m "chore: release ${VERSION} 🔥"
+	@git tag "v${VERSION}"
+	@git-cliff -o CHANGELOG.md
+	@git tag -d "v${VERSION}"
+	@git add CHANGELOG.md
+	@git commit --amend --no-edit
+	@git tag -a "v${VERSION}" -m "release v${VERSION}"
+	@git push
+	@git push --tags
+
 .PHONY: help
 help: ## print this message
 	@echo "Usage: make <command>"
