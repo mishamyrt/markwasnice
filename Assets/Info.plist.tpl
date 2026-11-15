@@ -47,9 +47,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>{%APP_VERSION%}</string>
 	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>{%APP_BUILD%}</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
 		<string>MacOSX</string>

@@ -65,7 +65,17 @@ install: $(APP_DIST) ## build and install the app
 	@ditto "$(APP_DIST)" "$(APP_INSTALL_DIR)"
 	@echo "$(APP_NAME).app is installed successfully"
 
+# Render every time so command-line version overrides cannot reuse a stale plist.
+.PHONY: $(ASSETS_MANIFEST_PATH)
+$(ASSETS_MANIFEST_PATH): $(ASSETS_MANIFEST_PATH).tpl
+	@sed \
+		-e 's/{%APP_VERSION%}/$(VERSION)/g' \
+		-e 's/{%APP_BUILD%}/$(VERSION_BUNDLE)/g' \
+		"$<" > "$@"
+	@plutil -lint "$@" > /dev/null
+
 $(APP_DIST): \
+	$(ASSETS_MANIFEST_PATH) \
 	$(RESOURCES_DIR)/AppIcon.icns \
 	$(RESOURCES_DIR)/Assets.car \
 	$(LPROJ_FILES) \
