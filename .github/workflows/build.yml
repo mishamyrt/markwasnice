@@ -1,0 +1,149 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::Release tags must use the format v1.2.3.'
+            exit 1
+          fi
+
+      - name: Import signing certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: |
+          : "${BUILD_CERTIFICATE_BASE64:?Set the BUILD_CERTIFICATE_BASE64 repository secret}"
+          : "${P12_PASSWORD:?Set the P12_PASSWORD repository secret}"
+          umask 077
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+
+          # A self-signed identity needs an explicit trust anchor on the runner.
+          security find-certificate -p "$keychain" > "$RUNNER_TEMP/signing.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$keychain" "$RUNNER_TEMP/signing.pem"
+          signing_identity="$(security find-identity -v -p codesigning "$keychain" | awk '/"/ { print $2 }')"
+          if [[ ! "$signing_identity" =~ ^[[:xdigit:]]{40}$ ]]; then
+            echo '::error::The .p12 must contain exactly one valid code-signing identity and its private key.'
+            exit 1
+          fi
+          echo "SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
+
+      - name: Build and sign app
+        run: |
+          version_args=()
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version_args=("VERSION=${GITHUB_REF_NAME#v}")
+          fi
+          make "${version_args[@]}" VERSION_BUNDLE="$GITHUB_RUN_NUMBER" SIGNATURE_NAME="$SIGNING_IDENTITY"
+
+      - name: Package and sign DMG
+        run: |
+          mkdir -p "$RUNNER_TEMP/dmg"
+          ditto .build/release/Markwasnice.app "$RUNNER_TEMP/dmg/Markwasnice.app"
+          ln -s /Applications "$RUNNER_TEMP/dmg/Applications"
+          diskutil image create from --volumeName Markwasnice --format UDZO "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/Markwasnice-arm64.dmg"
+          codesign --sign "$SIGNING_IDENTITY" "$RUNNER_TEMP/Markwasnice-arm64.dmg"
+          codesign --verify --strict --verbose=2 "$RUNNER_TEMP/Markwasnice-arm64.dmg"
+          hdiutil verify "$RUNNER_TEMP/Markwasnice-arm64.dmg"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: Markwasnice-arm64
+          path: ${{ runner.temp }}/Markwasnice-arm64.dmg
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Clean up signing files
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/signing.pem"
+          if [[ -f "$RUNNER_TEMP/signing.keychain-db" ]]; then
+            security delete-keychain "$RUNNER_TEMP/signing.keychain-db"
+          fi
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: Markwasnice-arm64
+          path: ${{ runner.temp }}
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # Reuse the published asset on retries so the cask checksum stays correct.
+            gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --pattern Markwasnice-arm64.dmg --dir "$RUNNER_TEMP" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/Markwasnice-arm64.dmg" \
+              --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v7
+        with:
+          repository: mishamyrt/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Render cask
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sha256="$(sha256sum "$RUNNER_TEMP/Markwasnice-arm64.dmg" | awk '{ print $1 }')"
+          mkdir -p homebrew-tap/Casks
+          sed -e "s/{%APP_VERSION%}/$version/g" -e "s/{%APP_SHA256%}/$sha256/g" \
+            scripts/markwasnice.rb.tpl > homebrew-tap/Casks/markwasnice.rb
+
+      - name: Publish cask
+        working-directory: homebrew-tap
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Casks/markwasnice.rb
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: update markwasnice to ${GITHUB_REF_NAME#v}"
+          git push
