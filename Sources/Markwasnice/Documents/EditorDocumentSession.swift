@@ -803,7 +803,7 @@ final class EditorDocumentSession: ObservableObject, Identifiable,
             let words = Self.wordCount(in: text)
             let characters = text.count
             let sentences = Self.sentenceCount(in: text)
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard !Task.isCancelled, let shellState = self?.shellState else {
                     return
                 }

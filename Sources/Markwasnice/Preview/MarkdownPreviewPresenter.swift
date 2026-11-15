@@ -178,12 +178,15 @@ final class MarkdownPreviewPresenter {
             preview.animator().alphaValue = 0
             editorScrollView?.animator().alphaValue = 1
         } completionHandler: { [weak self] in
-            guard let self, !isActive, let previewView else {
-                return
-            }
+            // AppKit guarantees this completion handler runs on the main thread.
+            MainActor.assumeIsolated {
+                guard let self, !self.isActive, let previewView = self.previewView else {
+                    return
+                }
 
-            previewView.isHidden = true
-            previewView.layer?.transform = CATransform3DIdentity
+                previewView.isHidden = true
+                previewView.layer?.transform = CATransform3DIdentity
+            }
         }
         animateScale(on: preview, from: 1, to: Self.transitionScale)
     }

@@ -1,5 +1,5 @@
 # Environment paths
-XCODE_DIR := /Applications/Xcode-beta.app
+XCODE_DIR := $(patsubst %/Contents/Developer,%,$(shell xcode-select -p))
 XCODE_CONTENTS_DIR := $(XCODE_DIR)/Contents
 
 # Repository paths
@@ -30,7 +30,7 @@ APP_INSTALL_DIR := /Applications/$(APP_NAME).app
 CLI_NAME := markwasnice
 
 # Build tools
-ICTOOL := $(XCODE_CONTENTS_DIR)/Applications/Icon\ Composer.app/Contents/Executables/ictool
+ICTOOL := $(XCODE_CONTENTS_DIR)/Applications/Icon Composer.app/Contents/Executables/ictool
 ACTOOL := $(XCODE_CONTENTS_DIR)/Developer/usr/bin/actool
 
 # Source lists
@@ -111,7 +111,7 @@ $(RESOURCES_DIR)/AppIcon.icns: $(ICON_FILES) | $(RELEASE_DIR)/$(APP_NAME)
 	@rm -rf "$(ICONSET_DIR)" && mkdir -p "$(ICONSET_DIR)"
 
 	@echo "  Generating iconset"
-	@$(ICTOOL) "$(ASSETS_ICON_PATH)" \
+	@"$(ICTOOL)" "$(ASSETS_ICON_PATH)" \
 		--export-image \
 		--output-file "$(APP_ICON_PNG_PATH)" \
 		--platform macOS \
@@ -143,7 +143,7 @@ $(RESOURCES_DIR)/AppIcon.icns: $(ICON_FILES) | $(RELEASE_DIR)/$(APP_NAME)
 $(RESOURCES_DIR)/Assets.car: $(ICON_FILES) | $(RELEASE_DIR)/$(APP_NAME)
 	@echo "Building Assets.car"
 	@mkdir -p $(RESOURCES_DIR)
-	@$(ACTOOL) "$(ASSETS_ICON_PATH)" \
+	@"$(ACTOOL)" "$(ASSETS_ICON_PATH)" \
 		--compile "$(RESOURCES_DIR)" \
 		--app-icon AppIcon \
 		--enable-on-demand-resources NO \
